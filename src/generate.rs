@@ -37,3 +37,32 @@ pub fn generate_stage(params: &SceneParams) -> anyhow::Result<Stage> {
     author_scene(app.world_mut(), &stage)?;
     Ok(stage)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The only export target is robotics simulation (Isaac Lab / ROS,
+    /// REP-103 right-handed Z-up), so the generated stage must declare that
+    /// convention itself rather than relying on a consumer to correct for
+    /// Y-up — `upAxis`/`metersPerUnit` don't compose through references, so
+    /// an unauthored (default Y-up) root stage would be silently wrong.
+    #[test]
+    fn generated_stage_declares_z_up_meters() {
+        let stage = generate_stage(&SceneParams::default()).unwrap();
+        assert!(
+            matches!(
+                stage.stage_metadata("upAxis").unwrap(),
+                Some(openusd::sdf::Value::Token(t)) if t.as_str() == "Z"
+            ),
+            "generated stage must author upAxis = Z"
+        );
+        assert!(
+            matches!(
+                stage.stage_metadata("metersPerUnit").unwrap(),
+                Some(openusd::sdf::Value::Double(d)) if (d - 1.0).abs() < 1e-9
+            ),
+            "generated stage must author metersPerUnit = 1.0"
+        );
+    }
+}
