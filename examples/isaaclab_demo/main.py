@@ -84,9 +84,6 @@ def design_scene() -> tuple[dict, list[list[float]]]:
 
     p = SceneParams(rows=2, cols=2, spacing=0.5, cube_size=0.2)
     usda = p.generate_usda()
-    print("_____________________________________")
-    print(usda)
-    print("_____________________________________")
 
     stage = sim_utils.get_current_stage()
     layer = Sdf.Layer.CreateAnonymous(".usda")
