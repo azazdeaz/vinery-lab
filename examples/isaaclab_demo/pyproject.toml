@@ -1,0 +1,21 @@
+[project]
+name = "levinery"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "vinerylab",
+    "isaaclab[isaacsim,all]",
+]
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
+prerelease = "allow"
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+
+[tool.uv.sources]
+vinerylab = { path = "../../", editable = true }
