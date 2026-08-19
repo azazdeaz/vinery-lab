@@ -6001,6 +6001,7 @@ dependencies = [
  "anyhow",
  "bevy",
  "curvo",
+ "nalgebra 0.35.0",
  "openusd",
  "pyo3",
  "usd_bevy",

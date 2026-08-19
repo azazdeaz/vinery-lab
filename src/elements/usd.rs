@@ -6,7 +6,7 @@
 //! rather than `custom point3f[] points`.
 
 use openusd::schemas::geom::{Mesh, PointBased};
-use openusd::sdf::Value;
+use openusd::sdf::{self, Value};
 use openusd::usd::Stage;
 
 /// A polygonal mesh in USD's layout, ready to author.
@@ -35,6 +35,29 @@ pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result
         .set(Value::IntVec(mesh.face_vertex_counts.clone()))?;
     prim.create_face_vertex_indices_attr()?
         .set(Value::IntVec(mesh.face_vertex_indices.clone()))?;
+    Ok(())
+}
+
+/// Makes the prim at `path` an internal reference to `target`: the whole
+/// subtree under `target` composes in under `path`, transformed by whatever
+/// `path` itself authors.
+///
+/// This is how one element nests another's subtree without copying geometry.
+/// `target` must not be an ancestor of `path` — a reference to an ancestor is
+/// a composition cycle and resolves to nothing.
+///
+/// Goes through `set_metadata` rather than a typed API because `openusd` has
+/// no `UsdReferences` equivalent yet; `references` is a list op, and an
+/// explicit one replaces whatever a previous author pass left behind.
+pub fn reference_prim(stage: &Stage, path: &str, target: &str) -> anyhow::Result<()> {
+    let reference = sdf::Reference {
+        prim_path: sdf::path(target)?,
+        ..Default::default()
+    };
+    stage.prim(sdf::path(path)?).set_metadata(
+        sdf::FieldKey::References.as_str(),
+        Value::ReferenceListOp(sdf::ReferenceListOp::explicit([reference])),
+    )?;
     Ok(())
 }
 
@@ -97,6 +120,22 @@ mod tests {
                 "face {face} normal points away from the center"
             );
         }
+    }
+
+    /// The referenced subtree must show up under the referencing prim in the
+    /// *composed* stage — that's the whole point of nesting by reference, and
+    /// it's what the viewer traverses.
+    #[test]
+    fn reference_prim_composes_the_target_subtree() {
+        let stage = openusd::usd::Stage::builder().in_memory("ref.usda").unwrap();
+        author_mesh(&stage, "/parts/Group/Box", &box_mesh(1.0)).unwrap();
+        openusd::schemas::geom::Xform::define(&stage, sdf::path("/World/Nested").unwrap()).unwrap();
+        reference_prim(&stage, "/World/Nested", "/parts/Group").unwrap();
+
+        assert!(
+            usd_bevy::authoring::prim_exists(&stage, "/World/Nested/Box"),
+            "the referenced mesh composes in under the referencing prim"
+        );
     }
 
     #[test]

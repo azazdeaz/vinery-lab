@@ -23,6 +23,9 @@ usd_bevy = { path = "../bevy_openusd/crates/usd_bevy" }
 anyhow = "1"
 pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
 curvo = "0.1.91"
+# Must track the version curvo builds its own points/curves with, since its
+# API takes and returns nalgebra types.
+nalgebra = "0.35"
 
 [features]
 # Compiles the PyO3 wrapper code (src/python.rs). Safe to enable for normal

@@ -8,6 +8,7 @@
 
 pub mod cube;
 pub mod grid;
+pub mod terrain;
 pub mod usd;
 
 use bevy::prelude::*;
@@ -48,7 +49,7 @@ pub fn plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_plugins((cube::plugin, grid::plugin));
+    .add_plugins((cube::plugin, terrain::plugin, grid::plugin));
 }
 
 /// A plain snapshot of every element's params.
@@ -60,6 +61,7 @@ pub fn plugin(app: &mut App) {
 #[derive(Clone, Debug, Default)]
 pub struct VineyardParams {
     pub cube: cube::CubeParams,
+    pub terrain: terrain::TerrainParams,
     pub grid: grid::GridParams,
 }
 
@@ -68,6 +70,7 @@ impl VineyardParams {
     /// systems actually read.
     pub fn insert(self, world: &mut World) {
         world.insert_resource(self.cube);
+        world.insert_resource(self.terrain);
         world.insert_resource(self.grid);
     }
 }

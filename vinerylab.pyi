@@ -13,6 +13,21 @@ class CubeParams:
     def __init__(self, size: float = 0.1, variations: int = 3) -> None: ...
     def __repr__(self) -> str: ...
 
+class TerrainParams:
+    width: float
+    height: float
+    max_elevation: float
+    detail: int
+
+    def __init__(
+        self,
+        width: float = 4.0,
+        height: float = 4.0,
+        max_elevation: float = 0.5,
+        detail: int = 6,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 class GridParams:
     rows: int
     cols: int
@@ -38,11 +53,13 @@ class VineyardParams:
     """
 
     cube: CubeParams
+    terrain: TerrainParams
     grid: GridParams
 
     def __init__(
         self,
         cube: CubeParams | None = None,
+        terrain: TerrainParams | None = None,
         grid: GridParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...

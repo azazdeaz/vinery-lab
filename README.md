@@ -78,6 +78,9 @@ Adding an element is one new file plus one line in `elements::plugin`.
 **Each element owns exactly one prim subtree.** Its author fn removes that
 subtree and rewrites it from scratch; nothing else is allowed to touch it.
 Prototypes go under `/parts/<Name>`, placed instances under `/Vineyard/...`.
+`terrain` additionally *defines* the scene root `/Vineyard` and declares it the
+stage's default prim — it never removes it, so sibling elements keep their own
+subtrees under it.
 `/parts` itself belongs to no element — `stage::new_stage` defines it and
 marks it invisible, so prototypes don't render as a pile of stray geometry at
 the origin. Instances are unaffected; they hang off their instancer.

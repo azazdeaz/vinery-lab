@@ -12,6 +12,7 @@ use pyo3::prelude::*;
 use crate::elements::VineyardParams;
 use crate::elements::cube::CubeParams;
 use crate::elements::grid::GridParams;
+use crate::elements::terrain::TerrainParams;
 use crate::generate::generate_stage;
 use usd_bevy::authoring::save_stage_as;
 
@@ -27,6 +28,24 @@ impl CubeParams {
     #[pyo3(signature = (size=0.1, variations=3))]
     fn py_new(size: f32, variations: u32) -> Self {
         Self { size, variations }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+impl TerrainParams {
+    #[new]
+    #[pyo3(signature = (width=4.0, height=4.0, max_elevation=0.5, detail=6))]
+    fn py_new(width: f32, height: f32, max_elevation: f32, detail: u32) -> Self {
+        Self {
+            width,
+            height,
+            max_elevation,
+            detail,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -61,22 +80,28 @@ impl GridParams {
 #[pyclass(name = "VineyardParams", get_all, set_all)]
 pub struct PyVineyardParams {
     pub cube: Py<CubeParams>,
+    pub terrain: Py<TerrainParams>,
     pub grid: Py<GridParams>,
 }
 
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (cube=None, grid=None))]
+    #[pyo3(signature = (cube=None, terrain=None, grid=None))]
     fn py_new(
         py: Python<'_>,
         cube: Option<Py<CubeParams>>,
+        terrain: Option<Py<TerrainParams>>,
         grid: Option<Py<GridParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
             cube: match cube {
                 Some(v) => v,
                 None => Py::new(py, CubeParams::default())?,
+            },
+            terrain: match terrain {
+                Some(v) => v,
+                None => Py::new(py, TerrainParams::default())?,
             },
             grid: match grid {
                 Some(v) => v,
@@ -122,6 +147,7 @@ impl PyVineyardParams {
     fn snapshot(&self, py: Python<'_>) -> VineyardParams {
         VineyardParams {
             cube: (*self.cube.borrow(py)).clone(),
+            terrain: (*self.terrain.borrow(py)).clone(),
             grid: (*self.grid.borrow(py)).clone(),
         }
     }
@@ -131,6 +157,7 @@ impl PyVineyardParams {
 fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVineyardParams>()?;
     m.add_class::<CubeParams>()?;
+    m.add_class::<TerrainParams>()?;
     m.add_class::<GridParams>()?;
     Ok(())
 }

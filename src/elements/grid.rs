@@ -1,10 +1,13 @@
-//! Grid element — the placeholder layout, standing in until terrain and rows
-//! land.
+//! Grid element — the placeholder layout, standing in until rows land.
 //!
-//! Owns the scene root (`/Vineyard`, the stage's default prim) and scatters
-//! cube prototypes across it on a regular lattice. It discovers what to
+//! Scatters cube prototypes on a regular lattice. It discovers what to
 //! instance by listing the children of [`cube::PROTOTYPE`] rather than being
 //! told, so adding a cube variation needs no change here.
+//!
+//! Authors into the prototype library rather than into the scene, because it
+//! is placed by reference: [`terrain`](super::terrain) nests [`ROOT`] under
+//! its own subtree. That keeps it out of `/Vineyard`, which a reference to an
+//! ancestor could not be composed from.
 
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
@@ -19,11 +22,11 @@ use usd_bevy::live::LiveStage;
 use super::cube::{self, CubeParams};
 use super::{Grow, variation_indices};
 
-/// The subtree this element owns. Also the stage's default prim, so a
-/// consumer referencing the generated layer gets the whole scene.
-pub const ROOT: &str = "/Vineyard";
+/// The subtree this element owns, and the contract it offers: whoever places
+/// the grid references this path.
+pub const ROOT: &str = "/parts/Grid";
 
-const INSTANCER: &str = "/Vineyard/Cubes";
+const INSTANCER: &str = "/parts/Grid/Cubes";
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(
@@ -64,7 +67,6 @@ fn author(live: NonSend<LiveStage>, params: Res<GridParams>) -> Result<()> {
     let stage = &live.stage;
     remove_prim(stage, ROOT)?;
     define_prim(stage, ROOT, "Xform")?;
-    stage.set_default_prim("Vineyard")?;
 
     let prototypes = prototype_paths(stage, cube::PROTOTYPE)?;
     if prototypes.is_empty() {
@@ -205,6 +207,7 @@ mod tests {
                 spacing: 0.3,
                 seed: 1,
             },
+            ..default()
         };
         let stage = crate::generate::generate_stage(&params).unwrap();
 
