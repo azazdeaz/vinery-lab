@@ -92,8 +92,11 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     stage = sim_utils.get_current_stage()
     layer = Sdf.Layer.CreateAnonymous(".usda")
     layer.ImportFromString(usda)  # or copy from another Usd.Stage
-    prim = stage.DefinePrim("/World/Asset", "Xform")
-    prim.GetReferences().AddReference(layer.identifier)
+    root = stage.GetRootLayer()
+    Sdf.CopySpec(layer, "/parts", root, "/parts")
+    Sdf.CopySpec(layer, "/Vineyard", root, "/World/Vineyard")
+    # prim = stage.DefinePrim("/World/Asset", "Xform")
+    # prim.GetReferences().AddReference(layer.identifier)
     # -- Robot
     # anymal_b = Articulation(ANYMAL_B_CFG.replace(prim_path="/World/Origin1/Robot"))
 
