@@ -1,14 +1,14 @@
 //! Headless, single-cycle scene generation: no window, no renderer, no
-//! async runner — just `App::update()` once and then read the `World`.
+//! async runner — just `App::update()` once and then read the stage.
 
 use bevy::prelude::*;
 use openusd::usd::Stage;
+use usd_bevy::live::LiveStage;
 
-use crate::author::author_scene;
-use crate::scene::{spawn_scene, SceneParams};
+use crate::elements::VineyardParams;
 
-/// Runs one `Startup` + `Update` cycle of a minimal headless app and returns
-/// the resulting USD `Stage`.
+/// Runs one cycle of a minimal headless app and returns the authored USD
+/// `Stage`.
 ///
 /// Deliberately uses `App::update()` instead of `App::run()`: `run()` hands
 /// off to a runner (which, with a windowed app, never returns and may call
@@ -20,12 +20,21 @@ use crate::scene::{spawn_scene, SceneParams};
 /// `DefaultPlugins` pulls in `LogPlugin`, which installs a *global*
 /// `tracing` subscriber — calling this function twice in one process would
 /// panic on the second call. `MinimalPlugins` skips windowing, rendering and
-/// asset loading entirely, none of which scene generation needs.
-pub fn generate_stage(params: &SceneParams) -> anyhow::Result<Stage> {
+/// asset loading entirely, none of which authoring needs.
+///
+/// `LiveStagePlugin` is left out too: the stage is the output here, so
+/// there's nothing to project it into. The `LiveStage` wrapper is still used
+/// (it holds the stage for the author systems, which take it either way), it
+/// just never gets drained.
+pub fn generate_stage(params: &VineyardParams) -> anyhow::Result<Stage> {
+    let stage = crate::stage::new_stage("scene.usda")?;
+
     let mut app = App::new();
     app.add_plugins(MinimalPlugins)
-        .insert_resource(params.clone())
-        .add_systems(Startup, spawn_scene);
+        .add_plugins(crate::elements::plugin);
+    // After the element plugins, so these override their defaults.
+    params.clone().insert(app.world_mut());
+    app.world_mut().insert_non_send(LiveStage::new(stage.clone()));
 
     // Let plugins finish deferred setup before the first update, as `run()`
     // would have done for us.
@@ -33,8 +42,6 @@ pub fn generate_stage(params: &SceneParams) -> anyhow::Result<Stage> {
     app.cleanup();
     app.update();
 
-    let stage = Stage::builder().in_memory("scene.usda")?;
-    author_scene(app.world_mut(), &stage)?;
     Ok(stage)
 }
 
@@ -49,7 +56,7 @@ mod tests {
     /// an unauthored (default Y-up) root stage would be silently wrong.
     #[test]
     fn generated_stage_declares_z_up_meters() {
-        let stage = generate_stage(&SceneParams::default()).unwrap();
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
         assert!(
             matches!(
                 stage.stage_metadata("upAxis").unwrap(),
@@ -63,6 +70,16 @@ mod tests {
                 Some(openusd::sdf::Value::Double(d)) if (d - 1.0).abs() < 1e-9
             ),
             "generated stage must author metersPerUnit = 1.0"
+        );
+    }
+
+    #[test]
+    fn generated_stage_has_a_default_prim() {
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
+        let usda = stage.root_layer().export_to_string().unwrap();
+        assert!(
+            usda.contains("defaultPrim = \"Vineyard\""),
+            "got:\n{usda}"
         );
     }
 }

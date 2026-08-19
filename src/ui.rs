@@ -1,46 +1,37 @@
-//! Feathers-based panel for editing [`SceneParams`] live, docked to the
-//! top-left corner of the viewer.
+//! Feathers-based parameter panel, docked to the top-left corner of the
+//! viewer.
 //!
-//! Each slider writes straight into the [`SceneParams`] resource on every
-//! [`ValueChange`], including mid-drag, so dragging a slider gives instant
-//! feedback. [`crate::viewer::run`] wires [`despawn_cubes`] into its own
-//! system chain (ahead of the USD rebuild) so the cube grid respawns the
-//! moment a value lands in the resource.
+//! The panel itself owns no controls — it just stacks the UI fragment each
+//! element publishes next to its own params and author fn. Adding an element
+//! to the panel is one line in [`params_panel`].
+//!
+//! Sliders write straight into their params resource on every
+//! [`ValueChange`](bevy::ui_widgets::ValueChange), including mid-drag, so a
+//! drag re-authors that element's subtree every frame it moves.
 
 use bevy::feathers::{
     FeathersPlugins,
     containers::{pane, pane_body, pane_header},
-    controls::FeathersSlider,
     dark_theme::create_dark_theme,
-    display::label_small,
     theme::{ThemeBackgroundColor, ThemedText, UiTheme},
     tokens,
 };
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
-use crate::scene::{Cube, SceneParams};
+use crate::elements::cube::ui as cube_ui;
+use crate::elements::grid::ui as grid_ui;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(FeathersPlugins)
         .insert_resource(UiTheme(create_dark_theme()))
-        .add_systems(Startup, scene_params_panel_list.spawn());
+        .add_systems(Startup, params_panel_list.spawn());
 }
 
-/// Despawns every [`Cube`] entity. Paired with [`crate::scene::spawn_scene`]
-/// by [`crate::viewer::run`] to fully rebuild the grid whenever
-/// [`SceneParams`] changes.
-pub(crate) fn despawn_cubes(mut commands: Commands, cubes: Query<Entity, With<Cube>>) {
-    for entity in cubes.iter() {
-        commands.entity(entity).despawn();
-    }
+fn params_panel_list() -> impl SceneList {
+    bsn_list![params_panel()]
 }
 
-fn scene_params_panel_list() -> impl SceneList {
-    bsn_list![scene_params_panel()]
-}
-
-fn scene_params_panel() -> impl Scene {
+fn params_panel() -> impl Scene {
     bsn! {
         Node {
             position_type: PositionType::Absolute,
@@ -51,48 +42,10 @@ fn scene_params_panel() -> impl Scene {
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children [ pane() Children [
-            pane_header() Children [ (Text("Scene Params") ThemedText) ],
+            pane_header() Children [ (Text("Vineyard") ThemedText) ],
             pane_body() Children [
-                label_small("Rows"),
-                (
-                    @FeathersSlider { @min: 1.0, @max: 50.0, @value: 10.0 }
-                    SliderStep(1.0)
-                    SliderPrecision(0)
-                    on(slider_self_update)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SceneParams>| {
-                        params.rows = change.value.round().max(1.0) as u32;
-                    })
-                ),
-                label_small("Cols"),
-                (
-                    @FeathersSlider { @min: 1.0, @max: 50.0, @value: 10.0 }
-                    SliderStep(1.0)
-                    SliderPrecision(0)
-                    on(slider_self_update)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SceneParams>| {
-                        params.cols = change.value.round().max(1.0) as u32;
-                    })
-                ),
-                label_small("Spacing"),
-                (
-                    @FeathersSlider { @min: 0.05, @max: 2.0, @value: 0.2 }
-                    SliderStep(0.05)
-                    SliderPrecision(2)
-                    on(slider_self_update)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SceneParams>| {
-                        params.spacing = change.value;
-                    })
-                ),
-                label_small("Cube size"),
-                (
-                    @FeathersSlider { @min: 0.01, @max: 1.0, @value: 0.1 }
-                    SliderStep(0.01)
-                    SliderPrecision(2)
-                    on(slider_self_update)
-                    on(|change: On<ValueChange<f32>>, mut params: ResMut<SceneParams>| {
-                        params.cube_size = change.value;
-                    })
-                ),
+                grid_ui(),
+                cube_ui(),
             ],
         ]]
     }

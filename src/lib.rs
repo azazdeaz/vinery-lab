@@ -3,9 +3,9 @@
 //! ([`viewer::run`]) or headlessly from Python ([`python`], behind the
 //! `python` feature) to generate a `.usda`/`.usd` file in one shot.
 
-pub mod author;
+pub mod elements;
 pub mod generate;
-pub mod scene;
+pub mod stage;
 pub mod ui;
 pub mod viewer;
 

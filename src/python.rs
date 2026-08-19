@@ -1,16 +1,18 @@
-//! PyO3 wrapper: `SceneParams` is already a `#[pyclass]` (see [`crate::scene`]);
-//! this just adds the constructor and the two entry points Python calls.
+//! PyO3 wrapper: each element's params fragment is already a `#[pyclass]`
+//! (see `crate::elements`); this adds their constructors and the aggregate
+//! Python actually calls.
 //!
-//! Kept deliberately thin — all the actual work (spawning the headless app,
-//! authoring the stage) lives in [`crate::generate`] and [`crate::author`]
-//! and is exercised identically by the interactive viewer, so this module
-//! has nothing to test on its own beyond "does it call through correctly".
+//! Kept deliberately thin — all the real work (spawning the headless app,
+//! authoring the stage) lives in [`crate::generate`] and the element modules,
+//! and is exercised identically by the interactive viewer.
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
+use crate::elements::VineyardParams;
+use crate::elements::cube::CubeParams;
+use crate::elements::grid::GridParams;
 use crate::generate::generate_stage;
-use crate::scene::SceneParams;
 use usd_bevy::authoring::save_stage_as;
 
 /// Formats with `{:#}` so `anyhow`'s full context chain reaches the Python
@@ -20,26 +22,83 @@ fn to_py_err(err: anyhow::Error) -> PyErr {
 }
 
 #[pymethods]
-impl SceneParams {
+impl CubeParams {
     #[new]
-    #[pyo3(signature = (rows=10, cols=10, spacing=0.2, cube_size=0.1))]
-    fn py_new(rows: u32, cols: u32, spacing: f32, cube_size: f32) -> Self {
-        Self { rows, cols, spacing, cube_size }
+    #[pyo3(signature = (size=0.1, variations=3))]
+    fn py_new(size: f32, variations: u32) -> Self {
+        Self { size, variations }
     }
 
     fn __repr__(&self) -> String {
         format!("{self:?}")
     }
+}
+
+#[pymethods]
+impl GridParams {
+    #[new]
+    #[pyo3(signature = (rows=10, cols=10, spacing=0.2, seed=0))]
+    fn py_new(rows: u32, cols: u32, spacing: f32, seed: u64) -> Self {
+        Self {
+            rows,
+            cols,
+            spacing,
+            seed,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+/// The full parameter set, one field per element.
+///
+/// Fragments are held as `Py<T>` rather than by value so attribute access
+/// hands back the *same* Python object every time. With plain fields PyO3's
+/// generated getter clones, and `params.cube.size = 0.2` would mutate a
+/// throwaway copy while the scene silently kept the old value.
+#[pyclass(name = "VineyardParams", get_all, set_all)]
+pub struct PyVineyardParams {
+    pub cube: Py<CubeParams>,
+    pub grid: Py<GridParams>,
+}
+
+#[pymethods]
+impl PyVineyardParams {
+    #[new]
+    #[pyo3(signature = (cube=None, grid=None))]
+    fn py_new(
+        py: Python<'_>,
+        cube: Option<Py<CubeParams>>,
+        grid: Option<Py<GridParams>>,
+    ) -> PyResult<Self> {
+        Ok(Self {
+            cube: match cube {
+                Some(v) => v,
+                None => Py::new(py, CubeParams::default())?,
+            },
+            grid: match grid {
+                Some(v) => v,
+                None => Py::new(py, GridParams::default())?,
+            },
+        })
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> String {
+        format!("{:?}", self.snapshot(py))
+    }
 
     /// Generates the scene and returns it as `usda` text.
     ///
     /// Releases the GIL for the duration of the Rust/Bevy work via
-    /// `py.detach`: nothing in `generate_stage`/`export_to_string` touches
-    /// Python objects, so it's sound, and it lets other Python threads (e.g.
-    /// in a host application like Isaac Sim) keep making progress.
+    /// `py.detach`: the params are copied out first, so nothing inside
+    /// touches Python objects, and other Python threads (e.g. in a host
+    /// application like Isaac Sim) keep making progress.
     fn generate_usda(&self, py: Python<'_>) -> PyResult<String> {
+        let params = self.snapshot(py);
         py.detach(|| {
-            let stage = generate_stage(self)?;
+            let stage = generate_stage(&params)?;
             stage.root_layer().export_to_string()
         })
         .map_err(to_py_err)
@@ -48,16 +107,30 @@ impl SceneParams {
     /// Generates the scene and writes it directly to `path` (format chosen
     /// by extension — `.usda`, `.usdc`, `.usd`, `.usdz`).
     fn write_usd(&self, py: Python<'_>, path: &str) -> PyResult<()> {
+        let params = self.snapshot(py);
         py.detach(|| {
-            let stage = generate_stage(self)?;
+            let stage = generate_stage(&params)?;
             save_stage_as(&stage, path)
         })
         .map_err(to_py_err)
     }
 }
 
+impl PyVineyardParams {
+    /// Copies the fragments out of their Python objects into a plain Rust
+    /// aggregate, so the generation call needs no GIL.
+    fn snapshot(&self, py: Python<'_>) -> VineyardParams {
+        VineyardParams {
+            cube: (*self.cube.borrow(py)).clone(),
+            grid: (*self.grid.borrow(py)).clone(),
+        }
+    }
+}
+
 #[pymodule]
 fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<SceneParams>()?;
+    m.add_class::<PyVineyardParams>()?;
+    m.add_class::<CubeParams>()?;
+    m.add_class::<GridParams>()?;
     Ok(())
 }
