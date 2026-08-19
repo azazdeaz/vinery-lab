@@ -13,20 +13,32 @@ use usd_bevy::live::{LiveStage, LiveStagePlugin, PrimEntities, project_stage};
 use crate::author::author_scene;
 use crate::scene::{SceneParams, spawn_scene};
 
-/// Set by `mark_dirty` (a normal system, so `Changed<Transform>` tracks
-/// correctly across frames) and consumed by `rebuild_usd` (an exclusive
-/// system, which can't take a `Changed` query param directly alongside
-/// `&mut World`).
+/// Set by `mark_needs_rebuild` (a normal system, run right after
+/// `spawn_scene`) and consumed by `rebuild_usd` (an exclusive system, which
+/// can't take a `Changed` query param directly alongside `&mut World`).
 #[derive(Resource, Default)]
 struct NeedsRebuild(bool);
 
 pub fn run() {
     App::new()
-        .add_plugins((DefaultPlugins, UsdPlugin, LiveStagePlugin))
+        .add_plugins((DefaultPlugins, UsdPlugin, LiveStagePlugin, crate::ui::plugin))
         .init_resource::<SceneParams>()
         .init_resource::<NeedsRebuild>()
-        .add_systems(Startup, (spawn_scene, setup))
-        .add_systems(Update, (mark_dirty, rebuild_usd, save_usd_on_key).chain())
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                // `SceneParams` starts out "changed" on the very first Update
+                // tick too, so this also covers the initial spawn — no
+                // separate `Startup` call to `spawn_scene` is needed.
+                (crate::ui::despawn_cubes, spawn_scene, mark_needs_rebuild)
+                    .chain()
+                    .run_if(resource_changed::<SceneParams>),
+                rebuild_usd,
+                save_usd_on_key,
+            )
+                .chain(),
+        )
         .run();
 }
 
@@ -46,13 +58,15 @@ fn setup(world: &mut World) {
     world.resource_mut::<NeedsRebuild>().0 = true;
 }
 
-/// Flags `NeedsRebuild` whenever a cube's transform changes. Plain system
-/// (not exclusive), so `Changed<Transform>` correctly tracks state across
-/// frames via the query's cached `QueryState`.
-fn mark_dirty(mut dirty: ResMut<NeedsRebuild>, changed: Query<(), Changed<Transform>>) {
-    if !changed.is_empty() {
-        dirty.0 = true;
-    }
+/// Unconditionally flags `NeedsRebuild`. Chained directly after
+/// `spawn_scene`, so a panel-driven parameter change rebuilds the USD stage
+/// the same frame the cube grid respawns. Plain (non-exclusive) system, so
+/// it runs before `spawn_scene`'s commands are actually applied — that's
+/// fine here since it just sets a flag rather than reading the respawned
+/// cubes; `rebuild_usd`, an exclusive system, forces that sync point right
+/// before it reads them.
+fn mark_needs_rebuild(mut dirty: ResMut<NeedsRebuild>) {
+    dirty.0 = true;
 }
 
 /// Fully recreate the USD stage from the current cube entities. Building

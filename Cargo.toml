@@ -14,7 +14,7 @@ name = "vinerylab"
 path = "src/main.rs"
 
 [dependencies]
-bevy = "0.19.1"
+bevy = {version = "0.19.1", features = ["bevy_feathers", "ghost_nodes", "bevy_ui_debug"]}
 openusd = { git = "https://github.com/mxpv/openusd", rev = "7934d9f3a375fabc93c14dc96b7900cbd035204d", features = [
     "geom",
     "shade",

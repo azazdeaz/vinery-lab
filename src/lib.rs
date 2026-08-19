@@ -6,6 +6,7 @@
 pub mod author;
 pub mod generate;
 pub mod scene;
+pub mod ui;
 pub mod viewer;
 
 #[cfg(feature = "python")]
