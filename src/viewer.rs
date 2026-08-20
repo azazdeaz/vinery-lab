@@ -7,11 +7,13 @@
 //! frame after that as a diff against what changed.
 
 use bevy::prelude::*;
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use usd_bevy::UsdPlugin;
 use usd_bevy::authoring::save_stage_as;
 use usd_bevy::live::{LiveStage, LiveStagePlugin};
 
 use crate::elements::parcel;
+use crate::ui::ParamsPanel;
 
 pub fn run() {
     App::new()
@@ -19,6 +21,7 @@ pub fn run() {
             DefaultPlugins,
             UsdPlugin,
             LiveStagePlugin,
+            PanOrbitCameraPlugin,
             crate::elements::plugin,
             crate::ui::plugin,
             // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
@@ -30,7 +33,7 @@ pub fn run() {
         // `open_stage` must land before the first `PreUpdate`, where the
         // element author systems expect a `LiveStage` to already exist.
         .add_systems(Startup, (open_stage, setup))
-        .add_systems(Update, save_usd_on_key)
+        .add_systems(Update, (save_usd_on_key, sync_camera_enabled_with_ui))
         .run();
 }
 
@@ -46,6 +49,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(70.0, 55.0, 70.0).looking_at(Vec3::ZERO, Vec3::Y),
+        PanOrbitCamera::default(),
         AmbientLight {
             brightness: 220.0,
             ..default()
@@ -64,4 +68,18 @@ fn save_usd_on_key(live: NonSend<LiveStage>, keys: Res<ButtonInput<KeyCode>>) ->
         info!("saved scene.usda");
     }
     Ok(())
+}
+
+/// Disables orbit/pan/zoom while the pointer is over the params panel, so
+/// dragging a slider there doesn't also drag the camera underneath it.
+fn sync_camera_enabled_with_ui(
+    panel: Query<&Interaction, With<ParamsPanel>>,
+    mut cameras: Query<&mut PanOrbitCamera>,
+) {
+    let over_panel = panel
+        .iter()
+        .any(|interaction| *interaction != Interaction::None);
+    for mut camera in &mut cameras {
+        camera.enabled = !over_panel;
+    }
 }

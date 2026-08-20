@@ -31,6 +31,11 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, params_panel_list.spawn());
 }
 
+/// Marks the params panel's root node so other systems (e.g. the viewer
+/// camera) can tell whether the pointer is over the panel.
+#[derive(Component, Clone, Default)]
+pub struct ParamsPanel;
+
 fn params_panel_list() -> impl SceneList {
     bsn_list![params_panel()]
 }
@@ -47,6 +52,8 @@ fn params_panel() -> impl Scene {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,
         }
+        ParamsPanel
+        Interaction
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children [ pane() Children [
             pane_header() Children [ (Text("Vineyard") ThemedText) ],
