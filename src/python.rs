@@ -10,8 +10,6 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::elements::VineyardParams;
-use crate::elements::cube::CubeParams;
-use crate::elements::grid::GridParams;
 use crate::elements::parcel::ParcelParams;
 use crate::elements::terrain::TerrainParams;
 use crate::elements::vine::VineParams;
@@ -25,19 +23,6 @@ fn to_py_err(err: anyhow::Error) -> PyErr {
 }
 
 #[pymethods]
-impl CubeParams {
-    #[new]
-    #[pyo3(signature = (size=0.1, variations=3))]
-    fn py_new(size: f32, variations: u32) -> Self {
-        Self { size, variations }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
 impl TerrainParams {
     #[new]
     #[pyo3(signature = (width=80.0, height=50.0, max_elevation=3.0, detail=6))]
@@ -47,24 +32,6 @@ impl TerrainParams {
             height,
             max_elevation,
             detail,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl GridParams {
-    #[new]
-    #[pyo3(signature = (rows=10, cols=10, spacing=0.2, seed=0))]
-    fn py_new(rows: u32, cols: u32, spacing: f32, seed: u64) -> Self {
-        Self {
-            rows,
-            cols,
-            spacing,
-            seed,
         }
     }
 
@@ -179,13 +146,11 @@ impl VineParams {
 ///
 /// Fragments are held as `Py<T>` rather than by value so attribute access
 /// hands back the *same* Python object every time. With plain fields PyO3's
-/// generated getter clones, and `params.cube.size = 0.2` would mutate a
+/// generated getter clones, and `params.terrain.detail = 8` would mutate a
 /// throwaway copy while the scene silently kept the old value.
 #[pyclass(name = "VineyardParams", get_all, set_all)]
 pub struct PyVineyardParams {
-    pub cube: Py<CubeParams>,
     pub terrain: Py<TerrainParams>,
-    pub grid: Py<GridParams>,
     pub parcel: Py<ParcelParams>,
     pub vine: Py<VineParams>,
 }
@@ -193,27 +158,17 @@ pub struct PyVineyardParams {
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (cube=None, terrain=None, grid=None, parcel=None, vine=None))]
+    #[pyo3(signature = (terrain=None, parcel=None, vine=None))]
     fn py_new(
         py: Python<'_>,
-        cube: Option<Py<CubeParams>>,
         terrain: Option<Py<TerrainParams>>,
-        grid: Option<Py<GridParams>>,
         parcel: Option<Py<ParcelParams>>,
         vine: Option<Py<VineParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
-            cube: match cube {
-                Some(v) => v,
-                None => Py::new(py, CubeParams::default())?,
-            },
             terrain: match terrain {
                 Some(v) => v,
                 None => Py::new(py, TerrainParams::default())?,
-            },
-            grid: match grid {
-                Some(v) => v,
-                None => Py::new(py, GridParams::default())?,
             },
             parcel: match parcel {
                 Some(v) => v,
@@ -262,9 +217,7 @@ impl PyVineyardParams {
     /// aggregate, so the generation call needs no GIL.
     fn snapshot(&self, py: Python<'_>) -> VineyardParams {
         VineyardParams {
-            cube: (*self.cube.borrow(py)).clone(),
             terrain: (*self.terrain.borrow(py)).clone(),
-            grid: (*self.grid.borrow(py)).clone(),
             parcel: (*self.parcel.borrow(py)).clone(),
             vine: (*self.vine.borrow(py)).clone(),
         }
@@ -274,9 +227,7 @@ impl PyVineyardParams {
 #[pymodule]
 fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVineyardParams>()?;
-    m.add_class::<CubeParams>()?;
     m.add_class::<TerrainParams>()?;
-    m.add_class::<GridParams>()?;
     m.add_class::<ParcelParams>()?;
     m.add_class::<VineParams>()?;
     Ok(())

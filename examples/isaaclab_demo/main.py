@@ -41,7 +41,7 @@ from isaaclab_newton.physics import NewtonManager, NewtonSolverCfg
 from isaaclab.utils.configclass import configclass
 from pxr import Sdf
 
-from vinerylab import VineyardParams, GridParams, CubeParams
+from vinerylab import VineyardParams
 
 ##
 # Pre-defined configs
@@ -82,7 +82,7 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     # Origin 1 with Anymal B
     sim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
 
-    p = VineyardParams(grid=GridParams(rows=2, cols=2, spacing=0.5), cube=CubeParams(size=0.2))
+    p = VineyardParams()
     usda = p.generate_usda()
 
     print("________________________________________")

@@ -19,8 +19,6 @@ use bevy::feathers::{
 use bevy::prelude::*;
 use bevy::ui_widgets::ScrollArea;
 
-use crate::elements::cube::ui as cube_ui;
-use crate::elements::grid::ui as grid_ui;
 use crate::elements::parcel::ui as parcel_ui;
 use crate::elements::terrain::ui as terrain_ui;
 use crate::elements::vine::ui as vine_ui;
@@ -70,8 +68,6 @@ fn params_panel() -> impl Scene {
                     terrain_ui(),
                     parcel_ui(),
                     vine_ui(),
-                    grid_ui(),
-                    cube_ui(),
                 ]
             ) ],
         ]]

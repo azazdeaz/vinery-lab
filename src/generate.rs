@@ -73,6 +73,21 @@ mod tests {
         );
     }
 
+    /// The generated stage must be byte-identical across runs for the same
+    /// params, so a downstream sim gets a reproducible scene.
+    #[test]
+    fn generation_is_reproducible() {
+        let params = VineyardParams::default();
+        let export = || {
+            generate_stage(&params)
+                .unwrap()
+                .root_layer()
+                .export_to_string()
+                .unwrap()
+        };
+        assert_eq!(export(), export());
+    }
+
     #[test]
     fn generated_stage_has_a_default_prim() {
         let stage = generate_stage(&VineyardParams::default()).unwrap();

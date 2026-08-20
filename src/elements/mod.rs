@@ -6,8 +6,6 @@
 //! element owns exactly one prim subtree, rewrites it from scratch whenever
 //! its params change, and composes with other elements by prim path alone.
 
-pub mod cube;
-pub mod grid;
 pub mod parcel;
 pub mod strand;
 pub mod terrain;
@@ -52,7 +50,7 @@ pub fn plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_plugins((cube::plugin, terrain::plugin, grid::plugin, vine::plugin));
+    .add_plugins((terrain::plugin, vine::plugin));
 }
 
 /// A plain snapshot of every element's params.
@@ -63,9 +61,7 @@ pub fn plugin(app: &mut App) {
 /// and headless generation.
 #[derive(Clone, Debug, Default)]
 pub struct VineyardParams {
-    pub cube: cube::CubeParams,
     pub terrain: terrain::TerrainParams,
-    pub grid: grid::GridParams,
     pub parcel: parcel::ParcelParams,
     pub vine: vine::VineParams,
 }
@@ -74,9 +70,7 @@ impl VineyardParams {
     /// Splits the aggregate back into the per-element resources the author
     /// systems actually read.
     pub fn insert(self, world: &mut World) {
-        world.insert_resource(self.cube);
         world.insert_resource(self.terrain);
-        world.insert_resource(self.grid);
         world.insert_resource(self.parcel);
         world.insert_resource(self.vine);
     }

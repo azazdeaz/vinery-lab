@@ -18,13 +18,11 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use curvo::prelude::{NurbsSurface, SurfaceTessellation3D};
 use nalgebra::Point4;
-use openusd::schemas::geom::{Xform, Xformable};
-use openusd::sdf;
 use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
-use super::usd::{MeshData, author_mesh, reference_prim};
-use super::{Grow, grid, parcel};
+use super::usd::{MeshData, author_mesh};
+use super::{Grow, parcel};
 
 /// The scene root, and the stage's default prim.
 pub const ROOT: &str = "/Vineyard";
@@ -33,7 +31,6 @@ pub const ROOT: &str = "/Vineyard";
 pub const TERRAIN: &str = "/Vineyard/Terrain";
 
 const SURFACE: &str = "/Vineyard/Terrain/Surface";
-const NESTED_GRID: &str = "/Vineyard/Terrain/Grid";
 
 /// Degree of the lofted surface in both directions, clamped down when there
 /// are too few control points to support it.
@@ -110,13 +107,6 @@ fn author(
     let (tessellation, divisions) = terrain_tessellation(&params)?;
     author_mesh(stage, SURFACE, &mesh_data(&tessellation))?;
     *ground = Ground::from_tessellation(&tessellation, divisions);
-
-    // Temporary: nests the grid element's subtree above the highest possible
-    // point of the terrain, to exercise composition through a reference. Goes
-    // away with the grid.
-    Xform::define(stage, sdf::path(NESTED_GRID)?)?
-        .set_translate([0.0, 0.0, params.max_elevation as f64].into())?;
-    reference_prim(stage, NESTED_GRID, grid::ROOT)?;
     Ok(())
 }
 
@@ -375,8 +365,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use openusd::schemas::geom::{Mesh, PointBased, PointInstancer};
-    use openusd::sdf::Value;
+    use openusd::schemas::geom::{Mesh, PointBased};
+    use openusd::sdf::{self, Value};
 
     fn mesh(params: &TerrainParams) -> MeshData {
         let (tessellation, _) = terrain_tessellation(params).expect("terrain lofts");
@@ -568,66 +558,6 @@ mod tests {
             ),
             "the terrain mesh has points"
         );
-    }
-
-    /// The nested grid is composed in by reference, not copied — so the
-    /// instancer authored under the grid's own subtree has to show up under
-    /// the terrain, still pointing at the cube prototypes it was authored
-    /// against (those live outside the referenced subtree, so composition has
-    /// to leave their paths alone).
-    #[test]
-    fn nests_the_grid_by_reference() {
-        let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        let path = sdf::path(format!("{NESTED_GRID}/Cubes")).unwrap();
-        let instancer = PointInstancer::get(&stage, path)
-            .unwrap()
-            .expect("grid subtree composes in under the terrain");
-        assert!(
-            instancer
-                .prototypes_rel()
-                .targets()
-                .unwrap()
-                .iter()
-                .all(|p| p.as_str().starts_with(crate::elements::cube::PROTOTYPE)),
-            "prototype targets survive the reference"
-        );
-    }
-
-    /// Editing the grid must show through the reference without the terrain
-    /// re-authoring anything: the viewer only re-runs the element whose params
-    /// changed, so a stale composition here would freeze the nested subtree.
-    #[test]
-    fn grid_edits_show_through_the_reference() {
-        let stage = crate::stage::new_stage("live.usda").unwrap();
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::elements::plugin);
-        app.world_mut().insert_non_send(LiveStage::new(stage.clone()));
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        let instances = || {
-            let path = sdf::path(format!("{NESTED_GRID}/Cubes")).unwrap();
-            match PointInstancer::get(&stage, path)
-                .unwrap()
-                .expect("composed instancer")
-                .positions_attr()
-                .get::<Value>()
-                .unwrap()
-            {
-                Some(Value::Vec3fVec(positions)) => positions.len(),
-                other => panic!("positions not authored: {other:?}"),
-            }
-        };
-        let before = instances();
-
-        app.world_mut()
-            .resource_mut::<crate::elements::grid::GridParams>()
-            .rows = 3;
-        app.update();
-
-        assert_ne!(instances(), before, "the re-authored grid composes through");
     }
 
     /// Re-authoring the terrain must not disturb the sibling subtrees under

@@ -35,15 +35,13 @@
 //! Two, as the README's rules anticipate: the prototype meshes under
 //! [`PROTOTYPE`], and the instancer that plants them under [`PLACEMENT`].
 //! [`PLACEMENT`] is a direct sibling of the terrain's subtree rather than
-//! nested inside it the way [`grid`](super::grid) is, because
-//! [`Row::vine_positions`] already returns `/Vineyard`-space points and
-//! `/Vineyard/Terrain` carries no transform — nesting would buy nothing and
-//! cost plenty. It would have to move the instancer under `/parts` (a
-//! reference target may not be an ancestor of the referrer), and since our
-//! prototypes live under `/parts/Vine` too, referencing that subtree into the
-//! scene would drag the prototype meshes in with it as a pile of geometry at
-//! the origin. `grid` only escapes that because its prototypes are somebody
-//! else's subtree.
+//! nested inside it by reference, because [`Row::vine_positions`] already
+//! returns `/Vineyard`-space points and `/Vineyard/Terrain` carries no
+//! transform — nesting would buy nothing and cost plenty. It would have to
+//! move the instancer under `/parts` (a reference target may not be an
+//! ancestor of the referrer), and since our prototypes live under
+//! `/parts/Vine` too, referencing that subtree into the scene would drag the
+//! prototype meshes in with it as a pile of geometry at the origin.
 
 use std::f64::consts::{PI, TAU};
 

@@ -6,13 +6,6 @@ layout: no `python/` source dir) and bundles it into the wheel along with an
 auto-generated `py.typed` marker.
 """
 
-class CubeParams:
-    size: float
-    variations: int
-
-    def __init__(self, size: float = 0.1, variations: int = 3) -> None: ...
-    def __repr__(self) -> str: ...
-
 class TerrainParams:
     width: float
     height: float
@@ -25,21 +18,6 @@ class TerrainParams:
         height: float = 50.0,
         max_elevation: float = 3.0,
         detail: int = 6,
-    ) -> None: ...
-    def __repr__(self) -> str: ...
-
-class GridParams:
-    rows: int
-    cols: int
-    spacing: float
-    seed: int
-
-    def __init__(
-        self,
-        rows: int = 10,
-        cols: int = 10,
-        spacing: float = 0.2,
-        seed: int = 0,
     ) -> None: ...
     def __repr__(self) -> str: ...
 
@@ -124,20 +102,16 @@ class VineyardParams:
     Fragments are live objects, so mutating them in place takes effect:
 
         params = VineyardParams()
-        params.grid.rows = 4
+        params.terrain.detail = 8
     """
 
-    cube: CubeParams
     terrain: TerrainParams
-    grid: GridParams
     parcel: ParcelParams
     vine: VineParams
 
     def __init__(
         self,
-        cube: CubeParams | None = None,
         terrain: TerrainParams | None = None,
-        grid: GridParams | None = None,
         parcel: ParcelParams | None = None,
         vine: VineParams | None = None,
     ) -> None: ...
