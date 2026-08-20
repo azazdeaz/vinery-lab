@@ -17,6 +17,7 @@ use bevy::feathers::{
     tokens,
 };
 use bevy::prelude::*;
+use bevy::ui_widgets::ScrollArea;
 
 use crate::elements::cube::ui as cube_ui;
 use crate::elements::grid::ui as grid_ui;
@@ -41,16 +42,29 @@ fn params_panel() -> impl Scene {
             left: px(10),
             width: px(240),
             padding: px(8),
+            display: Display::Flex,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Stretch,
         }
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children [ pane() Children [
             pane_header() Children [ (Text("Vineyard") ThemedText) ],
-            pane_body() Children [
-                terrain_ui(),
-                parcel_ui(),
-                grid_ui(),
-                cube_ui(),
-            ],
+            pane_body() Children [ (
+                Node {
+                    display: Display::Flex,
+                    flex_direction: FlexDirection::Column,
+                    row_gap: px(4),
+                    max_height: vh(75),
+                    overflow: Overflow::scroll_y(),
+                }
+                ScrollArea
+                Children [
+                    terrain_ui(),
+                    parcel_ui(),
+                    grid_ui(),
+                    cube_ui(),
+                ]
+            ) ],
         ]]
     }
 }
