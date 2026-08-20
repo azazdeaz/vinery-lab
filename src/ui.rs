@@ -23,6 +23,7 @@ use crate::elements::cube::ui as cube_ui;
 use crate::elements::grid::ui as grid_ui;
 use crate::elements::parcel::ui as parcel_ui;
 use crate::elements::terrain::ui as terrain_ui;
+use crate::elements::vine::ui as vine_ui;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(FeathersPlugins)
@@ -61,6 +62,7 @@ fn params_panel() -> impl Scene {
                 Children [
                     terrain_ui(),
                     parcel_ui(),
+                    vine_ui(),
                     grid_ui(),
                     cube_ui(),
                 ]

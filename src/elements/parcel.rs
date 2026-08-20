@@ -95,7 +95,10 @@ impl Row {
         self.start.distance(self.end)
     }
 
-    fn direction(&self) -> Vec2 {
+    /// Unit vector along the row, in plan view. Public because elements that
+    /// place row-aligned geometry — a vine's cordons run *along* the row —
+    /// need it to derive their instance orientation.
+    pub fn direction(&self) -> Vec2 {
         (self.end - self.start).normalize_or_zero()
     }
 

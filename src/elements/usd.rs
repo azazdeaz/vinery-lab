@@ -61,6 +61,29 @@ pub fn reference_prim(stage: &Stage, path: &str, target: &str) -> anyhow::Result
     Ok(())
 }
 
+/// Concatenates meshes into one, offsetting each part's indices past the
+/// points already emitted.
+///
+/// Lets an element build a shape out of several independent pieces and still
+/// author it as a single `Mesh`. A vine is a dozen separate tubes but one
+/// prototype, and prototypes are instanced hundreds of times — prim count is
+/// what drives projection cost, so the pieces are merged rather than authored
+/// side by side.
+pub fn merge_meshes(parts: &[MeshData]) -> MeshData {
+    let mut merged = MeshData::default();
+    for part in parts {
+        let offset = merged.points.len() as i32;
+        merged.points.extend_from_slice(&part.points);
+        merged
+            .face_vertex_counts
+            .extend_from_slice(&part.face_vertex_counts);
+        merged
+            .face_vertex_indices
+            .extend(part.face_vertex_indices.iter().map(|i| i + offset));
+    }
+    merged
+}
+
 /// An axis-aligned box of edge length `size`, centered on the origin.
 ///
 /// Emits four unshared vertices per face rather than eight shared corners, so
@@ -120,6 +143,23 @@ mod tests {
                 "face {face} normal points away from the center"
             );
         }
+    }
+
+    #[test]
+    fn merge_meshes_offsets_each_parts_indices() {
+        let merged = merge_meshes(&[box_mesh(1.0), box_mesh(2.0)]);
+        assert_eq!(merged.points.len(), 48);
+        assert_eq!(merged.face_vertex_counts, vec![4; 12]);
+        // The second box's faces must index into its own copy of the points,
+        // which starts where the first box's ended.
+        assert_eq!(merged.face_vertex_indices[..24], (0..24).collect::<Vec<_>>());
+        assert_eq!(merged.face_vertex_indices[24..], (24..48).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn merging_nothing_yields_an_empty_mesh() {
+        let merged = merge_meshes(&[]);
+        assert!(merged.points.is_empty() && merged.face_vertex_counts.is_empty());
     }
 
     /// The referenced subtree must show up under the referencing prim in the

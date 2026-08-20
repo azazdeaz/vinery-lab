@@ -9,8 +9,10 @@
 pub mod cube;
 pub mod grid;
 pub mod parcel;
+pub mod strand;
 pub mod terrain;
 pub mod usd;
+pub mod vine;
 
 use bevy::prelude::*;
 
@@ -50,7 +52,7 @@ pub fn plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_plugins((cube::plugin, terrain::plugin, grid::plugin));
+    .add_plugins((cube::plugin, terrain::plugin, grid::plugin, vine::plugin));
 }
 
 /// A plain snapshot of every element's params.
@@ -65,6 +67,7 @@ pub struct VineyardParams {
     pub terrain: terrain::TerrainParams,
     pub grid: grid::GridParams,
     pub parcel: parcel::ParcelParams,
+    pub vine: vine::VineParams,
 }
 
 impl VineyardParams {
@@ -75,6 +78,7 @@ impl VineyardParams {
         world.insert_resource(self.terrain);
         world.insert_resource(self.grid);
         world.insert_resource(self.parcel);
+        world.insert_resource(self.vine);
     }
 }
 
@@ -108,6 +112,38 @@ fn split_mix_64(state: &mut u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// A deterministic stream of floats, for the shape and scatter randomness
+/// elements need beyond picking a variation index.
+///
+/// Same inlined [`split_mix_64`] as the variation picker, for the same
+/// reason: a fixed algorithm is what makes the scene reproducible across
+/// machines and crate versions.
+///
+/// The *draw order* of a stream is part of an element's output. Inserting a
+/// draw in the middle of a build re-rolls everything downstream of it, so
+/// elements document their draw order where a reader would otherwise be
+/// tempted to reorder it.
+pub struct Rng {
+    state: u64,
+}
+
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    /// The next draw, uniform in `0.0..1.0`.
+    pub fn unit(&mut self) -> f64 {
+        // Top 53 bits, the mantissa width of an f64, for a uniform unit float.
+        (split_mix_64(&mut self.state) >> 11) as f64 / (1u64 << 53) as f64
+    }
+
+    /// The next draw, uniform in `lo..hi`.
+    pub fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + self.unit() * (hi - lo)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +167,33 @@ mod tests {
     #[test]
     fn reseeding_changes_the_picks() {
         assert_ne!(variation_indices(1, 64, 4), variation_indices(2, 64, 4));
+    }
+
+    fn draws(seed: u64, n: usize) -> Vec<f64> {
+        let mut rng = Rng::new(seed);
+        (0..n).map(|_| rng.unit()).collect()
+    }
+
+    #[test]
+    fn rng_produces_the_same_stream_for_the_same_seed() {
+        assert_eq!(draws(7, 32), draws(7, 32));
+        assert_ne!(draws(7, 32), draws(8, 32));
+    }
+
+    #[test]
+    fn rng_stays_within_its_range() {
+        let mut rng = Rng::new(3);
+        assert!((0..256).all(|_| (0.0..1.0).contains(&rng.unit())));
+        assert!((0..256).all(|_| (-2.0..5.0).contains(&rng.range(-2.0, 5.0))));
+    }
+
+    /// A stream has to actually spread out, not sit near one value — a
+    /// broken shift or divisor would still pass the range check above.
+    #[test]
+    fn rng_draws_spread_across_the_unit_interval() {
+        let d = draws(11, 512);
+        let mean = d.iter().sum::<f64>() / d.len() as f64;
+        assert!((mean - 0.5).abs() < 0.05, "mean {mean} is near 0.5");
+        assert!(d.iter().any(|v| *v < 0.05) && d.iter().any(|v| *v > 0.95));
     }
 }

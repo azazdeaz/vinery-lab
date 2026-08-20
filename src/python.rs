@@ -14,6 +14,7 @@ use crate::elements::cube::CubeParams;
 use crate::elements::grid::GridParams;
 use crate::elements::parcel::ParcelParams;
 use crate::elements::terrain::TerrainParams;
+use crate::elements::vine::VineParams;
 use crate::generate::generate_stage;
 use usd_bevy::authoring::save_stage_as;
 
@@ -109,6 +110,71 @@ impl ParcelParams {
     }
 }
 
+#[pymethods]
+impl VineParams {
+    #[new]
+    #[pyo3(signature = (
+        variations=4,
+        seed=0,
+        trunk_height=0.9,
+        trunk_radius=0.035,
+        trunk_wobble=0.02,
+        arms=2,
+        cordon_gap=0.15,
+        cordon_radius=0.022,
+        spur_spacing=0.12,
+        spur_length=0.05,
+        roughness=0.14,
+        sides=8,
+        detail=20,
+        miss_rate=0.03,
+        young_rate=0.08,
+        young_scale=0.55,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn py_new(
+        variations: u32,
+        seed: u64,
+        trunk_height: f32,
+        trunk_radius: f32,
+        trunk_wobble: f32,
+        arms: u32,
+        cordon_gap: f32,
+        cordon_radius: f32,
+        spur_spacing: f32,
+        spur_length: f32,
+        roughness: f32,
+        sides: u32,
+        detail: u32,
+        miss_rate: f32,
+        young_rate: f32,
+        young_scale: f32,
+    ) -> Self {
+        Self {
+            variations,
+            seed,
+            trunk_height,
+            trunk_radius,
+            trunk_wobble,
+            arms,
+            cordon_gap,
+            cordon_radius,
+            spur_spacing,
+            spur_length,
+            roughness,
+            sides,
+            detail,
+            miss_rate,
+            young_rate,
+            young_scale,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 /// The full parameter set, one field per element.
 ///
 /// Fragments are held as `Py<T>` rather than by value so attribute access
@@ -121,18 +187,20 @@ pub struct PyVineyardParams {
     pub terrain: Py<TerrainParams>,
     pub grid: Py<GridParams>,
     pub parcel: Py<ParcelParams>,
+    pub vine: Py<VineParams>,
 }
 
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (cube=None, terrain=None, grid=None, parcel=None))]
+    #[pyo3(signature = (cube=None, terrain=None, grid=None, parcel=None, vine=None))]
     fn py_new(
         py: Python<'_>,
         cube: Option<Py<CubeParams>>,
         terrain: Option<Py<TerrainParams>>,
         grid: Option<Py<GridParams>>,
         parcel: Option<Py<ParcelParams>>,
+        vine: Option<Py<VineParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
             cube: match cube {
@@ -150,6 +218,10 @@ impl PyVineyardParams {
             parcel: match parcel {
                 Some(v) => v,
                 None => Py::new(py, ParcelParams::default())?,
+            },
+            vine: match vine {
+                Some(v) => v,
+                None => Py::new(py, VineParams::default())?,
             },
         })
     }
@@ -194,6 +266,7 @@ impl PyVineyardParams {
             terrain: (*self.terrain.borrow(py)).clone(),
             grid: (*self.grid.borrow(py)).clone(),
             parcel: (*self.parcel.borrow(py)).clone(),
+            vine: (*self.vine.borrow(py)).clone(),
         }
     }
 }
@@ -205,5 +278,6 @@ fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<TerrainParams>()?;
     m.add_class::<GridParams>()?;
     m.add_class::<ParcelParams>()?;
+    m.add_class::<VineParams>()?;
     Ok(())
 }

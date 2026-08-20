@@ -46,7 +46,14 @@ Design notes for development.
 ## Elements
 
 The scene is built from **elements** — self-contained producers of USD, one per
-thing that exists in a vineyard (terrain, pole, trunk, vine, leaf, grape, weed).
+thing that exists in a vineyard (terrain, pole, vine, cane, leaf, grape, weed).
+
+Parts are named the way viticulture names them: a vine's **trunk** rises from
+the ground to its **head**, where it turns into one or two **cordons** running
+along the fruiting wire; the short pruning stubs on a cordon are **spurs**, and
+the annual growth off those is **canes** and **shoots**. A vine with one cordon
+is *unilateral*, with two *bilateral*.
+
 Each element is a single file under `src/elements/` holding four items:
 
 ```rust
@@ -88,9 +95,13 @@ the origin. Instances are unaffected; they hang off their instancer.
 **Elements compose by prim path only.** An element that instances another just
 targets its `PROTOTYPE` path and trusts it to exist — no Rust data is passed
 between elements. Placement is computed by whoever does the instancing, in its
-own local space: `vine` decides where leaves sit on a vine, `trunk` where vines
-sit on a trunk, `terrain` where poles and weeds sit on the ground. This nests,
-so `/parts/Trunk` already contains its vines, which already contain their leaves.
+own local space: `cane` decides where leaves sit on a cane, `vine` where canes
+sit on its spurs, `terrain` where poles and weeds sit on the ground. This nests,
+so `/parts/Vine` already contains its canes, which already contain their leaves.
+
+An element may own a *second* subtree when it also places its own prototypes —
+`vine` authors `/parts/Vine` and plants it from `/Vineyard/Vines`. The rule is
+unchanged: nobody else touches either.
 
 **Ordering is a `SystemSet` enum**, chained once in `elements::plugin`, with
 prototype authoring first so the path contract always holds:
@@ -112,7 +123,7 @@ seeded RNG. Rewriting `protoIndices` is an attribute-only edit, so re-rolling
 variations patches the stage without resyncing or recomputing any geometry.
 
 Variety comes from the product of variation counts across nesting levels: all
-instances of `Trunk/Var_0` share one vine arrangement, so upper-level counts
+instances of `Vine/Var_0` share one cane arrangement, so upper-level counts
 matter more than they look.
 
 ### Stage handling

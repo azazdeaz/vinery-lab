@@ -46,9 +46,8 @@ class GridParams:
 class ParcelParams:
     """How vineyard rows are laid out across the terrain.
 
-    Has no effect on the generated USD yet -- there is no element consuming
-    `VineyardLayout` for geometry yet -- but is included in the aggregate for
-    the geometry slice that follows.
+    Consumed by `VineParams`, which plants a vine at every position this
+    solves for, and reads `vine_spacing` to size their cordons.
     """
 
     orientation: float
@@ -71,6 +70,54 @@ class ParcelParams:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class VineParams:
+    """The permanent woody framework of a grapevine.
+
+    A trunk rising to the head, one or two cordons running along the fruiting
+    wire from there, and the spurs pruned back onto them. `arms` is 1 for a
+    unilateral vine or 2 for a bilateral one; how far each cordon reaches is
+    solved from `ParcelParams.vine_spacing` and `cordon_gap` rather than set
+    directly.
+    """
+
+    variations: int
+    seed: int
+    trunk_height: float
+    trunk_radius: float
+    trunk_wobble: float
+    arms: int
+    cordon_gap: float
+    cordon_radius: float
+    spur_spacing: float
+    spur_length: float
+    roughness: float
+    sides: int
+    detail: int
+    miss_rate: float
+    young_rate: float
+    young_scale: float
+
+    def __init__(
+        self,
+        variations: int = 4,
+        seed: int = 0,
+        trunk_height: float = 0.9,
+        trunk_radius: float = 0.035,
+        trunk_wobble: float = 0.02,
+        arms: int = 2,
+        cordon_gap: float = 0.15,
+        cordon_radius: float = 0.022,
+        spur_spacing: float = 0.12,
+        spur_length: float = 0.05,
+        roughness: float = 0.14,
+        sides: int = 8,
+        detail: int = 20,
+        miss_rate: float = 0.03,
+        young_rate: float = 0.08,
+        young_scale: float = 0.55,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 class VineyardParams:
     """The full parameter set, one attribute per element.
 
@@ -84,6 +131,7 @@ class VineyardParams:
     terrain: TerrainParams
     grid: GridParams
     parcel: ParcelParams
+    vine: VineParams
 
     def __init__(
         self,
@@ -91,6 +139,7 @@ class VineyardParams:
         terrain: TerrainParams | None = None,
         grid: GridParams | None = None,
         parcel: ParcelParams | None = None,
+        vine: VineParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
     def generate_usda(self) -> str:
