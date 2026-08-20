@@ -11,6 +11,8 @@ use usd_bevy::UsdPlugin;
 use usd_bevy::authoring::save_stage_as;
 use usd_bevy::live::{LiveStage, LiveStagePlugin};
 
+use crate::elements::parcel;
+
 pub fn run() {
     App::new()
         .add_plugins((
@@ -19,6 +21,11 @@ pub fn run() {
             LiveStagePlugin,
             crate::elements::plugin,
             crate::ui::plugin,
+            // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
+            // headless generation path's `MinimalPlugins` doesn't provide —
+            // see `parcel::debug_plugin`'s docs for why it's kept separate
+            // from `crate::elements::plugin`.
+            parcel::debug_plugin,
         ))
         // `open_stage` must land before the first `PreUpdate`, where the
         // element author systems expect a `LiveStage` to already exist.
@@ -34,9 +41,11 @@ fn open_stage(world: &mut World) -> Result<()> {
 }
 
 fn setup(mut commands: Commands) {
+    // Framed for `TerrainParams::default()`'s 80x50m extent, not the 4x4m
+    // placeholder scale the defaults used before rows landed.
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(4.0, 3.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(70.0, 55.0, 70.0).looking_at(Vec3::ZERO, Vec3::Y),
         AmbientLight {
             brightness: 220.0,
             ..default()
@@ -44,7 +53,7 @@ fn setup(mut commands: Commands) {
     ));
     commands.spawn((
         DirectionalLight::default(),
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(40.0, 80.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 }
 

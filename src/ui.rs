@@ -20,6 +20,7 @@ use bevy::prelude::*;
 
 use crate::elements::cube::ui as cube_ui;
 use crate::elements::grid::ui as grid_ui;
+use crate::elements::parcel::ui as parcel_ui;
 use crate::elements::terrain::ui as terrain_ui;
 
 pub fn plugin(app: &mut App) {
@@ -46,6 +47,7 @@ fn params_panel() -> impl Scene {
             pane_header() Children [ (Text("Vineyard") ThemedText) ],
             pane_body() Children [
                 terrain_ui(),
+                parcel_ui(),
                 grid_ui(),
                 cube_ui(),
             ],

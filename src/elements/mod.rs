@@ -8,6 +8,7 @@
 
 pub mod cube;
 pub mod grid;
+pub mod parcel;
 pub mod terrain;
 pub mod usd;
 
@@ -63,6 +64,7 @@ pub struct VineyardParams {
     pub cube: cube::CubeParams,
     pub terrain: terrain::TerrainParams,
     pub grid: grid::GridParams,
+    pub parcel: parcel::ParcelParams,
 }
 
 impl VineyardParams {
@@ -72,6 +74,7 @@ impl VineyardParams {
         world.insert_resource(self.cube);
         world.insert_resource(self.terrain);
         world.insert_resource(self.grid);
+        world.insert_resource(self.parcel);
     }
 }
 

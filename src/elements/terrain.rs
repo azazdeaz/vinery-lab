@@ -3,6 +3,9 @@
 //! Builds a NURBS surface by lofting through cross sections: `detail`
 //! sections spaced along Y, each a curve over `detail` control points spread
 //! along X at random elevations, then tessellates that surface into a mesh.
+//! The same tessellation also feeds the [`Ground`] resource, a height-field
+//! sampler that [`parcel`](super::parcel) uses to drape row layouts onto the
+//! surface.
 //!
 //! Also owns the scene root (`/Vineyard`, the stage's default prim), so a
 //! consumer referencing the generated layer gets the whole scene. It only
@@ -13,7 +16,7 @@ use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use curvo::prelude::{NurbsCurve3D, NurbsSurface, SurfaceTessellation3D};
+use curvo::prelude::{NurbsSurface, SurfaceTessellation3D};
 use nalgebra::Point4;
 use openusd::schemas::geom::{Xform, Xformable};
 use openusd::sdf;
@@ -21,7 +24,7 @@ use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
 use super::usd::{MeshData, author_mesh, reference_prim};
-use super::{Grow, grid};
+use super::{Grow, grid, parcel};
 
 /// The scene root, and the stage's default prim.
 pub const ROOT: &str = "/Vineyard";
@@ -67,31 +70,46 @@ pub struct TerrainParams {
 impl Default for TerrainParams {
     fn default() -> Self {
         Self {
-            width: 4.0,
-            height: 4.0,
-            max_elevation: 0.5,
+            width: 80.0,
+            height: 50.0,
+            max_elevation: 3.0,
             detail: 6,
         }
     }
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<TerrainParams>().add_systems(
-        PreUpdate,
-        author
-            .in_set(Grow::Terrain)
-            .run_if(resource_changed::<TerrainParams>),
-    );
+    app.init_resource::<TerrainParams>()
+        .init_resource::<Ground>()
+        .init_resource::<parcel::ParcelParams>()
+        .init_resource::<parcel::VineyardLayout>()
+        .add_systems(
+            PreUpdate,
+            (
+                author.run_if(resource_changed::<TerrainParams>),
+                parcel::author.run_if(
+                    resource_changed::<parcel::ParcelParams>.or_else(resource_changed::<Ground>),
+                ),
+            )
+                .chain()
+                .in_set(Grow::Terrain),
+        );
 }
 
-fn author(live: NonSend<LiveStage>, params: Res<TerrainParams>) -> Result<()> {
+fn author(
+    live: NonSend<LiveStage>,
+    params: Res<TerrainParams>,
+    mut ground: ResMut<Ground>,
+) -> Result<()> {
     let stage = &live.stage;
     define_prim(stage, ROOT, "Xform")?;
     stage.set_default_prim("Vineyard")?;
 
     remove_prim(stage, TERRAIN)?;
     define_prim(stage, TERRAIN, "Xform")?;
-    author_mesh(stage, SURFACE, &terrain_mesh(&params)?)?;
+    let (tessellation, divisions) = terrain_tessellation(&params)?;
+    author_mesh(stage, SURFACE, &mesh_data(&tessellation))?;
+    *ground = Ground::from_tessellation(&tessellation, divisions);
 
     // Temporary: nests the grid element's subtree above the highest possible
     // point of the terrain, to exercise composition through a reference. Goes
@@ -102,37 +120,57 @@ fn author(live: NonSend<LiveStage>, params: Res<TerrainParams>) -> Result<()> {
     Ok(())
 }
 
-/// Lofts the terrain surface and tessellates it into a mesh.
-fn terrain_mesh(params: &TerrainParams) -> anyhow::Result<MeshData> {
-    // A curve needs more control points than its degree, and a loft needs at
-    // least two sections, so one span is the floor for both directions.
+/// Builds the terrain surface and tessellates it, returning the tessellation
+/// alongside the (square) division count used to build it — [`Ground`] needs
+/// that count to index back into the point grid.
+///
+/// Built directly via [`NurbsSurface::new`] with one shared, explicit knot
+/// vector in both directions, rather than [`NurbsSurface::try_loft`]'s
+/// per-column chord-length interpolation: `try_loft` derives each column's
+/// fit from the Euclidean distance between its (randomly elevated) points,
+/// so with elevation baked into the lofted curves themselves, different
+/// columns end up fit against slightly different implicit parametrizations
+/// even though they share one knot vector on the resulting surface — which
+/// makes the surface's `x`/`y` only *approximately* separable, undermining
+/// the whole point of [`Ground`]. Every control point's x depends only on
+/// its column index and y only on its row index here (both spread evenly by
+/// construction), so building the grid with one explicit shared knot vector
+/// keeps x and y exactly separable regardless of the random elevation —
+/// see `the_tessellation_grid_is_rectilinear_in_xy` below.
+fn terrain_tessellation(
+    params: &TerrainParams,
+) -> anyhow::Result<(SurfaceTessellation3D<f64>, usize)> {
+    // A curve needs more control points than its degree, and a surface
+    // needs at least two rows/columns, so one span is the floor for both
+    // directions.
     let count = (params.detail as usize).max(2);
     let degree = DEGREE.min(count - 1);
     let knots = clamped_uniform_knots(count, degree);
     let mut elevations = Elevations::new(SEED, params.max_elevation as f64);
+    // Drawn row-by-row (`j` outer, `i` inner) so reseeding keeps assigning
+    // the same draw to the same (i, j) grid cell regardless of how the grid
+    // is later built up.
+    let heights: Vec<f64> = (0..count * count).map(|_| elevations.next()).collect();
 
-    let sections = (0..count)
-        .map(|section| {
-            let y = spread(params.height as f64, section, count);
-            // Homogeneous control points: curvo's 3D curve carries a weight
-            // per point, and an unweighted point is `w = 1`.
-            let control_points = (0..count)
-                .map(|i| {
-                    Point4::new(
-                        spread(params.width as f64, i, count),
-                        y,
-                        elevations.next(),
-                        1.0,
-                    )
+    // control_points[i][j]: column `i` spread along x, row `j` spread along
+    // y — matching curvo's own `[u][v]` control-point layout, so this slots
+    // straight into `NurbsSurface::new` without curvo needing to infer
+    // anything about the grid's shape.
+    let control_points: Vec<Vec<_>> = (0..count)
+        .map(|i| {
+            let x = spread(params.width as f64, i, count);
+            (0..count)
+                .map(|j| {
+                    let y = spread(params.height as f64, j, count);
+                    Point4::new(x, y, heights[j * count + i], 1.0)
                 })
-                .collect();
-            NurbsCurve3D::try_new(degree, control_points, knots.clone())
+                .collect()
         })
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .collect();
 
-    let surface = NurbsSurface::try_loft(&sections, Some(DEGREE))?;
+    let surface = NurbsSurface::new(degree, degree, knots.clone(), knots, control_points);
     let divisions = (count - 1) * TESSELLATION;
-    Ok(mesh_data(&surface.regular_tessellate(divisions, divisions)))
+    Ok((surface.regular_tessellate(divisions, divisions), divisions))
 }
 
 /// Position `i` of `count` evenly spaced across `extent`, centered on 0.
@@ -175,6 +213,94 @@ fn mesh_data(tessellation: &SurfaceTessellation3D<f64>) -> MeshData {
     }
 }
 
+/// The terrain's height field, sampled on a rectilinear XY grid.
+///
+/// `regular_tessellate` lays its points out u-major (`points[iu * m + iv]`),
+/// and because every control point's x comes from [`spread`] over `i` alone
+/// and its y from the section index alone, the loft's x depends only on u
+/// and its y only on v — so the tessellated grid is rectilinear in XY even
+/// though the surface itself is a general NURBS loft. That turns height
+/// lookup into two binary searches and a bilinear blend instead of a NURBS
+/// parameter inversion, and — since it samples the same grid the mesh is
+/// built from — it agrees exactly with the collision geometry at the grid
+/// points.
+///
+/// Rows are drawn in plan view and lifted onto this field afterwards, rather
+/// than following the surface's own parameterization: see
+/// [`parcel`](super::parcel) for where that happens.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct Ground {
+    /// Strictly increasing x coordinates of the grid columns.
+    xs: Vec<f32>,
+    /// Strictly increasing y coordinates of the grid rows.
+    ys: Vec<f32>,
+    /// Heights, indexed `[ix * ys.len() + iy]`.
+    heights: Vec<f32>,
+}
+
+impl Ground {
+    /// Builds the sampler from a tessellation known to have `divs + 1`
+    /// points along each parametric direction, laid out u-major.
+    fn from_tessellation(tessellation: &SurfaceTessellation3D<f64>, divs: usize) -> Self {
+        let n = divs + 1;
+        let points = tessellation.points();
+        if points.len() != n * n {
+            // Defensive: a mismatch here means the u/v layout assumption
+            // above no longer holds, and any grid built from it would just
+            // be wrong. Fall back to "no terrain" rather than sample garbage.
+            return Self::default();
+        }
+        Self {
+            xs: (0..n).map(|iu| points[iu * n].x as f32).collect(),
+            ys: (0..n).map(|iv| points[iv].y as f32).collect(),
+            heights: points.iter().map(|p| p.z as f32).collect(),
+        }
+    }
+
+    /// Height at `(x, y)`, bilinearly interpolated and clamped to the grid
+    /// at the edges. `0.0` if the grid hasn't been built yet.
+    pub fn height(&self, x: f32, y: f32) -> f32 {
+        if self.xs.is_empty() || self.ys.is_empty() {
+            return 0.0;
+        }
+        let (ix0, ix1, tx) = segment(&self.xs, x);
+        let (iy0, iy1, ty) = segment(&self.ys, y);
+        let m = self.ys.len();
+        let at = |ix: usize, iy: usize| self.heights[ix * m + iy];
+        let h0 = at(ix0, iy0).lerp(at(ix0, iy1), ty);
+        let h1 = at(ix1, iy0).lerp(at(ix1, iy1), ty);
+        h0.lerp(h1, tx)
+    }
+
+    /// `p`, lifted from the XY ground plane onto this height field.
+    pub fn lift(&self, p: Vec2) -> Vec3 {
+        p.extend(self.height(p.x, p.y))
+    }
+}
+
+/// Locates `v` within `axis`, returning the bracketing indices and the
+/// interpolation parameter between them (`0.0` at the lower index, `1.0` at
+/// the upper). Clamps `v` to the axis's extent, and degenerates to a single
+/// index pair when the axis has fewer than two entries.
+fn segment(axis: &[f32], v: f32) -> (usize, usize, f32) {
+    let n = axis.len();
+    if n < 2 {
+        return (0, 0, 0.0);
+    }
+    if v <= axis[0] {
+        return (0, 1, 0.0);
+    }
+    if v >= axis[n - 1] {
+        return (n - 2, n - 1, 1.0);
+    }
+    let i = axis
+        .partition_point(|&a| a <= v)
+        .saturating_sub(1)
+        .min(n - 2);
+    let t = (v - axis[i]) / (axis[i + 1] - axis[i]);
+    (i, i + 1, t)
+}
+
 /// The random elevation field, as a stream of heights in `0..=max`.
 ///
 /// Uses the same inlined SplitMix64 as the variation picker (see
@@ -203,9 +329,9 @@ pub fn ui() -> impl Scene {
         Children [
             label_small("Terrain width"),
             (
-                @FeathersSlider { @min: 0.5, @max: 50.0, @value: 4.0 }
-                SliderStep(0.5)
-                SliderPrecision(1)
+                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 80.0 }
+                SliderStep(1.0)
+                SliderPrecision(0)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
                     params.width = change.value;
@@ -213,9 +339,9 @@ pub fn ui() -> impl Scene {
             ),
             label_small("Terrain height"),
             (
-                @FeathersSlider { @min: 0.5, @max: 50.0, @value: 4.0 }
-                SliderStep(0.5)
-                SliderPrecision(1)
+                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 50.0 }
+                SliderStep(1.0)
+                SliderPrecision(0)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
                     params.height = change.value;
@@ -223,9 +349,9 @@ pub fn ui() -> impl Scene {
             ),
             label_small("Max elevation"),
             (
-                @FeathersSlider { @min: 0.0, @max: 5.0, @value: 0.5 }
-                SliderStep(0.05)
-                SliderPrecision(2)
+                @FeathersSlider { @min: 0.0, @max: 15.0, @value: 3.0 }
+                SliderStep(0.1)
+                SliderPrecision(1)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
                     params.max_elevation = change.value;
@@ -253,7 +379,8 @@ mod tests {
     use openusd::sdf::Value;
 
     fn mesh(params: &TerrainParams) -> MeshData {
-        terrain_mesh(params).expect("terrain lofts")
+        let (tessellation, _) = terrain_tessellation(params).expect("terrain lofts");
+        mesh_data(&tessellation)
     }
 
     #[test]
@@ -320,6 +447,107 @@ mod tests {
                 "face {face} normal points up"
             );
         }
+    }
+
+    /// The rectilinear-grid assumption `Ground` relies on: every point in a
+    /// tessellation column shares an x, and every point in a row shares a y.
+    /// If curvo ever laid the loft's u/v out the other way round, this is
+    /// the test that would catch it — `Ground::from_tessellation` would
+    /// otherwise silently sample a transposed field.
+    #[test]
+    fn the_tessellation_grid_is_rectilinear_in_xy() {
+        let (tessellation, divisions) = terrain_tessellation(&TerrainParams {
+            width: 8.0,
+            height: 3.0,
+            max_elevation: 1.5,
+            detail: 5,
+        })
+        .unwrap();
+        let n = divisions + 1;
+        let points = tessellation.points();
+        assert_eq!(points.len(), n * n);
+
+        for iu in 0..n {
+            let x0 = points[iu * n].x;
+            for iv in 1..n {
+                assert!(
+                    (points[iu * n + iv].x - x0).abs() < 1e-9,
+                    "column {iu} shares one x"
+                );
+            }
+        }
+        for iv in 0..n {
+            let y0 = points[iv].y;
+            for iu in 1..n {
+                assert!(
+                    (points[iu * n + iv].y - y0).abs() < 1e-9,
+                    "row {iv} shares one y"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ground_height_matches_the_mesh_at_grid_points() {
+        let params = TerrainParams {
+            width: 8.0,
+            height: 3.0,
+            max_elevation: 1.5,
+            detail: 5,
+        };
+        let (tessellation, divisions) = terrain_tessellation(&params).unwrap();
+        let ground = Ground::from_tessellation(&tessellation, divisions);
+
+        for point in tessellation.points() {
+            let (x, y, z) = (point.x as f32, point.y as f32, point.z as f32);
+            assert!(
+                (ground.height(x, y) - z).abs() < 1e-4,
+                "grid point ({x}, {y}) samples back to its own height"
+            );
+        }
+    }
+
+    /// Exercises the bilinear math directly against a hand-built grid,
+    /// rather than a real terrain's — real elevation is independently random
+    /// per control point, so nothing says a real height field is anywhere
+    /// near linear between two neighbouring grid samples, which is exactly
+    /// what a midpoint check like this needs to hold.
+    #[test]
+    fn ground_height_interpolates_between_grid_points() {
+        let ground = Ground {
+            xs: vec![0.0, 1.0],
+            ys: vec![0.0, 1.0],
+            // (0,0) -> 0.0, (1,0) -> 2.0, (0,1) -> 4.0, (1,1) -> 6.0
+            heights: vec![0.0, 4.0, 2.0, 6.0],
+        };
+
+        assert!((ground.height(0.0, 0.0) - 0.0).abs() < 1e-6);
+        assert!((ground.height(1.0, 0.0) - 2.0).abs() < 1e-6);
+        assert!((ground.height(0.0, 1.0) - 4.0).abs() < 1e-6);
+        assert!((ground.height(1.0, 1.0) - 6.0).abs() < 1e-6);
+        // The center of a bilinear patch is the average of its four corners.
+        assert!((ground.height(0.5, 0.5) - 3.0).abs() < 1e-6);
+        // Halfway along one edge is the average of that edge's two corners.
+        assert!((ground.height(0.5, 0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ground_height_clamps_outside_the_grid() {
+        let params = TerrainParams::default();
+        let (tessellation, divisions) = terrain_tessellation(&params).unwrap();
+        let ground = Ground::from_tessellation(&tessellation, divisions);
+
+        let far_below = ground.height(-1e6, -1e6);
+        let corner = ground.height(
+            (-(params.width as f64) / 2.0) as f32,
+            (-(params.height as f64) / 2.0) as f32,
+        );
+        assert!((far_below - corner).abs() < 1e-3, "clamps to the near edge");
+    }
+
+    #[test]
+    fn an_unbuilt_ground_samples_to_zero() {
+        assert_eq!(Ground::default().height(1.0, 2.0), 0.0);
     }
 
     #[test]
@@ -413,6 +641,7 @@ mod tests {
         let mut world = World::new();
         world.insert_non_send(LiveStage::new(stage.clone()));
         world.insert_resource(TerrainParams::default());
+        world.insert_resource(Ground::default());
         let mut schedule = Schedule::default();
         schedule.add_systems(author);
         schedule.run(&mut world);
