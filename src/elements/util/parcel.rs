@@ -7,20 +7,24 @@
 //! [`VineyardLayout`] resource for later elements (trunk, pole, cover-crop)
 //! to place their geometry against.
 //!
-//! Wired from [`super::terrain`] rather than given its own [`super::Grow`]
-//! slot: it needs the terrain's extent to know what rectangle it's filling,
-//! and terrain already owns the [`super::terrain::Ground`] height field rows
-//! get draped onto, so chaining after `terrain::author` avoids relying on
+//! Wired from [`terrain`] rather than given its own [`Grow`] slot: it needs
+//! the terrain's extent to know what rectangle it's filling, and terrain
+//! already owns the [`Ground`] height field rows get draped onto, so
+//! chaining after `terrain::author` avoids relying on
 //! system-ordering-across-elements for something one element's plugin can
 //! just guarantee directly.
 //!
 //! Rows are solved in plan view (the XY ground plane) and lifted onto
-//! [`super::terrain::Ground`] only when a consumer asks for actual 3D
-//! positions — [`Row::post_positions`] and [`Row::vine_positions`] do that
+//! [`Ground`] only when a consumer asks for actual 3D positions —
+//! [`Row::post_positions`] and [`Row::vine_positions`] do that
 //! lifting. That keeps spacing parameters (`row_spacing`, `vine_spacing`,
 //! ...) exact in plan view rather than measured along the slope; the error
 //! from that simplification stays under 1% below roughly a 15% grade, well
 //! past what this terrain generates.
+//!
+//! [`terrain`]: crate::elements::terrain
+//! [`terrain::plugin`]: crate::elements::terrain::plugin
+//! [`Grow`]: crate::elements::Grow
 
 use bevy::color::palettes::basic::{GRAY, YELLOW};
 use bevy::color::palettes::css::{LIMEGREEN, ORANGE};
@@ -32,7 +36,7 @@ use bevy::ui_widgets::{
     SliderPrecision, SliderStep, ValueChange, checkbox_self_update, slider_self_update,
 };
 
-use super::terrain::{Ground, TerrainParams};
+use crate::elements::terrain::{Ground, TerrainParams};
 
 /// How vineyard rows are laid out across the terrain.
 #[derive(Resource, Clone, Debug)]
@@ -140,9 +144,8 @@ pub struct VineyardLayout {
 }
 
 /// Re-solves [`VineyardLayout`] from `parcel` and `terrain`. Called from
-/// [`super::terrain::plugin`], chained after `terrain::author`; see the
-/// module docs for why it lives there instead of its own [`super::Grow`]
-/// slot.
+/// [`terrain::plugin`], chained after `terrain::author`; see the module docs
+/// for why it lives there instead of its own [`Grow`] slot.
 pub fn author(
     parcel: Res<ParcelParams>,
     terrain: Res<TerrainParams>,

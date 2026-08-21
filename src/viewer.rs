@@ -12,7 +12,7 @@ use usd_bevy::UsdPlugin;
 use usd_bevy::authoring::save_stage_as;
 use usd_bevy::live::{LiveStage, LiveStagePlugin};
 
-use crate::elements::parcel;
+use crate::elements::util::parcel;
 use crate::ui::ParamsPanel;
 
 pub fn run() {

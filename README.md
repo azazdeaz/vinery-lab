@@ -54,7 +54,8 @@ along the fruiting wire; the short pruning stubs on a cordon are **spurs**, and
 the annual growth off those is **canes** and **shoots**. A vine with one cordon
 is *unilateral*, with two *bilateral*.
 
-Each element is a single file under `src/elements/` holding four items:
+Each element is a single file directly under `src/elements/` holding four
+items:
 
 ```rust
 // src/elements/leaf.rs
@@ -80,6 +81,14 @@ pub fn ui() -> impl Scene { /* sliders writing into LeafParams */ }
 
 Adding an element is one new file plus one line in `elements::plugin`.
 
+Everything under `src/elements/` that *isn't* an element lives in
+`src/elements/util/`: the USD authoring plumbing (`usd`), the tube-skinning
+geometry kernel (`strand`), the row-layout solver (`parcel`), the two ways a
+prototype gets put on the ground (`place`), and the pass that walks the layout
+and plants them (`planting`). The dividing line is identity, not file size —
+nothing there corresponds to a thing that exists in a vineyard, so nothing
+there gets a `/parts/<Name>` prototype or a line in `elements::plugin`.
+
 ### Rules
 
 **Each element owns exactly one prim subtree.** Its author fn removes that
@@ -90,18 +99,22 @@ stage's default prim — it never removes it, so sibling elements keep their own
 subtrees under it.
 `/parts` itself belongs to no element — `stage::new_stage` defines it and
 marks it invisible, so prototypes don't render as a pile of stray geometry at
-the origin. Instances are unaffected; they hang off their instancer.
+the origin. Placed instances are unaffected: a reference composes the target's
+own opinions, not the ancestors it happened to sit under, and a `PointInstancer`
+instance hangs off the instancer rather than off `/parts`.
 
 **Elements compose by prim path only.** An element that instances another just
 targets its `PROTOTYPE` path and trusts it to exist — no Rust data is passed
-between elements. Placement is computed by whoever does the instancing, in its
-own local space: `cane` decides where leaves sit on a cane, `vine` where canes
-sit on its spurs, `terrain` where poles and weeds sit on the ground. This nests,
+between elements. Placement is computed by whoever does the placing, in its own
+local space: `cane` decides where leaves sit on a cane, `vine` where canes sit on
+its spurs, `terrain` where vines, poles and weeds sit on the ground. This nests,
 so `/parts/Vine` already contains its canes, which already contain their leaves.
 
-An element may own a *second* subtree when it also places its own prototypes —
-`vine` authors `/parts/Vine` and plants it from `/Vineyard/Vines`. The rule is
-unchanged: nobody else touches either.
+An element may own a *second* subtree when it also places prototypes — `terrain`
+authors `/Vineyard/Terrain` and, through `util::planting`, everything standing on
+it at `/Vineyard/Planting`. The rule is unchanged: nobody else touches either.
+`vine` owns only `/parts/Vine`; it authors shapes and never decides where they
+stand.
 
 **Ordering is a `SystemSet` enum**, chained once in `elements::plugin`, with
 prototype authoring first so the path contract always holds:
@@ -114,13 +127,38 @@ enum Grow { Prototypes, Terrain, Layout, Plants, Scatter, Randomize }
 dirty-tracking mechanism — curvo tessellation is expensive enough that this
 matters. Use `Local` only for private scratch (RNG state, reusable buffers).
 
+### Placement
+
+Two ways, both in `util::place`, taking the same `Placement` list:
+
+`place_referenced` gives every instance **its own prim**, an internal reference
+to the prototype carrying a `translate`/`rotateZ`/`scale` stack. That prim has a
+path, which is what Isaac Lab needs to attach a semantic label, bind a rigid
+body, or randomize one plant — so this is what anything addressable uses (vines,
+posts). The referencing prim is defined with the *prototype's own* type name,
+read off the stage: a reference is a weaker opinion than a local `typeName`, so
+an `Xform` over a `Mesh` prototype composes to an `Xform` carrying stray
+`points` that no renderer draws.
+
+`place_instanced` authors **one** `PointInstancer` holding parallel arrays for
+all of them. No instance has a path, but the stage cost is flat — the only
+workable option for scatter that is never addressed individually (weeds, leaves,
+grapes), where per-instance prims would run to five figures.
+
+Placed prims are named for their *slot*, not their rank: `Row_000/Vine_007` is
+the eighth planting position of the first row whether or not slots before it
+were skipped, so a config keyed on a path doesn't silently repoint when
+`miss_rate` moves.
+
 ### Variations
 
-Every element authors `params.variations` prototypes (`/parts/Leaf/Var_0`, `…`).
-Instancing uses a `PointInstancer` whose `prototypes` relationship lists all of
-them; picking a variation per instance is just filling `protoIndices` from a
-seeded RNG. Rewriting `protoIndices` is an attribute-only edit, so re-rolling
-variations patches the stage without resyncing or recomputing any geometry.
+Every element authors `params.variations` prototypes (`/parts/Leaf/Var_0`, `…`),
+and whoever places them picks one per instance from a seeded RNG. For a
+`PointInstancer` that means filling `protoIndices`, an attribute-only edit, so
+re-rolling patches the stage without resyncing or recomputing any geometry. For
+reference-placed prims it means rewriting `references` metadata, which is a
+composition change and forces a resync of the subtree — the price of every
+instance having a path.
 
 Variety comes from the product of variation counts across nesting levels: all
 instances of `Vine/Var_0` share one cane arrangement, so upper-level counts

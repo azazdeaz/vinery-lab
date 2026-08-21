@@ -24,8 +24,8 @@ class TerrainParams:
 class ParcelParams:
     """How vineyard rows are laid out across the terrain.
 
-    Consumed by `VineParams`, which plants a vine at every position this
-    solves for, and reads `vine_spacing` to size their cordons.
+    Solves the positions `PlantingParams` puts a vine at; `vine_spacing` also
+    sizes the cordons `VineParams` builds.
     """
 
     orientation: float
@@ -56,6 +56,9 @@ class VineParams:
     unilateral vine or 2 for a bilateral one; how far each cordon reaches is
     solved from `ParcelParams.vine_spacing` and `cordon_gap` rather than set
     directly.
+
+    Shape only -- where vines stand, and which ones are missing or young, is
+    `PlantingParams`.
     """
 
     variations: int
@@ -71,9 +74,6 @@ class VineParams:
     roughness: float
     sides: int
     detail: int
-    miss_rate: float
-    young_rate: float
-    young_scale: float
 
     def __init__(
         self,
@@ -90,6 +90,27 @@ class VineParams:
         roughness: float = 0.14,
         sides: int = 8,
         detail: int = 20,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class PlantingParams:
+    """What stands on the ground, and where.
+
+    Each plant is authored as its own prim -- `/Vineyard/Planting/Row_000/
+    Vine_007` -- so a simulator can address one: attach a semantic label, bind
+    a rigid body, randomize it. A name refers to a planting *slot*, so a vine
+    skipped by `miss_rate` leaves a gap in the numbering rather than shifting
+    every name after it.
+    """
+
+    seed: int
+    miss_rate: float
+    young_rate: float
+    young_scale: float
+
+    def __init__(
+        self,
+        seed: int = 0,
         miss_rate: float = 0.03,
         young_rate: float = 0.08,
         young_scale: float = 0.55,
@@ -107,12 +128,14 @@ class VineyardParams:
 
     terrain: TerrainParams
     parcel: ParcelParams
+    planting: PlantingParams
     vine: VineParams
 
     def __init__(
         self,
         terrain: TerrainParams | None = None,
         parcel: ParcelParams | None = None,
+        planting: PlantingParams | None = None,
         vine: VineParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...

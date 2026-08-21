@@ -10,8 +10,9 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::elements::VineyardParams;
-use crate::elements::parcel::ParcelParams;
 use crate::elements::terrain::TerrainParams;
+use crate::elements::util::parcel::ParcelParams;
+use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
 use crate::generate::generate_stage;
 use usd_bevy::authoring::save_stage_as;
@@ -94,9 +95,6 @@ impl VineParams {
         roughness=0.14,
         sides=8,
         detail=20,
-        miss_rate=0.03,
-        young_rate=0.08,
-        young_scale=0.55,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
@@ -113,9 +111,6 @@ impl VineParams {
         roughness: f32,
         sides: u32,
         detail: u32,
-        miss_rate: f32,
-        young_rate: f32,
-        young_scale: f32,
     ) -> Self {
         Self {
             variations,
@@ -131,6 +126,21 @@ impl VineParams {
             roughness,
             sides,
             detail,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+impl PlantingParams {
+    #[new]
+    #[pyo3(signature = (seed=0, miss_rate=0.03, young_rate=0.08, young_scale=0.55))]
+    fn py_new(seed: u64, miss_rate: f32, young_rate: f32, young_scale: f32) -> Self {
+        Self {
+            seed,
             miss_rate,
             young_rate,
             young_scale,
@@ -152,17 +162,19 @@ impl VineParams {
 pub struct PyVineyardParams {
     pub terrain: Py<TerrainParams>,
     pub parcel: Py<ParcelParams>,
+    pub planting: Py<PlantingParams>,
     pub vine: Py<VineParams>,
 }
 
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (terrain=None, parcel=None, vine=None))]
+    #[pyo3(signature = (terrain=None, parcel=None, planting=None, vine=None))]
     fn py_new(
         py: Python<'_>,
         terrain: Option<Py<TerrainParams>>,
         parcel: Option<Py<ParcelParams>>,
+        planting: Option<Py<PlantingParams>>,
         vine: Option<Py<VineParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
@@ -173,6 +185,10 @@ impl PyVineyardParams {
             parcel: match parcel {
                 Some(v) => v,
                 None => Py::new(py, ParcelParams::default())?,
+            },
+            planting: match planting {
+                Some(v) => v,
+                None => Py::new(py, PlantingParams::default())?,
             },
             vine: match vine {
                 Some(v) => v,
@@ -219,6 +235,7 @@ impl PyVineyardParams {
         VineyardParams {
             terrain: (*self.terrain.borrow(py)).clone(),
             parcel: (*self.parcel.borrow(py)).clone(),
+            planting: (*self.planting.borrow(py)).clone(),
             vine: (*self.vine.borrow(py)).clone(),
         }
     }
@@ -229,6 +246,7 @@ fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVineyardParams>()?;
     m.add_class::<TerrainParams>()?;
     m.add_class::<ParcelParams>()?;
+    m.add_class::<PlantingParams>()?;
     m.add_class::<VineParams>()?;
     Ok(())
 }

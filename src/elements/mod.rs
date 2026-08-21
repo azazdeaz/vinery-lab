@@ -5,11 +5,13 @@
 //! of `README.md` for the rules they follow; the short version is that an
 //! element owns exactly one prim subtree, rewrites it from scratch whenever
 //! its params change, and composes with other elements by prim path alone.
+//!
+//! What they are built *from* — authoring plumbing, the geometry kernel, the
+//! layout solver, the placement helpers — lives in [`util`], which holds
+//! everything under this directory that isn't an element.
 
-pub mod parcel;
-pub mod strand;
 pub mod terrain;
-pub mod usd;
+pub mod util;
 pub mod vine;
 
 use bevy::prelude::*;
@@ -62,7 +64,8 @@ pub fn plugin(app: &mut App) {
 #[derive(Clone, Debug, Default)]
 pub struct VineyardParams {
     pub terrain: terrain::TerrainParams,
-    pub parcel: parcel::ParcelParams,
+    pub parcel: util::parcel::ParcelParams,
+    pub planting: util::planting::PlantingParams,
     pub vine: vine::VineParams,
 }
 
@@ -72,6 +75,7 @@ impl VineyardParams {
     pub fn insert(self, world: &mut World) {
         world.insert_resource(self.terrain);
         world.insert_resource(self.parcel);
+        world.insert_resource(self.planting);
         world.insert_resource(self.vine);
     }
 }

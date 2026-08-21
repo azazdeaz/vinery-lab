@@ -18,12 +18,13 @@
 //! tube surface is then stitched directly from a ring per frame.
 //!
 //! Deliberately *not* `try_sweep`/`try_loft` + `regular_tessellate`, which is
-//! how [`terrain`](super::terrain) builds its surface. `try_loft` interpolates
-//! *across* the sections it is given and `regular_tessellate` then re-samples
-//! the result, so the mesh's rings would not be the rings we placed. That is
-//! fine for terrain, whose input is already a smooth field, but here it would
-//! sand off the [`Bark`] ridges — the one detail the whole module exists to
-//! produce. Skinning the rings we computed keeps them exact, and costs less.
+//! how [`terrain`](crate::elements::terrain) builds its surface. `try_loft`
+//! interpolates *across* the sections it is given and `regular_tessellate`
+//! then re-samples the result, so the mesh's rings would not be the rings we
+//! placed. That is fine for terrain, whose input is already a smooth field,
+//! but here it would sand off the [`Bark`] ridges — the one detail the whole
+//! module exists to produce. Skinning the rings we computed keeps them exact,
+//! and costs less.
 //!
 //! [`try_divide_by_count`]: curvo::prelude::NurbsCurve::try_divide_by_count
 //! [`compute_frenet_frames`]: curvo::prelude::NurbsCurve::compute_frenet_frames
@@ -33,7 +34,7 @@ use std::f64::consts::TAU;
 use curvo::prelude::*;
 use nalgebra::Point3;
 
-use super::Rng;
+use crate::elements::Rng;
 use super::usd::MeshData;
 
 /// Degree of the fitted centerline, clamped down when a strand has too few
@@ -348,8 +349,8 @@ fn chord_parameters(points: &[Point3<f64>]) -> Vec<f64> {
 /// `radii` sampled at parameter `t`, linearly between the two control points
 /// bracketing it and clamped past both ends.
 ///
-/// Same bracket-and-lerp shape as [`terrain::segment`](super::terrain), on a
-/// list short enough that a scan beats a binary search.
+/// Same bracket-and-lerp shape as `terrain::segment`, on a list short enough
+/// that a scan beats a binary search.
 fn radius_at(anchors: &[f64], radii: &[f64], t: f64) -> f64 {
     if radii.is_empty() {
         return 0.0;

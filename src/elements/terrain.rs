@@ -11,6 +11,16 @@
 //! consumer referencing the generated layer gets the whole scene. It only
 //! *defines* that root — the subtree it rewrites is `/Vineyard/Terrain`, which
 //! leaves room for sibling elements to place themselves under `/Vineyard`.
+//!
+//! # Two subtrees
+//!
+//! Terrain also owns `/Vineyard/Planting`, through
+//! [`planting`](super::util::planting) — everything standing *on* the ground,
+//! placed against the rows [`parcel`](super::util::parcel) solves. Both
+//! helpers are wired from this element's [`plugin`] rather than given
+//! [`Grow`] slots of their own, because both need the terrain's extent and
+//! the [`Ground`] field, and chaining them here guarantees the ordering that
+//! system-ordering-across-elements would only imply.
 
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
@@ -21,8 +31,9 @@ use nalgebra::Point4;
 use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
-use super::usd::{MeshData, author_mesh};
-use super::{Grow, parcel};
+use super::Grow;
+use super::util::usd::{MeshData, author_mesh};
+use super::util::{parcel, planting};
 
 /// The scene root, and the stage's default prim.
 pub const ROOT: &str = "/Vineyard";
@@ -80,6 +91,7 @@ pub fn plugin(app: &mut App) {
         .init_resource::<Ground>()
         .init_resource::<parcel::ParcelParams>()
         .init_resource::<parcel::VineyardLayout>()
+        .init_resource::<planting::PlantingParams>()
         .add_systems(
             PreUpdate,
             (
@@ -90,6 +102,19 @@ pub fn plugin(app: &mut App) {
             )
                 .chain()
                 .in_set(Grow::Terrain),
+        )
+        // `VineParams` is a coarse trigger: planting reads no vine params, but
+        // it does count the prototypes on the stage, and changing
+        // `variations` is what changes that count. When a second element
+        // needs planting, replace this with a registry the prototype authors
+        // push into.
+        .add_systems(
+            PreUpdate,
+            planting::author.in_set(Grow::Plants).run_if(
+                resource_changed::<planting::PlantingParams>
+                    .or_else(resource_changed::<parcel::VineyardLayout>)
+                    .or_else(resource_changed::<super::vine::VineParams>),
+            ),
         );
 }
 

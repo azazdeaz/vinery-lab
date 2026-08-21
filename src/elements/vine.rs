@@ -30,18 +30,14 @@
 //! it. The placer therefore only ever needs a yaw about Z, and never has to
 //! know which way a strand was authored.
 //!
-//! # Subtrees
+//! # One subtree
 //!
-//! Two, as the README's rules anticipate: the prototype meshes under
-//! [`PROTOTYPE`], and the instancer that plants them under [`PLACEMENT`].
-//! [`PLACEMENT`] is a direct sibling of the terrain's subtree rather than
-//! nested inside it by reference, because [`Row::vine_positions`] already
-//! returns `/Vineyard`-space points and `/Vineyard/Terrain` carries no
-//! transform — nesting would buy nothing and cost plenty. It would have to
-//! move the instancer under `/parts` (a reference target may not be an
-//! ancestor of the referrer), and since our prototypes live under
-//! `/parts/Vine` too, referencing that subtree into the scene would drag the
-//! prototype meshes in with it as a pile of geometry at the origin.
+//! Just the prototype meshes under [`PROTOTYPE`]. This element authors shapes
+//! and nothing else — where vines *stand* is
+//! [`planting`](super::util::planting)'s business, and it finds these
+//! prototypes by path alone. That split is what lets a vine be planted as an
+//! addressable prim, as a `PointInstancer` instance, or nested inside another
+//! prototype, without this module knowing which.
 
 use std::f64::consts::{PI, TAU};
 
@@ -50,25 +46,16 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::{Point3, Vector3};
-use openusd::gf::{self, f16};
-use openusd::schemas::geom::PointInstancer;
-use openusd::sdf::{self, Value};
 use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
-use super::parcel::{ParcelParams, VineyardLayout};
-use super::strand::{Bark, Bulge, Strand, strand_mesh};
-use super::terrain::Ground;
-use super::usd::{author_mesh, merge_meshes};
+use super::util::parcel::ParcelParams;
+use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
+use super::util::usd::{author_mesh, merge_meshes};
 use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` mesh per variation.
 pub const PROTOTYPE: &str = "/parts/Vine";
-
-/// The placed instances. See the module docs for why this is a sibling of the
-/// terrain rather than nested inside it.
-const PLACEMENT: &str = "/Vineyard/Vines";
-const INSTANCER: &str = "/Vineyard/Vines/Rows";
 
 // ─── Shape constants ────────────────────────────────────────────────
 //
@@ -171,14 +158,6 @@ pub struct VineParams {
     /// Rings per meter along each tube. Barely visible at row distance, so
     /// this is the cheaper of the two detail knobs to turn down.
     pub detail: u32,
-    /// Fraction of planting positions left empty. Real vineyards have gaps,
-    /// and a perception model trained without them learns that they can't
-    /// happen.
-    pub miss_rate: f32,
-    /// Fraction of vines that are recent replants rather than mature.
-    pub young_rate: f32,
-    /// How small the youngest replant is, relative to a mature vine.
-    pub young_scale: f32,
 }
 
 impl Default for VineParams {
@@ -197,9 +176,6 @@ impl Default for VineParams {
             roughness: 0.14,
             sides: 8,
             detail: 20,
-            miss_rate: 0.03,
-            young_rate: 0.08,
-            young_scale: 0.55,
         }
     }
 }
@@ -210,13 +186,8 @@ pub fn plugin(app: &mut App) {
     // changes, this element's author systems are what will notice.
     app.init_resource::<VineParams>().add_systems(
         PreUpdate,
-        (
-            author_prototypes.in_set(Grow::Prototypes).run_if(
-                resource_changed::<VineParams>.or_else(resource_changed::<ParcelParams>),
-            ),
-            author_placement.in_set(Grow::Plants).run_if(
-                resource_changed::<VineParams>.or_else(resource_changed::<VineyardLayout>),
-            ),
+        author_prototypes.in_set(Grow::Prototypes).run_if(
+            resource_changed::<VineParams>.or_else(resource_changed::<ParcelParams>),
         ),
     );
 }
@@ -267,7 +238,7 @@ fn graft_bulge(params: &VineParams) -> Bulge {
 ///
 /// Two low-frequency waves with seeded phases, tapered to nothing at both ends
 /// by a `sin(pi f)` bell. Pinning both ends is deliberate: the base is the
-/// planting position the instancer put the vine at, and the head has to stay
+/// planting position the vine was placed at, and the head has to stay
 /// on the axis because the cordons attach there and the placer only rotates
 /// about Z.
 ///
@@ -540,93 +511,6 @@ fn author_prototypes(
     Ok(())
 }
 
-/// Plants the prototypes along the solved rows.
-///
-/// Runs in [`Grow::Plants`], after [`Grow::Terrain`], so the layout and the
-/// ground it is draped on are both current. No `resource_changed::<Ground>`
-/// condition is needed alongside the layout's: `parcel::author` reassigns
-/// [`VineyardLayout`] unconditionally, so it already registers as changed
-/// whenever the ground moved under it.
-fn author_placement(
-    live: NonSend<LiveStage>,
-    params: Res<VineParams>,
-    layout: Res<VineyardLayout>,
-    ground: Res<Ground>,
-) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, PLACEMENT)?;
-    define_prim(stage, PLACEMENT, "Xform")?;
-
-    let variations = params.variations.max(1);
-    let mut rng = Rng::new(params.seed);
-    let mut positions = Vec::new();
-    let mut orientations = Vec::new();
-    let mut scales = Vec::new();
-    let mut proto_indices = Vec::new();
-
-    for row in &layout.rows {
-        let orientation = yaw_about_z(row.direction());
-        for position in row.vine_positions(&ground) {
-            // All three draws happen before the miss test, so the stream stays
-            // aligned no matter which vines are skipped. Rolling them lazily
-            // instead would make every vine past the first change re-roll
-            // whenever `miss_rate` was nudged.
-            let (miss, age, pick) = (rng.unit(), rng.unit(), rng.unit());
-            if miss < params.miss_rate as f64 {
-                continue;
-            }
-            positions.push(gf::vec3f(position.x, position.y, position.z));
-            orientations.push(orientation);
-            let scale = age_scale(&params, age) as f32;
-            scales.push(gf::vec3f(scale, scale, scale));
-            proto_indices.push((pick * variations as f64) as i32 % variations as i32);
-        }
-    }
-
-    let instancer = PointInstancer::define(stage, sdf::path(INSTANCER)?)?;
-    instancer.create_prototypes_rel()?.set_targets(
-        (0..variations)
-            .map(|i| sdf::path(format!("{PROTOTYPE}/Var_{i}")))
-            .collect::<Result<Vec<_>, _>>()?,
-    )?;
-    instancer
-        .create_positions_attr()?
-        .set(Value::Vec3fVec(positions))?;
-    instancer
-        .create_orientations_attr()?
-        .set(Value::QuathVec(orientations))?;
-    instancer.create_scales_attr()?.set(Value::Vec3fVec(scales))?;
-    instancer
-        .create_proto_indices_attr()?
-        .set(Value::IntVec(proto_indices))?;
-    Ok(())
-}
-
-/// A rotation about Z that carries the prototype's local +X onto `direction`.
-///
-/// USD types `orientations` as `quath[]`, so the components are half floats —
-/// about three decimal digits, which is far finer than a row's direction is
-/// ever known to.
-fn yaw_about_z(direction: Vec2) -> gf::Quath {
-    let half = direction.y.atan2(direction.x) * 0.5;
-    let half16 = |v: f32| f16::from_f32(v);
-    gf::quath(half16(half.cos()), half16(0.0), half16(0.0), half16(half.sin()))
-}
-
-/// Uniform scale for a vine whose age draw came out at `age`.
-///
-/// Young vines are shorter *and* thinner, which one uniform scale gives for
-/// free. Ramping across the young band rather than stepping means a replanted
-/// stretch of row shows a spread of ages, not one clone repeated.
-fn age_scale(params: &VineParams, age: f64) -> f64 {
-    let young_rate = params.young_rate as f64;
-    let young_scale = params.young_scale as f64;
-    if young_rate <= 0.0 || age >= young_rate {
-        return 1.0;
-    }
-    young_scale + (1.0 - young_scale) * (age / young_rate)
-}
-
 // ─── UI ─────────────────────────────────────────────────────────────
 
 pub fn ui() -> impl Scene {
@@ -753,36 +637,6 @@ pub fn ui() -> impl Scene {
                     params.variations = change.value.round().max(1.0) as u32;
                 })
             ),
-            label_small("Missing vines"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.3, @value: 0.03 }
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
-                    params.miss_rate = change.value;
-                })
-            ),
-            label_small("Young vines"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.5, @value: 0.08 }
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
-                    params.young_rate = change.value;
-                })
-            ),
-            label_small("Young vine scale"),
-            (
-                @FeathersSlider { @min: 0.2, @max: 1.0, @value: 0.55 }
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
-                    params.young_scale = change.value;
-                })
-            ),
             label_small("Vine seed"),
             (
                 @FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
@@ -807,7 +661,7 @@ mod tests {
     }
 
     /// The prototype's merged mesh, at the default cordon reach.
-    fn prototype(params: &VineParams) -> super::super::usd::MeshData {
+    fn prototype(params: &VineParams) -> crate::elements::util::usd::MeshData {
         let reach =
             cordon_reach(ParcelParams::default().vine_spacing, params.cordon_gap, params.arms)
                 as f64;
@@ -818,7 +672,7 @@ mod tests {
         merge_meshes(&parts)
     }
 
-    fn bounds(mesh: &super::super::usd::MeshData, axis: usize) -> (f32, f32) {
+    fn bounds(mesh: &crate::elements::util::usd::MeshData, axis: usize) -> (f32, f32) {
         mesh.points.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
             (lo.min(p[axis]), hi.max(p[axis]))
         })
@@ -1004,213 +858,5 @@ mod tests {
             !usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_3")),
             "stale prototype removed on re-author"
         );
-    }
-
-    /// The instancer under test, plus the layout it was built from.
-    fn placed(params: VineParams) -> (openusd::usd::Stage, usize) {
-        let vineyard = VineyardParams {
-            vine: params,
-            ..default()
-        };
-        let stage = crate::generate::generate_stage(&vineyard).unwrap();
-        let layout = {
-            let mut app = App::new();
-            app.add_plugins(MinimalPlugins)
-                .add_plugins(crate::elements::plugin);
-            app.world_mut()
-                .insert_non_send(LiveStage::new(crate::stage::new_stage("l.usda").unwrap()));
-            vineyard.clone().insert(app.world_mut());
-            app.finish();
-            app.cleanup();
-            app.update();
-            let world = app.world();
-            let layout = world.resource::<VineyardLayout>();
-            let ground = world.resource::<Ground>();
-            layout
-                .rows
-                .iter()
-                .map(|r| r.vine_positions(ground).count())
-                .sum()
-        };
-        (stage, layout)
-    }
-
-    fn instancer_value(stage: &openusd::usd::Stage, attr: &str) -> Value {
-        let instancer = PointInstancer::get(stage, sdf::path(INSTANCER).unwrap())
-            .unwrap()
-            .expect("the vine instancer is authored");
-        match attr {
-            "positions" => instancer.positions_attr(),
-            "orientations" => instancer.orientations_attr(),
-            "scales" => instancer.scales_attr(),
-            _ => instancer.proto_indices_attr(),
-        }
-        .get::<Value>()
-        .unwrap()
-        .expect("attribute authored")
-    }
-
-    #[test]
-    fn the_vine_instancer_targets_every_prototype() {
-        let (stage, _) = placed(VineParams {
-            variations: 3,
-            ..params()
-        });
-        let targets = PointInstancer::get(&stage, sdf::path(INSTANCER).unwrap())
-            .unwrap()
-            .unwrap()
-            .prototypes_rel()
-            .targets()
-            .unwrap();
-        assert_eq!(targets.len(), 3);
-        assert!(targets.iter().all(|p| p.as_str().starts_with(PROTOTYPE)));
-    }
-
-    #[test]
-    fn the_instancer_places_one_vine_per_planting_position() {
-        let (stage, planted) = placed(VineParams {
-            miss_rate: 0.0,
-            ..params()
-        });
-        assert!(planted > 100, "the default parcel plants a lot of vines");
-        match instancer_value(&stage, "positions") {
-            Value::Vec3fVec(v) => assert_eq!(v.len(), planted),
-            other => panic!("positions not authored: {other:?}"),
-        }
-    }
-
-    /// Strictly fewer vines *and* a subset of the ones that survived the lower
-    /// rate — which only holds because the miss roll is drawn before the skip,
-    /// keeping the stream aligned across settings.
-    #[test]
-    fn raising_the_miss_rate_drops_instances() {
-        let kept = |rate: f32| match instancer_value(
-            &placed(VineParams {
-                miss_rate: rate,
-                ..params()
-            })
-            .0,
-            "positions",
-        ) {
-            Value::Vec3fVec(v) => v
-                .into_iter()
-                .map(|p| (p.x.to_bits(), p.y.to_bits(), p.z.to_bits()))
-                .collect::<Vec<_>>(),
-            other => panic!("{other:?}"),
-        };
-
-        let few = kept(0.05);
-        let many = kept(0.25);
-        assert!(many.len() < few.len(), "{} vs {}", many.len(), few.len());
-        assert!(
-            many.iter().all(|p| few.contains(p)),
-            "raising the rate only removes vines, never moves them"
-        );
-    }
-
-    #[test]
-    fn every_vine_instance_faces_along_its_row() {
-        let mut vineyard = VineyardParams::default();
-        vineyard.parcel.orientation = 30.0;
-        vineyard.vine.miss_rate = 0.0;
-        let stage = crate::generate::generate_stage(&vineyard).unwrap();
-
-        let direction = Vec2::from_angle(30.0_f32.to_radians());
-        match instancer_value(&stage, "orientations") {
-            Value::QuathVec(v) => {
-                assert!(!v.is_empty());
-                for q in v {
-                    // Rotating the prototype's local +X by a yaw-only
-                    // quaternion has to land on the row's own direction.
-                    let quat = Quat::from_xyzw(
-                        q.x.to_f32(),
-                        q.y.to_f32(),
-                        q.z.to_f32(),
-                        q.w.to_f32(),
-                    )
-                    .normalize();
-                    let along = quat * Vec3::X;
-                    assert!(
-                        (along.truncate() - direction).length() < 1e-2,
-                        "cordons run along the row, got {along:?} against {direction:?}"
-                    );
-                }
-            }
-            other => panic!("orientations not authored as quath[]: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn young_vines_are_scaled_down() {
-        let p = params();
-        assert_eq!(age_scale(&p, 0.5), 1.0, "a mature vine is full size");
-        assert!((age_scale(&p, 0.0) - p.young_scale as f64).abs() < 1e-9);
-        assert!(age_scale(&p, 0.04) > p.young_scale as f64);
-
-        let (stage, _) = placed(VineParams {
-            young_rate: 0.3,
-            ..p.clone()
-        });
-        match instancer_value(&stage, "scales") {
-            Value::Vec3fVec(v) => {
-                assert!(v.iter().any(|s| s.x < 0.999), "some vines are young");
-                assert!(
-                    v.iter().all(|s| s.x >= p.young_scale - 1e-6 && s.x <= 1.0 + 1e-6),
-                    "and none outside the age band"
-                );
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[test]
-    fn young_vines_scale_uniformly() {
-        let (stage, _) = placed(params());
-        match instancer_value(&stage, "scales") {
-            Value::Vec3fVec(v) => assert!(
-                v.iter().all(|s| s.x == s.y && s.y == s.z),
-                "a young vine is shorter and thinner by the same factor"
-            ),
-            other => panic!("{other:?}"),
-        }
-    }
-
-    /// Every vine has to sit on the terrain, not float above or sink into it.
-    #[test]
-    fn vines_sit_on_the_ground() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::elements::plugin);
-        app.world_mut()
-            .insert_non_send(LiveStage::new(crate::stage::new_stage("g.usda").unwrap()));
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        let ground = app.world().resource::<Ground>();
-        let layout = app.world().resource::<VineyardLayout>();
-        for row in &layout.rows {
-            for position in row.vine_positions(ground) {
-                assert!(
-                    (position.z - ground.height(position.x, position.y)).abs() < 1e-5,
-                    "a vine's base is on the height field"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn proto_indices_stay_in_range() {
-        let (stage, _) = placed(VineParams {
-            variations: 3,
-            ..params()
-        });
-        match instancer_value(&stage, "protoIndices") {
-            Value::IntVec(v) => {
-                assert!(v.iter().all(|i| (0..3).contains(i)));
-                assert!(v.iter().any(|i| *i != v[0]), "picks actually vary");
-            }
-            other => panic!("{other:?}"),
-        }
     }
 }
