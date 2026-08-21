@@ -6,10 +6,6 @@
 //! shape is and add more where the shape needs resolving; nothing here knows
 //! any botany.
 //!
-//! Not an element in the sense the other modules in this directory are: it
-//! owns no prim subtree, authors no USD and has no params, the same standing
-//! [`parcel`](super::parcel) has.
-//!
 //! # Why the surface is hand-skinned
 //!
 //! curvo builds the *centerline* — [`NurbsCurve3D::interpolate`] fits a curve
