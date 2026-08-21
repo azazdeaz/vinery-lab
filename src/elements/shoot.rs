@@ -332,6 +332,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
+    use crate::elements::util::place::prototype_count;
+    use crate::elements::util::testing::{Authoring, bounds};
 
     fn params() -> ShootParams {
         ShootParams::default()
@@ -339,12 +341,6 @@ mod tests {
 
     fn mesh(params: &ShootParams, seed: u64) -> crate::elements::util::usd::MeshData {
         strand_mesh(&shoot_strand(params, &mut Rng::new(seed))).expect("every shoot skins")
-    }
-
-    fn bounds(mesh: &crate::elements::util::usd::MeshData, axis: usize) -> (f32, f32) {
-        mesh.points.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
-            (lo.min(p[axis]), hi.max(p[axis]))
-        })
     }
 
     /// The whole placement contract: a shoot leaves its bud along +X and ends
@@ -442,44 +438,34 @@ mod tests {
         })
         .unwrap();
 
-        for i in 0..3 {
-            assert!(
-                usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_{i}")),
-                "Var_{i} authored"
-            );
-        }
-        assert!(!usd_bevy::authoring::prim_exists(
-            &stage,
-            &format!("{PROTOTYPE}/Var_3")
-        ));
+        assert_eq!(
+            prototype_count(&stage, PROTOTYPE),
+            3,
+            "three variations authored, and nothing past them"
+        );
     }
 
     /// Re-authoring must not leave prototypes from a larger previous count
     /// behind — the element owns its subtree and clears it first.
     #[test]
     fn shrinking_the_count_drops_stale_prototypes() {
-        let stage = crate::stage::new_stage("shoot.usda").unwrap();
-        let mut world = World::new();
-        world.insert_non_send(LiveStage::new(stage.clone()));
-        world.insert_resource(ShootParams {
-            variations: 4,
-            ..params()
-        });
-        let mut schedule = Schedule::default();
-        schedule.add_systems(author_prototypes);
-        schedule.run(&mut world);
-        assert!(usd_bevy::authoring::prim_exists(
-            &stage,
-            &format!("{PROTOTYPE}/Var_3")
-        ));
+        let mut authoring = Authoring::new("shoot.usda", author_prototypes);
+        authoring
+            .insert(ShootParams {
+                variations: 4,
+                ..params()
+            })
+            .run();
+        assert!(authoring.has(&format!("{PROTOTYPE}/Var_3")));
 
-        world.insert_resource(ShootParams {
-            variations: 2,
-            ..params()
-        });
-        schedule.run(&mut world);
+        authoring
+            .insert(ShootParams {
+                variations: 2,
+                ..params()
+            })
+            .run();
         assert!(
-            !usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_3")),
+            !authoring.has(&format!("{PROTOTYPE}/Var_3")),
             "stale prototype removed on re-author"
         );
     }

@@ -16,6 +16,10 @@
 //! the second for scatter that is only ever looked at in aggregate — weeds,
 //! leaves, grapes — where per-instance prims would run to five figures.
 //!
+//! Anything that could go either way asks [`Style`] instead of choosing, and
+//! [`place`] dispatches. That is what lets the viewer trade addressability for
+//! authoring speed while the export keeps it.
+//!
 //! Nothing here knows about vineyards; the caller decides where instances go.
 
 use bevy::prelude::*;
@@ -26,6 +30,31 @@ use openusd::usd::{Prim, SchemaBase, SchemaKind, Stage};
 use usd_bevy::authoring::define_prim;
 
 use super::usd::reference_prim;
+
+/// Which of the two placement paths an authoring pass takes.
+///
+/// A resource rather than an argument each caller decides for itself, because
+/// it has to be the *same* for every batch in one pass. The combination that
+/// breaks is a `PointInstancer` nested inside a reference-placed prototype:
+/// its `prototypes` relationship targets the library it draws from, which sits
+/// outside the referenced subtree, so the reference's namespace mapping cannot
+/// map it and USD drops it — an instancer keeping every instance and losing
+/// every prototype, drawing nothing, silently. That is the same failure
+/// [`stage::define_parts_library`] guards one level up. One value for the
+/// whole pass makes the combination unreachable.
+///
+/// [`stage::define_parts_library`]: crate::stage
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Style {
+    /// One prim per instance. What a simulator addresses, and the shape the
+    /// generated scene is exported in.
+    #[default]
+    Referenced,
+    /// One `PointInstancer` per batch. What the viewer forces: re-authoring a
+    /// parcel becomes four array writes rather than a prim and three
+    /// attributes per plant.
+    Instanced,
+}
 
 /// One placed instance, in the space of whatever prim it is authored under.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -70,6 +99,41 @@ pub fn prototype_count(stage: &Stage, root: &str) -> usize {
     (0..)
         .take_while(|i| usd_bevy::authoring::prim_exists(stage, &prototype_path(root, *i)))
         .count()
+}
+
+/// Places `placements` under `parent`, by whichever path `style` names.
+///
+/// `group` is the name the `PointInstancer` takes *under* `parent`; it goes
+/// unused when referencing, where every placement carries its own prim name.
+/// Keeping the instancer a child rather than letting it replace `parent` means
+/// the caller's own subtree shape — a `Scope` per row, an `Xform` over a
+/// vine's wood — is the same either way, and only what hangs below it changes.
+#[allow(clippy::too_many_arguments)]
+pub fn place(
+    stage: &Stage,
+    style: Style,
+    parent: &str,
+    group: &str,
+    proto_root: &str,
+    variations: usize,
+    placements: &[(String, Placement)],
+) -> anyhow::Result<()> {
+    match style {
+        Style::Referenced => place_referenced(stage, parent, proto_root, placements),
+        Style::Instanced => {
+            // The names are the referenced path's whole point, and the
+            // instanced path has nowhere to put them: an instance is a row in
+            // four arrays, not a prim.
+            let flat: Vec<Placement> = placements.iter().map(|(_, p)| *p).collect();
+            place_instanced(
+                stage,
+                &format!("{parent}/{group}"),
+                proto_root,
+                variations,
+                &flat,
+            )
+        }
+    }
 }
 
 /// Authors one prim per placement under `parent`, each an internal reference
@@ -177,7 +241,7 @@ fn reference_type(stage: &Stage, target: &str) -> String {
 /// prototype turned out to be, and the typed views (`Xform::get`, `Mesh::get`,
 /// …) each resolve only their own type. `Xformable` needs nothing but the prim
 /// itself, so this supplies exactly that.
-struct Placed(Prim);
+pub(crate) struct Placed(pub(crate) Prim);
 
 impl SchemaBase for Placed {
     const KIND: SchemaKind = SchemaKind::ConcreteTyped;
@@ -502,6 +566,45 @@ mod tests {
             Some(Value::IntVec(v)) => assert_eq!(v, vec![0, 1, 0, 1, 0]),
             other => panic!("protoIndices not authored: {other:?}"),
         }
+    }
+
+    /// The dispatcher's whole contract: same batch, same prototypes, two
+    /// shapes on the stage — a prim each under `parent`, or one instancer
+    /// beside them named `group`.
+    #[test]
+    fn place_switches_between_a_prim_each_and_one_instancer() {
+        let batch = [
+            ("A".to_string(), placement(0.0, 0)),
+            ("B".to_string(), placement(1.0, 1)),
+        ];
+        let author = |style| {
+            let (stage, root) = library();
+            place(&stage, style, "/World", "Batch", root, 2, &batch).unwrap();
+            stage
+        };
+
+        let referenced = author(Style::Referenced);
+        assert!(prim_exists(&referenced, "/World/A") && prim_exists(&referenced, "/World/B"));
+        assert!(
+            !prim_exists(&referenced, "/World/Batch"),
+            "no instancer when every instance is its own prim"
+        );
+
+        let instanced = author(Style::Instanced);
+        assert!(
+            !prim_exists(&instanced, "/World/A") && !prim_exists(&instanced, "/World/B"),
+            "the names are dropped — an instance is a row in four arrays"
+        );
+        let instancer = PointInstancer::get(&instanced, sdf::path("/World/Batch").unwrap())
+            .unwrap()
+            .expect("the batch is one instancer");
+        assert!(
+            matches!(
+                instancer.proto_indices_attr().get::<Value>().unwrap(),
+                Some(Value::IntVec(v)) if v == vec![0, 1]
+            ),
+            "carrying both placements, each still on its own variation"
+        );
     }
 
     /// `orientations` is `quath[]`, so a yaw round-trips through half floats.

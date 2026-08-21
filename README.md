@@ -61,7 +61,7 @@ items:
 // src/elements/leaf.rs
 
 /// The contract other elements rely on: this element guarantees a prototype here.
-pub const PROTOTYPE: &str = "/parts/Leaf";
+pub const PROTOTYPE: &str = "/Vineyard/parts/Leaf";
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all))]
@@ -93,13 +93,14 @@ there gets a `/parts/<Name>` prototype or a line in `elements::plugin`.
 
 **Each element owns exactly one prim subtree.** Its author fn removes that
 subtree and rewrites it from scratch; nothing else is allowed to touch it.
-Prototypes go under `/parts/<Name>`, placed instances under `/Vineyard/...`.
-`terrain` additionally *defines* the scene root `/Vineyard` and declares it the
-stage's default prim — it never removes it, so sibling elements keep their own
-subtrees under it.
-`/parts` itself belongs to no element — `stage::new_stage` defines it and
-marks it invisible, so prototypes don't render as a pile of stray geometry at
-the origin. Placed instances are unaffected: a reference composes the target's
+Prototypes go under `/Vineyard/parts/<Name>`, placed instances under
+`/Vineyard/...`.
+`/Vineyard` and the prototype library both belong to no element —
+`stage::new_stage` defines the scene root, declares it the stage's default prim,
+and defines `/Vineyard/parts` as a `class`, which keeps prototypes out of the
+viewer's traversal so they don't render as a pile of stray geometry at the
+origin. Neither is ever removed, so sibling elements keep their own subtrees
+under the root. Placed instances are unaffected: a reference composes the target's
 own opinions, not the ancestors it happened to sit under, and a `PointInstancer`
 instance hangs off the instancer rather than off `/parts`.
 
@@ -147,6 +148,23 @@ all of them. No instance has a path, but the stage cost is flat — the only
 workable option for scatter that is never addressed individually (weeds, leaves,
 grapes), where per-instance prims would run to five figures.
 
+Anything that could go either way asks `place::Style` and calls `place`, which
+dispatches. It is a resource, defaulting to `Referenced` — the export shape,
+since that is the one Isaac Lab can address. The **viewer forces `Instanced`**:
+nothing there addresses an individual plant, and re-authoring a parcel as four
+arrays per row instead of a prim and three attributes per vine is what a slider
+drag pays for on every frame it moves. Pressing `S` in the viewer still writes
+the export shape — it re-generates the scene headlessly rather than saving the
+stage on screen.
+
+The style has to be **the same for a whole authoring pass**, which is why it is
+a resource and not an argument each caller picks. The combination that breaks is
+a `PointInstancer` nested inside a reference-placed prototype: its `prototypes`
+relationship targets the library it draws from, outside the referenced subtree,
+so the reference's namespace mapping drops it and the instancer keeps every
+instance while losing every prototype — the same silent failure that puts
+`/Vineyard/parts` inside the default prim, one level down.
+
 Placed prims are named for their *slot*, not their rank: `Row_000/Vine_007` is
 the eighth planting position of the first row whether or not slots before it
 were skipped, so a config keyed on a path doesn't silently repoint when
@@ -154,7 +172,8 @@ were skipped, so a config keyed on a path doesn't silently repoint when
 
 ### Variations
 
-Every element authors `params.variations` prototypes (`/parts/Leaf/Var_0`, `…`),
+Every element authors `params.variations` prototypes
+(`/Vineyard/parts/Leaf/Var_0`, `…`),
 and whoever places them picks one per instance from a seeded RNG. For a
 `PointInstancer` that means filling `protoIndices`, an attribute-only edit, so
 re-rolling patches the stage without resyncing or recomputing any geometry. For

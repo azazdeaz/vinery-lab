@@ -504,6 +504,7 @@ fn tube_faces(stations: usize, sides: usize) -> (Vec<i32>, Vec<i32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elements::util::testing::{face_centroid, face_normal, faces};
     use bevy::math::Vec3;
     use std::collections::HashMap;
 
@@ -572,17 +573,10 @@ mod tests {
     #[test]
     fn strand_faces_wind_outward() {
         let mesh = strand_mesh(&upright(8, 6, bark(0.14))).unwrap();
-        let point = |i: i32| Vec3::from(mesh.points[i as usize]);
 
-        let mut cursor = 0usize;
-        for (face, count) in mesh.face_vertex_counts.iter().enumerate() {
-            let corners = &mesh.face_vertex_indices[cursor..cursor + *count as usize];
-            cursor += *count as usize;
-
-            let [a, b, c] = [0, 1, 2].map(|i| point(corners[i]));
-            let normal = (b - a).cross(c - a);
-            let centroid =
-                corners.iter().map(|i| point(*i)).sum::<Vec3>() / corners.len() as f32;
+        for (face, corners) in faces(&mesh).enumerate() {
+            let normal = face_normal(&mesh, corners);
+            let centroid = face_centroid(&mesh, corners);
 
             if face < 5 * 8 {
                 // A side face points away from the axis, which for this
@@ -610,10 +604,7 @@ mod tests {
         let mesh = strand_mesh(&upright(8, 6, bark(0.14))).unwrap();
 
         let mut directed: HashMap<(i32, i32), usize> = HashMap::new();
-        let mut cursor = 0usize;
-        for count in &mesh.face_vertex_counts {
-            let corners = &mesh.face_vertex_indices[cursor..cursor + *count as usize];
-            cursor += *count as usize;
+        for corners in faces(&mesh) {
             for i in 0..corners.len() {
                 let edge = (corners[i], corners[(i + 1) % corners.len()]);
                 *directed.entry(edge).or_default() += 1;

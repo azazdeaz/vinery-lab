@@ -113,6 +113,7 @@ pub fn box_mesh(size: f32) -> MeshData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elements::util::testing::{face_centroid, face_normal, faces};
 
     #[test]
     fn box_mesh_is_a_well_formed_hexahedron() {
@@ -131,16 +132,10 @@ mod tests {
     #[test]
     fn box_mesh_faces_wind_outward() {
         let m = box_mesh(2.0);
-        for face in 0..6 {
-            let [a, b, c] = [0, 1, 2].map(|i| bevy::math::Vec3::from(m.points[face * 4 + i]));
-            let normal = (b - a).cross(c - a);
-            let centroid = (0..4)
-                .map(|i| bevy::math::Vec3::from(m.points[face * 4 + i]))
-                .sum::<bevy::math::Vec3>()
-                / 4.0;
+        for (i, face) in faces(&m).enumerate() {
             assert!(
-                normal.dot(centroid) > 0.0,
-                "face {face} normal points away from the center"
+                face_normal(&m, face).dot(face_centroid(&m, face)) > 0.0,
+                "face {i} normal points away from the center"
             );
         }
     }

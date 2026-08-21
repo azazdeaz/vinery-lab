@@ -41,6 +41,10 @@ pub enum Grow {
 }
 
 pub fn plugin(app: &mut App) {
+    // Defaults to the reference-placed export shape, which is the one a
+    // consumer can address. The viewer overrides it — see `viewer::run`.
+    app.init_resource::<util::place::Style>();
+
     app.configure_sets(
         PreUpdate,
         (
@@ -80,6 +84,22 @@ impl VineyardParams {
         world.insert_resource(self.planting);
         world.insert_resource(self.vine);
         world.insert_resource(self.shoot);
+    }
+
+    /// Reads every element's params resource back out of `world`.
+    ///
+    /// The inverse of [`insert`](Self::insert), for the one caller that has a
+    /// live world and needs a plain snapshot: the viewer's save key, which
+    /// re-generates the scene headlessly rather than saving the stage it is
+    /// previewing.
+    pub fn from_world(world: &World) -> Self {
+        Self {
+            terrain: world.resource::<terrain::TerrainParams>().clone(),
+            parcel: world.resource::<util::parcel::ParcelParams>().clone(),
+            planting: world.resource::<util::planting::PlantingParams>().clone(),
+            vine: world.resource::<vine::VineParams>().clone(),
+            shoot: world.resource::<shoot::ShootParams>().clone(),
+        }
     }
 }
 

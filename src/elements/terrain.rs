@@ -110,7 +110,8 @@ pub fn plugin(app: &mut App) {
             planting::author.in_set(Grow::Plants).run_if(
                 resource_changed::<planting::PlantingParams>
                     .or_else(resource_changed::<parcel::VineyardLayout>)
-                    .or_else(resource_changed::<super::vine::VineParams>),
+                    .or_else(resource_changed::<super::vine::VineParams>)
+                    .or_else(resource_changed::<super::util::place::Style>),
             ),
         );
 }
@@ -384,6 +385,7 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
+    use crate::elements::util::testing::{Authoring, bounds, face_normal, faces};
     use openusd::schemas::geom::{Mesh, PointBased};
     use openusd::sdf::{self, Value};
 
@@ -427,14 +429,9 @@ mod tests {
             detail: 5,
         };
         let m = mesh(&params);
-        let bound = |axis: usize| {
-            m.points.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
-                (lo.min(p[axis]), hi.max(p[axis]))
-            })
-        };
-        let (x0, x1) = bound(0);
-        let (y0, y1) = bound(1);
-        let (z0, z1) = bound(2);
+        let (x0, x1) = bounds(&m, 0);
+        let (y0, y1) = bounds(&m, 1);
+        let (z0, z1) = bounds(&m, 2);
         assert!((x1 - x0 - params.width).abs() < 1e-4, "width {x0}..{x1}");
         assert!((y1 - y0 - params.height).abs() < 1e-4, "height {y0}..{y1}");
         assert!(
@@ -449,12 +446,8 @@ mod tests {
     #[test]
     fn faces_wind_upward() {
         let m = mesh(&TerrainParams::default());
-        for (face, indices) in m.face_vertex_indices.chunks(3).enumerate() {
-            let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(m.points[indices[i] as usize]));
-            assert!(
-                (b - a).cross(c - a).z > 0.0,
-                "face {face} normal points up"
-            );
+        for (i, face) in faces(&m).enumerate() {
+            assert!(face_normal(&m, face).z > 0.0, "face {i} normal points up");
         }
     }
 
@@ -583,22 +576,15 @@ mod tests {
     /// `/Vineyard`: the element owns `/Vineyard/Terrain`, not the root itself.
     #[test]
     fn re_authoring_keeps_the_scene_root_intact() {
-        let stage = crate::stage::new_stage("terrain.usda").unwrap();
-        define_prim(&stage, "/Vineyard/Sibling", "Xform").unwrap();
+        let mut authoring = Authoring::new("terrain.usda", author);
+        define_prim(&authoring.stage, "/Vineyard/Sibling", "Xform").unwrap();
+        authoring
+            .insert(TerrainParams::default())
+            .insert(Ground::default())
+            .run()
+            .run();
 
-        let mut world = World::new();
-        world.insert_non_send(LiveStage::new(stage.clone()));
-        world.insert_resource(TerrainParams::default());
-        world.insert_resource(Ground::default());
-        let mut schedule = Schedule::default();
-        schedule.add_systems(author);
-        schedule.run(&mut world);
-        schedule.run(&mut world);
-
-        assert!(usd_bevy::authoring::prim_exists(
-            &stage,
-            "/Vineyard/Sibling"
-        ));
-        assert!(usd_bevy::authoring::prim_exists(&stage, SURFACE));
+        assert!(authoring.has("/Vineyard/Sibling"));
+        assert!(authoring.has(SURFACE));
     }
 }

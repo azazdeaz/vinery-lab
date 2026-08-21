@@ -25,4 +25,6 @@ pub mod parcel;
 pub mod place;
 pub mod planting;
 pub mod strand;
+#[cfg(test)]
+pub mod testing;
 pub mod usd;

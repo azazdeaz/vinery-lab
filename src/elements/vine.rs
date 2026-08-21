@@ -34,9 +34,10 @@
 //! # One subtree
 //!
 //! The prototype library under [`PROTOTYPE`]. Each `Var_<i>` is an `Xform`
-//! over a single `Wood` mesh — the trunk, cordons and spurs merged — plus one
-//! prim per shoot, each referencing a [`shoot`](super::shoot) prototype. This
-//! element authors shapes and nothing else — where vines *stand* is
+//! over a single `Wood` mesh — the trunk, cordons and spurs merged — plus its
+//! shoots, placed by whichever path [`place::Style`] names: a prim each,
+//! referencing a [`shoot`](super::shoot) prototype, or one [`SHOOTS`]
+//! instancer holding the lot. This element authors shapes and nothing else — where vines *stand* is
 //! [`planting`](super::util::planting)'s business, and it finds these
 //! prototypes by path alone. That split is what lets a vine be planted as an
 //! addressable prim, as a `PointInstancer` instance, or nested inside another
@@ -61,6 +62,11 @@ use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` mesh per variation.
 pub const PROTOTYPE: &str = "/Vineyard/parts/Vine";
+
+/// Name the `PointInstancer` holding a variation's shoots takes, when they are
+/// instanced rather than reference-placed. A variation is an `Xform` over its
+/// `Wood` either way.
+pub const SHOOTS: &str = "Shoots";
 
 // ─── Shape constants ────────────────────────────────────────────────
 //
@@ -240,7 +246,11 @@ pub fn plugin(app: &mut App) {
             .run_if(
                 resource_changed::<VineParams>
                     .or_else(resource_changed::<ParcelParams>)
-                    .or_else(resource_changed::<shoot::ShootParams>),
+                    .or_else(resource_changed::<shoot::ShootParams>)
+                    // Fixed for the life of the app today, so this only ever
+                    // fires on the first frame. It is here so the system stays
+                    // honest if the style ever becomes something you can flip.
+                    .or_else(resource_changed::<place::Style>),
             ),
     );
 }
@@ -675,6 +685,7 @@ fn author_prototypes(
     live: NonSend<LiveStage>,
     params: Res<VineParams>,
     parcel: Res<ParcelParams>,
+    style: Res<place::Style>,
 ) -> Result<()> {
     let stage = &live.stage;
     remove_prim(stage, PROTOTYPE)?;
@@ -707,7 +718,15 @@ fn author_prototypes(
 
         if shoot_variations > 0 {
             let shoots = shoot_placements(&params, &shape.spurs, shoot_variations, seed);
-            place::place_referenced(stage, &variation, shoot::PROTOTYPE, &shoots)?;
+            place::place(
+                stage,
+                *style,
+                &variation,
+                SHOOTS,
+                shoot::PROTOTYPE,
+                shoot_variations,
+                &shoots,
+            )?;
         }
     }
     Ok(())
@@ -867,6 +886,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
+    use crate::elements::util::testing::{self, Authoring, STYLES, bounds};
+    use place::prototype_count;
 
     fn params() -> VineParams {
         VineParams::default()
@@ -883,12 +904,6 @@ mod tests {
             .map(|s| strand_mesh(s).expect("every strand skins"))
             .collect();
         merge_meshes(&parts)
-    }
-
-    fn bounds(mesh: &crate::elements::util::usd::MeshData, axis: usize) -> (f32, f32) {
-        mesh.points.iter().fold((f32::MAX, f32::MIN), |(lo, hi), p| {
-            (lo.min(p[axis]), hi.max(p[axis]))
-        })
     }
 
     #[test]
@@ -1134,36 +1149,68 @@ mod tests {
         assert_eq!(wood(1.8), wood(0.0), "same wood, however many shoots");
     }
 
-    /// Pins the prototype's shape: an `Xform` over one merged wood mesh plus a
-    /// prim per shoot. `place_referenced` reads that type off the stage, so if
-    /// `Var_0` were still a `Mesh` every planted vine would be a `Mesh`
+    /// Pins the prototype's shape: an `Xform` over one merged wood mesh, with
+    /// its shoots below it. `place_referenced` reads that type off the stage,
+    /// so if `Var_0` were still a `Mesh` every planted vine would be a `Mesh`
     /// carrying children no renderer would reach.
+    ///
+    /// The wrapper has to hold whichever way the shoots were placed — the
+    /// instanced style only changes what hangs below it, never that there is
+    /// something to hang.
     #[test]
     fn a_vine_prototype_is_an_xform_over_its_wood_and_its_shoots() {
-        let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        let path =
-            |suffix: &str| openusd::sdf::path(format!("{PROTOTYPE}/Var_0{suffix}")).unwrap();
+        for style in STYLES {
+            let (stage, _) = testing::grown(VineyardParams::default(), style);
+            let path =
+                |suffix: &str| openusd::sdf::path(format!("{PROTOTYPE}/Var_0{suffix}")).unwrap();
 
-        assert!(
-            openusd::schemas::geom::Xform::get(&stage, path(""))
-                .unwrap()
-                .is_some(),
-            "the variation is an Xform, so it can have children"
-        );
-        assert!(
-            openusd::schemas::geom::Mesh::get(&stage, path(""))
-                .unwrap()
-                .is_none(),
-            "and not a Mesh, which would swallow them"
-        );
-        assert!(usd_bevy::authoring::prim_exists(
-            &stage,
-            &format!("{PROTOTYPE}/Var_0/Wood")
-        ));
-        assert!(
-            usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_0/Shoot_00_0")),
-            "the first bud of the first spur pushed a shoot"
-        );
+            assert!(
+                openusd::schemas::geom::Xform::get(&stage, path(""))
+                    .unwrap()
+                    .is_some(),
+                "{style:?}: the variation is an Xform, so it can have children"
+            );
+            assert!(
+                openusd::schemas::geom::Mesh::get(&stage, path(""))
+                    .unwrap()
+                    .is_none(),
+                "{style:?}: and not a Mesh, which would swallow them"
+            );
+            assert!(usd_bevy::authoring::prim_exists(
+                &stage,
+                &format!("{PROTOTYPE}/Var_0/Wood")
+            ));
+
+            match style {
+                place::Style::Referenced => assert!(
+                    usd_bevy::authoring::prim_exists(
+                        &stage,
+                        &format!("{PROTOTYPE}/Var_0/Shoot_00_0")
+                    ),
+                    "the first bud of the first spur pushed a shoot"
+                ),
+                place::Style::Instanced => {
+                    let shoots = openusd::schemas::geom::PointInstancer::get(
+                        &stage,
+                        path(&format!("/{SHOOTS}")),
+                    )
+                    .unwrap()
+                    .expect("the shoots are one instancer, nested inside the prototype");
+                    // Nested instancing is where a `prototypes` relationship
+                    // is most easily lost — see `place::Style`. If these came
+                    // back empty, every previewed vine would grow bare wood.
+                    let targets = shoots.prototypes_rel().targets().unwrap();
+                    assert!(!targets.is_empty());
+                    assert!(
+                        targets
+                            .iter()
+                            .all(|t| usd_bevy::authoring::prim_exists(&stage, t.as_str())),
+                        "the nested instancer names shoot prototypes that exist, got \
+                         {targets:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -1177,45 +1224,36 @@ mod tests {
         })
         .unwrap();
 
-        for i in 0..3 {
-            assert!(
-                usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_{i}")),
-                "Var_{i} authored"
-            );
-        }
-        assert!(!usd_bevy::authoring::prim_exists(
-            &stage,
-            &format!("{PROTOTYPE}/Var_3")
-        ));
+        assert_eq!(
+            prototype_count(&stage, PROTOTYPE),
+            3,
+            "three variations authored, and nothing past them"
+        );
     }
 
     /// Re-authoring must not leave prototypes from a larger previous count
     /// behind — the element owns its subtree and clears it first.
     #[test]
     fn shrinking_the_count_drops_stale_prototypes() {
-        let stage = crate::stage::new_stage("vine.usda").unwrap();
-        let mut world = World::new();
-        world.insert_non_send(LiveStage::new(stage.clone()));
-        world.insert_resource(ParcelParams::default());
-        world.insert_resource(VineParams {
-            variations: 4,
-            ..params()
-        });
-        let mut schedule = Schedule::default();
-        schedule.add_systems(author_prototypes);
-        schedule.run(&mut world);
-        assert!(usd_bevy::authoring::prim_exists(
-            &stage,
-            &format!("{PROTOTYPE}/Var_3")
-        ));
+        let mut authoring = Authoring::new("vine.usda", author_prototypes);
+        authoring
+            .insert(ParcelParams::default())
+            .insert(place::Style::default())
+            .insert(VineParams {
+                variations: 4,
+                ..params()
+            })
+            .run();
+        assert!(authoring.has(&format!("{PROTOTYPE}/Var_3")));
 
-        world.insert_resource(VineParams {
-            variations: 2,
-            ..params()
-        });
-        schedule.run(&mut world);
+        authoring
+            .insert(VineParams {
+                variations: 2,
+                ..params()
+            })
+            .run();
         assert!(
-            !usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_3")),
+            !authoring.has(&format!("{PROTOTYPE}/Var_3")),
             "stale prototype removed on re-author"
         );
     }

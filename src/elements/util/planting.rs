@@ -24,6 +24,12 @@
 //! rather than one per kind, and re-rolling a variation rewrites composition
 //! metadata instead of patching one `protoIndices` array.
 //!
+//! Which is why that is the *export* shape and not the only one. Nothing in
+//! the viewer addresses an individual plant, and those prices are paid again
+//! on every frame a slider moves, so the viewer sets
+//! [`place::Style::Instanced`] and gets one `PointInstancer` per row instead —
+//! see [`place`](super::place). This module authors whichever it is told to.
+//!
 //! # Path stability
 //!
 //! `Row_00/Vine_007` names the *eighth planting slot of the first row*, not
@@ -52,6 +58,10 @@ use super::place::{self, Placement};
 
 /// The subtree this module owns and rewrites from scratch.
 pub const PLANTING: &str = "/Vineyard/Planting";
+
+/// Name the `PointInstancer` holding a row's vines takes, when the vines are
+/// instanced rather than reference-placed. A row is a `Scope` either way.
+pub const VINES: &str = "Vines";
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(
@@ -95,6 +105,7 @@ pub fn author(
     params: Res<PlantingParams>,
     layout: Res<VineyardLayout>,
     ground: Res<Ground>,
+    style: Res<place::Style>,
 ) -> Result<()> {
     let stage = &live.stage;
     remove_prim(stage, PLANTING)?;
@@ -110,7 +121,19 @@ pub fn author(
         // terrain that a single row transform could not follow.
         define_prim(stage, &group, "Scope")?;
         let vines = row_vines(row, &ground, &params, variations, &mut rng);
-        place::place_referenced(stage, &group, vine::PROTOTYPE, &vines)?;
+        // One instancer per row rather than one for the whole planting: the
+        // row grouping survives either way, and eighteen prims is already flat
+        // enough. Collapsing to a single instancer is the next step if it ever
+        // isn't.
+        place::place(
+            stage,
+            *style,
+            &group,
+            VINES,
+            vine::PROTOTYPE,
+            variations,
+            &vines,
+        )?;
     }
     Ok(())
 }
@@ -217,27 +240,10 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use openusd::schemas::geom::{Imageable, Mesh, PointBased, Visibility, Xformable};
+    use crate::elements::util::testing::{self, Instance, STYLES};
+    use openusd::schemas::geom::{Imageable, Mesh, PointBased, Visibility};
     use openusd::sdf::{self, Value};
     use openusd::usd::Stage;
-
-    /// Runs one authoring cycle, handing back the stage together with the app
-    /// it was authored from — tests need the solved [`VineyardLayout`] and
-    /// [`Ground`] to check the placed prims against what they were placed
-    /// from.
-    fn grown(params: VineyardParams) -> (Stage, App) {
-        let stage = crate::stage::new_stage("planting.usda").unwrap();
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::elements::plugin);
-        params.insert(app.world_mut());
-        app.world_mut()
-            .insert_non_send(LiveStage::new(stage.clone()));
-        app.finish();
-        app.cleanup();
-        app.update();
-        (stage, app)
-    }
 
     fn no_misses() -> VineyardParams {
         VineyardParams {
@@ -249,33 +255,20 @@ mod tests {
         }
     }
 
-    /// Every planted prim, as `(path, translate)`.
-    fn planted(stage: &Stage) -> Vec<(String, [f64; 3])> {
-        let mut out = Vec::new();
-        for row in stage.prim(sdf::path(PLANTING).unwrap()).children().unwrap() {
-            for vine in row.children().unwrap() {
-                let path = vine.path().as_str().to_string();
-                let m = Placed(vine).local_to_parent_transform(0.0).unwrap();
-                out.push((path, [m.0[12], m.0[13], m.0[14]]));
-            }
-        }
-        out
+    /// Every planted vine, read back whichever way it was placed.
+    fn planted(stage: &Stage) -> Vec<Instance> {
+        stage
+            .prim(sdf::path(PLANTING).unwrap())
+            .children()
+            .unwrap()
+            .iter()
+            .flat_map(|row| testing::instances(stage, row.path().as_str()))
+            .collect()
     }
-
-    /// A bare `Xformable` view, mirroring the one `place` authors through.
-    struct Placed(openusd::usd::Prim);
-    impl openusd::usd::SchemaBase for Placed {
-        const KIND: openusd::usd::SchemaKind = openusd::usd::SchemaKind::ConcreteTyped;
-        fn prim(&self) -> &openusd::usd::Prim {
-            &self.0
-        }
-    }
-    impl Imageable for Placed {}
-    impl Xformable for Placed {}
 
     #[test]
     fn every_planted_vine_has_its_own_prim_path() {
-        let (stage, _) = grown(no_misses());
+        let (stage, _) = testing::grown(no_misses(), place::Style::Referenced);
         assert!(
             usd_bevy::authoring::prim_exists(&stage, "/Vineyard/Planting/Row_000/Vine_000"),
             "the first slot of the first row is addressable"
@@ -283,6 +276,38 @@ mod tests {
         assert!(
             planted(&stage).len() > 100,
             "the default parcel plants a lot"
+        );
+    }
+
+    /// The trade the viewer takes: no vine has a path any more, and the whole
+    /// row is four arrays on one prim.
+    #[test]
+    fn the_preview_style_authors_one_instancer_per_row() {
+        let (stage, _) = testing::grown(no_misses(), place::Style::Instanced);
+        let row = "/Vineyard/Planting/Row_000";
+
+        assert_eq!(
+            stage
+                .prim(sdf::path(row).unwrap())
+                .type_name()
+                .unwrap()
+                .map(|t| t.to_string())
+                .as_deref(),
+            Some("Scope"),
+            "a row is still a Scope — only what hangs below it changed"
+        );
+        assert!(
+            openusd::schemas::geom::PointInstancer::get(
+                &stage,
+                sdf::path(format!("{row}/{VINES}")).unwrap()
+            )
+            .unwrap()
+            .is_some(),
+            "its vines are one instancer"
+        );
+        assert!(
+            !usd_bevy::authoring::prim_exists(&stage, &format!("{row}/Vine_000")),
+            "and no vine has a prim of its own"
         );
     }
 
@@ -297,7 +322,7 @@ mod tests {
     /// [`a_planted_vine_composes_its_shoots`].
     #[test]
     fn the_referenced_prototype_composes_in() {
-        let (stage, _) = grown(no_misses());
+        let (stage, _) = testing::grown(no_misses(), place::Style::Referenced);
         let mesh = Mesh::get(
             &stage,
             sdf::path("/Vineyard/Planting/Row_000/Vine_000/Wood").unwrap(),
@@ -321,11 +346,12 @@ mod tests {
     /// It is worth its own test because the failure is silent and one-sided —
     /// `/parts/Vine` would look perfect in isolation while every vine actually
     /// standing in the vineyard came out pruned bare. A relationship target
-    /// *would* fail this way (see `stage::define_parts_library`); a reference
-    /// does not, because it composes in the layer stack it was authored in.
+    /// *would* fail this way (see `stage::define_parts_library`, and the
+    /// reason `place::Style` is one value for a whole pass); a reference does
+    /// not, because it composes in the layer stack it was authored in.
     #[test]
     fn a_planted_vine_composes_its_shoots() {
-        let (stage, _) = grown(no_misses());
+        let (stage, _) = testing::grown(no_misses(), place::Style::Referenced);
         let path = "/Vineyard/Planting/Row_000/Vine_000/Shoot_00_0";
 
         assert!(
@@ -351,7 +377,7 @@ mod tests {
     /// If that ever regressed, every vine would vanish from viewer and sim alike.
     #[test]
     fn a_placed_vine_is_concrete_despite_referencing_an_abstract_prototype() {
-        let (stage, _) = grown(no_misses());
+        let (stage, _) = testing::grown(no_misses(), place::Style::Referenced);
         let path = sdf::path("/Vineyard/Planting/Row_000/Vine_000").unwrap();
 
         assert!(
@@ -383,35 +409,47 @@ mod tests {
 
     #[test]
     fn one_vine_is_planted_per_slot_in_the_layout() {
-        let (stage, app) = grown(no_misses());
-        let slots: usize = {
-            let layout = app.world().resource::<VineyardLayout>();
-            let ground = app.world().resource::<Ground>();
-            layout
-                .rows
-                .iter()
-                .map(|r| r.vine_positions(ground).count())
-                .sum()
-        };
-        assert_eq!(planted(&stage).len(), slots);
+        for style in STYLES {
+            let (stage, app) = testing::grown(no_misses(), style);
+            let slots: usize = {
+                let layout = app.world().resource::<VineyardLayout>();
+                let ground = app.world().resource::<Ground>();
+                layout
+                    .rows
+                    .iter()
+                    .map(|r| r.vine_positions(ground).count())
+                    .sum()
+            };
+            assert_eq!(planted(&stage).len(), slots, "{style:?}");
+        }
     }
 
     /// `Vine_007` has to keep meaning "the eighth slot of this row" whatever
     /// the miss rate is, or an Isaac Lab config keyed on a path silently
     /// repoints at a different plant when the rate is nudged.
+    ///
+    /// Referenced only: the instanced path has no names to keep stable, which
+    /// is the whole reason it is not what gets exported.
     #[test]
     fn a_vines_path_names_its_slot_not_its_rank() {
         let at = |rate: f32| {
-            planted(
-                &grown(VineyardParams {
+            let (stage, _) = testing::grown(
+                VineyardParams {
                     planting: PlantingParams {
                         miss_rate: rate,
                         ..default()
                     },
                     ..default()
+                },
+                place::Style::Referenced,
+            );
+            planted(&stage)
+                .into_iter()
+                .map(|v| {
+                    let at = v.position();
+                    (v.name.expect("a reference-placed vine is named"), at)
                 })
-                .0,
-            )
+                .collect::<Vec<_>>()
         };
         let few = at(0.05);
         let many = at(0.25);
@@ -429,13 +467,16 @@ mod tests {
     /// Every vine sits on the terrain, not floating above or sunk into it.
     #[test]
     fn a_planted_vine_sits_on_the_ground() {
-        let (stage, app) = grown(no_misses());
-        let ground = app.world().resource::<Ground>();
-        for (path, [x, y, z]) in planted(&stage) {
-            assert!(
-                (z as f32 - ground.height(x as f32, y as f32)).abs() < 1e-4,
-                "{path} is on the height field"
-            );
+        for style in STYLES {
+            let (stage, app) = testing::grown(no_misses(), style);
+            let ground = app.world().resource::<Ground>();
+            for vine in planted(&stage) {
+                let at = vine.position();
+                assert!(
+                    (at.z - ground.height(at.x, at.y)).abs() < 1e-4,
+                    "{style:?}: {vine:?} is on the height field"
+                );
+            }
         }
     }
 
@@ -446,26 +487,25 @@ mod tests {
     fn every_vine_faces_along_its_row() {
         let mut params = no_misses();
         params.parcel.orientation = 30.0;
-        let (stage, _) = grown(params);
-
         let direction = Vec2::from_angle(30.0_f32.to_radians());
-        let mut checked = 0;
-        for row in stage.prim(sdf::path(PLANTING).unwrap()).children().unwrap() {
-            for vine in row.children().unwrap() {
-                let m = Placed(vine).local_to_parent_transform(0.0).unwrap();
-                // Row-vector convention: the first row of the matrix is where
-                // the prototype's local +X — the axis its cordons run along —
-                // ends up. Normalized, because a young vine's scale is baked
-                // into it and only the direction is under test here.
-                let along = Vec2::new(m.0[0] as f32, m.0[1] as f32).normalize();
+
+        for style in STYLES {
+            let (stage, _) = testing::grown(params.clone(), style);
+            let vines = planted(&stage);
+            assert!(vines.len() > 100, "{style:?}");
+            for vine in vines {
+                // Where the prototype's local +X — the axis its cordons run
+                // along — ends up. Normalized, because a young vine's scale is
+                // baked in and only the direction is under test here.
+                let along = vine.transform.x_axis.truncate().truncate().normalize();
                 assert!(
-                    (along - direction).length() < 1e-3,
-                    "cordons run along the row, got {along:?} against {direction:?}"
+                    // `orientations` is `quath[]`, so the instanced path is
+                    // only good to about three digits.
+                    (along - direction).length() < 1e-2,
+                    "{style:?}: cordons run along the row, got {along:?} against {direction:?}"
                 );
-                checked += 1;
             }
         }
-        assert!(checked > 100);
     }
 
     #[test]
@@ -475,84 +515,62 @@ mod tests {
         assert!((age_scale(&p, 0.0) - p.young_scale as f64).abs() < 1e-9);
         assert!(age_scale(&p, 0.04) > p.young_scale as f64);
 
-        let (stage, _) = grown(VineyardParams {
+        let params = VineyardParams {
             planting: PlantingParams {
                 miss_rate: 0.0,
                 young_rate: 0.3,
                 ..default()
             },
             ..default()
-        });
-        let scales: Vec<[f64; 3]> = stage
-            .prim(sdf::path(PLANTING).unwrap())
-            .children()
-            .unwrap()
-            .iter()
-            .flat_map(|row| row.children().unwrap())
-            .map(|vine| {
-                let m = Placed(vine).local_to_parent_transform(0.0).unwrap();
-                // Diagonal of the linear block: uniform scale, no shear.
-                [m.0[0].hypot(m.0[1]), m.0[4].hypot(m.0[5]), m.0[10]]
-            })
-            .collect();
+        };
+        for style in STYLES {
+            let (stage, _) = testing::grown(params.clone(), style);
+            let scales: Vec<Vec3> = planted(&stage).iter().map(Instance::scale).collect();
 
-        assert!(scales.iter().any(|s| s[0] < 0.999), "some vines are young");
-        for s in &scales {
             assert!(
-                s[0] >= p.young_scale as f64 - 1e-6 && s[0] <= 1.0 + 1e-6,
-                "inside the age band, got {s:?}"
+                scales.iter().any(|s| s.x < 0.999),
+                "{style:?}: some vines are young"
             );
-            assert!(
-                (s[0] - s[1]).abs() < 1e-6 && (s[1] - s[2]).abs() < 1e-6,
-                "a young vine is shorter and thinner by the same factor, got {s:?}"
-            );
+            for s in &scales {
+                assert!(
+                    s.x >= p.young_scale - 1e-6 && s.x <= 1.0 + 1e-6,
+                    "{style:?}: inside the age band, got {s:?}"
+                );
+                assert!(
+                    (s.x - s.y).abs() < 1e-6 && (s.y - s.z).abs() < 1e-6,
+                    "{style:?}: a young vine is shorter and thinner by the same \
+                     factor, got {s:?}"
+                );
+            }
         }
     }
 
-    /// Every vine references a prototype that exists, and the picks actually
-    /// vary across the variations on offer.
+    /// Every vine draws a prototype that exists, and the picks actually vary
+    /// across the variations on offer.
     #[test]
     fn placed_vines_spread_across_the_prototype_library() {
-        let (stage, _) = grown(no_misses());
-        let targets: Vec<String> = stage
-            .prim(sdf::path(PLANTING).unwrap())
-            .children()
-            .unwrap()
-            .iter()
-            .flat_map(|row| row.children().unwrap())
-            .map(|vine| {
-                assert!(
-                    vine.has_composition_arc().unwrap(),
-                    "{} composes a reference",
-                    vine.path().as_str()
-                );
-                // The prim stack names every site contributing an opinion;
-                // for a referencing prim that includes the target it pulled in.
-                vine.prim_stack()
-                    .unwrap()
-                    .into_iter()
-                    .map(|(_, path)| path.as_str().to_string())
-                    .find(|path| path.starts_with(vine::PROTOTYPE))
-                    .expect("the prototype shows up in the prim stack")
-            })
-            .collect();
+        for style in STYLES {
+            let (stage, _) = testing::grown(no_misses(), style);
+            let targets: Vec<String> = planted(&stage).into_iter().map(|v| v.prototype).collect();
 
-        assert!(
-            targets
-                .iter()
-                .all(|t| usd_bevy::authoring::prim_exists(&stage, t))
-        );
-        assert!(
-            targets.iter().any(|t| *t != targets[0]),
-            "picks actually vary"
-        );
+            assert!(
+                targets
+                    .iter()
+                    .all(|t| usd_bevy::authoring::prim_exists(&stage, t)),
+                "{style:?}"
+            );
+            assert!(
+                targets.iter().any(|t| *t != targets[0]),
+                "{style:?}: picks actually vary"
+            );
+        }
     }
 
     /// Planting owns its subtree and rewrites it from scratch, so shrinking
     /// the layout must not leave the rows that no longer exist behind.
     #[test]
     fn re_authoring_drops_rows_that_no_longer_exist() {
-        let (stage, mut app) = grown(no_misses());
+        let (stage, mut app) = testing::grown(no_misses(), place::Style::Referenced);
         let rows = |stage: &Stage| {
             stage
                 .prim(sdf::path(PLANTING).unwrap())

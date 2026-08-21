@@ -48,6 +48,8 @@ pub fn generate_stage(params: &VineyardParams) -> anyhow::Result<Stage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elements::util::place::Style;
+    use crate::elements::util::testing::{self, STYLES};
 
     /// The only export target is robotics simulation (Isaac Lab / ROS,
     /// REP-103 right-handed Z-up), so the generated stage must declare that
@@ -75,17 +77,22 @@ mod tests {
 
     /// The generated stage must be byte-identical across runs for the same
     /// params, so a downstream sim gets a reproducible scene.
+    ///
+    /// Both placement styles, because they reach the stage by different
+    /// routes: a prim and a reference each, or one ordering of four parallel
+    /// arrays.
     #[test]
     fn generation_is_reproducible() {
-        let params = VineyardParams::default();
-        let export = || {
-            generate_stage(&params)
-                .unwrap()
-                .root_layer()
-                .export_to_string()
-                .unwrap()
-        };
-        assert_eq!(export(), export());
+        for style in STYLES {
+            let export = || {
+                testing::grown(VineyardParams::default(), style)
+                    .0
+                    .root_layer()
+                    .export_to_string()
+                    .unwrap()
+            };
+            assert_eq!(export(), export(), "{style:?}");
+        }
     }
 
     #[test]
@@ -125,38 +132,115 @@ mod tests {
     /// rule binds every relationship an element might author later — material
     /// bindings, physics joint bodies, collision groups — not just
     /// `prototypes`.
+    ///
+    /// Run at both placement styles because `place_instanced` authors the only
+    /// relationship on the stage today: reference-placed alone, this walks a
+    /// scene with nothing to check.
     #[test]
     fn no_relationship_target_escapes_the_default_prim() {
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
         let root = crate::stage::ROOT;
         let inside = |p: &str| p == root || p.starts_with(&format!("{root}/"));
 
-        let prims = every_prim(&stage);
+        for style in STYLES {
+            let (stage, _) = testing::grown(VineyardParams::default(), style);
+            let prims = every_prim(&stage);
+            assert!(
+                prims.iter().any(|p| p.as_str() == crate::stage::PARTS),
+                "the walk reaches the abstract prototype library, so a stage whose \
+                 only escaping targets live in there cannot pass by being skipped"
+            );
+
+            let escapes: Vec<String> = prims
+                .iter()
+                .flat_map(|path| stage.prim(path.clone()).relationships().unwrap())
+                .flat_map(|rel| {
+                    let from = rel.path().as_str().to_string();
+                    rel.targets()
+                        .unwrap()
+                        .into_iter()
+                        .map(move |t| (from.clone(), t))
+                })
+                .filter(|(_, target)| !inside(target.as_str()))
+                .map(|(from, target)| format!("{from} -> {}", target.as_str()))
+                .collect();
+
+            assert!(
+                escapes.is_empty(),
+                "{style:?}: these targets would be silently dropped when the \
+                 layer is referenced:\n  {}",
+                escapes.join("\n  ")
+            );
+        }
+    }
+
+    /// The viewer's save key calls this from inside a system of the app it is
+    /// already running, so the nesting has to hold: a second `App` with its own
+    /// `MinimalPlugins` and its own single `update()`, while the outer one is
+    /// mid-schedule.
+    ///
+    /// Worth a test because the two hazards are silent and process-wide —
+    /// re-initialized task pools, and the global `tracing` subscriber
+    /// `MinimalPlugins` is chosen to avoid. And because what comes back has to
+    /// be the *export* shape even though the app it was called from is
+    /// previewing an instanced one.
+    #[test]
+    fn generate_stage_runs_from_inside_a_running_app() {
+        // The exported text rather than the stage, because `Stage` is `!Send`
+        // and cannot be a resource — and because text is what the save key
+        // ultimately puts on disk.
+        #[derive(Resource)]
+        struct Saved(String);
+
+        fn save(world: &mut World) {
+            let params = VineyardParams::from_world(world);
+            let stage = generate_stage(&params).unwrap();
+            let usda = stage.root_layer().export_to_string().unwrap();
+            world.insert_resource(Saved(usda));
+        }
+
+        let previewed = crate::stage::new_stage("outer.usda").unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(crate::elements::plugin)
+            .insert_resource(Style::Instanced)
+            .add_systems(Update, save);
+        app.world_mut()
+            .insert_non_send(LiveStage::new(previewed.clone()));
+        app.finish();
+        app.cleanup();
+        app.update();
+
+        let saved = &app.world().resource::<Saved>().0;
         assert!(
-            prims.iter().any(|p| p.as_str() == crate::stage::PARTS),
-            "the walk reaches the abstract prototype library, so a stage whose \
-             only escaping targets live in there cannot pass by being skipped"
+            saved.contains("\"Vine_000\"") && !saved.contains("PointInstancer"),
+            "what gets written is reference-placed"
         );
-
-        let escapes: Vec<String> = prims
-            .iter()
-            .flat_map(|path| stage.prim(path.clone()).relationships().unwrap())
-            .flat_map(|rel| {
-                let from = rel.path().as_str().to_string();
-                rel.targets()
-                    .unwrap()
-                    .into_iter()
-                    .map(move |t| (from.clone(), t))
-            })
-            .filter(|(_, target)| !inside(target.as_str()))
-            .map(|(from, target)| format!("{from} -> {}", target.as_str()))
-            .collect();
-
         assert!(
-            escapes.is_empty(),
-            "these targets would be silently dropped when the layer is \
-             referenced:\n  {}",
-            escapes.join("\n  ")
+            usd_bevy::authoring::prim_exists(&previewed, "/Vineyard/Planting/Row_000/Vines"),
+            "while the stage on screen stays instanced"
+        );
+    }
+
+    /// The default `generate_stage` gives the export shape, not the viewer's.
+    /// Every vine has to arrive with a prim path of its own, whatever the
+    /// viewer does to go faster.
+    #[test]
+    fn the_generated_scene_is_reference_placed() {
+        assert_eq!(Style::default(), Style::Referenced);
+
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
+        assert!(usd_bevy::authoring::prim_exists(
+            &stage,
+            "/Vineyard/Planting/Row_000/Vine_000"
+        ));
+        assert!(
+            !stage
+                .root_layer()
+                .export_to_string()
+                .unwrap()
+                .contains("PointInstancer"),
+            "nothing an Isaac Lab config could key on is hidden in an array"
         );
     }
 }
+
