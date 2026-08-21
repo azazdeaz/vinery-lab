@@ -8,6 +8,8 @@
 //!   internal references, mesh merging.
 //! - [`strand`] — the geometry kernel that skins a polyline of radii into a
 //!   tube. Knows no botany and authors no USD.
+//! - [`outline`] — the other geometry kernel: reads a shape traced in SVG and
+//!   fills it with triangles. Knows no botany either.
 //! - [`parcel`] — the row-layout solver. Publishes [`parcel::VineyardLayout`]
 //!   and authors nothing.
 //! - [`place`] — the two ways an element's prototypes get put on the ground:
@@ -21,6 +23,7 @@
 //! a thing that exists in a vineyard, so nothing here gets a `/parts/<Name>`
 //! prototype or a line in [`elements::plugin`](super::plugin).
 
+pub mod outline;
 pub mod parcel;
 pub mod place;
 pub mod planting;

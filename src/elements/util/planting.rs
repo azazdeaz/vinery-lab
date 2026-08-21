@@ -338,10 +338,10 @@ mod tests {
         );
     }
 
-    /// The nesting the whole element layout rests on, end to end: a shoot
-    /// prototype is referenced into a vine prototype, and that vine prototype
-    /// is referenced onto the ground. The inner arc has to survive the outer
-    /// one.
+    /// The nesting the whole element layout rests on, end to end: a leaf
+    /// prototype is referenced into a shoot prototype, that shoot into a vine
+    /// prototype, and that vine onto the ground. Every inner arc has to
+    /// survive the outer ones, three deep.
     ///
     /// It is worth its own test because the failure is silent and one-sided —
     /// `/parts/Vine` would look perfect in isolation while every vine actually
@@ -358,7 +358,7 @@ mod tests {
             usd_bevy::authoring::prim_exists(&stage, path),
             "the vine prototype's shoots compose in under the planted vine"
         );
-        let shoot = Mesh::get(&stage, sdf::path(path).unwrap())
+        let shoot = Mesh::get(&stage, sdf::path(format!("{path}/Stem")).unwrap())
             .unwrap()
             .expect("and arrive typed as the Mesh they reference");
         assert!(
@@ -367,6 +367,18 @@ mod tests {
                 Some(Value::Vec3fVec(p)) if !p.is_empty()
             ),
             "with points resolved through both references"
+        );
+
+        // And one level deeper again, which is where a leaf lives.
+        let leaf = Mesh::get(&stage, sdf::path(format!("{path}/Leaf_00")).unwrap())
+            .unwrap()
+            .expect("a leaf composes three references deep");
+        assert!(
+            matches!(
+                leaf.points_attr().get::<Value>().unwrap(),
+                Some(Value::Vec3fVec(p)) if !p.is_empty()
+            ),
+            "with a blade at the end of it"
         );
     }
 

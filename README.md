@@ -6,9 +6,14 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 ## Workflow
  - Start the viewer `cargo run --release`.
  - Edit the scene parameters in the UI.
- - # TODO: Copy the generated Isaac Lab configuration and paste it into your Isaac Lab envionment configuration file.
+ - // TODO: Copy the generated Isaac Lab configuration and paste it into your Isaac Lab envionment configuration file.
  - Run Isaac Lab environment. The provided python wrapper will generate the USD scene,
 
+## Features
+
+## Upcoming features
+ - Add cover crops and weeds.
+ - Flexible shoot simulation with newton-physics.
 
 ## Python bindings
 
@@ -58,36 +63,49 @@ Each element is a single file directly under `src/elements/` holding four
 items:
 
 ```rust
-// src/elements/leaf.rs
+// src/elements/grape.rs
 
 /// The contract other elements rely on: this element guarantees a prototype here.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Leaf";
+pub const PROTOTYPE: &str = "/Vineyard/parts/Grape";
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all))]
-pub struct LeafParams { pub variations: u32, pub length: f32, /* ... */ }
+pub struct GrapeParams { pub variations: u32, pub berry_radius: f32, /* ... */ }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<LeafParams>()
+    app.init_resource::<GrapeParams>()
         .add_systems(PreUpdate, author
             .in_set(Grow::Prototypes)
-            .run_if(resource_changed::<LeafParams>));
+            .run_if(resource_changed::<GrapeParams>));
 }
 
-fn author(live: NonSend<LiveStage>, params: Res<LeafParams>) -> Result<()> { /* ... */ }
+fn author(live: NonSend<LiveStage>, params: Res<GrapeParams>) -> Result<()> { /* ... */ }
 
-pub fn ui() -> impl Scene { /* sliders writing into LeafParams */ }
+pub fn ui() -> impl Scene { /* sliders writing into GrapeParams */ }
 ```
 
 Adding an element is one new file plus one line in `elements::plugin`.
 
 Everything under `src/elements/` that *isn't* an element lives in
 `src/elements/util/`: the USD authoring plumbing (`usd`), the tube-skinning
-geometry kernel (`strand`), the row-layout solver (`parcel`), the two ways a
-prototype gets put on the ground (`place`), and the pass that walks the layout
-and plants them (`planting`). The dividing line is identity, not file size —
-nothing there corresponds to a thing that exists in a vineyard, so nothing
-there gets a `/parts/<Name>` prototype or a line in `elements::plugin`.
+geometry kernel (`strand`), the one that fills a shape traced in SVG
+(`outline`), the row-layout solver (`parcel`), the two ways a prototype gets
+put on the ground (`place`), and the pass that walks the layout and plants them
+(`planting`). The dividing line is identity, not file size — nothing there
+corresponds to a thing that exists in a vineyard, so nothing there gets a
+`/parts/<Name>` prototype or a line in `elements::plugin`.
+
+### Drawn shapes
+
+Some shapes are cheaper to draw than to generate. A leaf blade is one, so
+`assets/leaves/*.svg` holds one traced outline per leaf shape and
+`util::outline` turns each into a filled mesh. A file holds one closed shape,
+standing up the page and hanging by the point it attaches at — the bottom of
+the drawing; nothing else about it matters, since its own scale is normalized
+away and every transform in it is resolved on load. Outlines are pulled in
+with `include_str!` rather than read at run time, because the crate also ships
+as a Python extension module inside a wheel, where `assets/` is not there to
+read.
 
 ### Rules
 
@@ -107,11 +125,17 @@ instance hangs off the instancer rather than off `/parts`.
 **Elements compose by prim path only.** An element that instances another just
 targets its `PROTOTYPE` path and trusts it to exist — no Rust data is passed
 between elements. Placement is computed by whoever does the placing, in its own
-local space: `vine` decides where shoots sit on its spurs, `shoot` will decide
-where leaves sit on a shoot, `terrain` where vines, poles and weeds sit on the
-ground. This nests, so `/parts/Vine` already contains its shoots, which will in
-turn contain their leaves — which is why a prototype is an `Xform` over its own
-mesh rather than a bare `Mesh` as soon as anything grows on it.
+local space: `vine` decides where shoots sit on its spurs, `shoot` where leaves
+sit on a shoot, `terrain` where vines, poles and weeds sit on the ground. This
+nests, so `/parts/Vine` contains its shoots and each of those contains its
+leaves — which is why a prototype is an `Xform` over its own mesh rather than a
+bare `Mesh` as soon as anything grows on it.
+
+Nesting is also what keeps the canopy affordable. A leaf is placed inside a
+*shoot prototype*, so a vineyard's worth of leaves costs a few dozen placements
+on the stage rather than one per leaf. The trade is that every instance of a
+given shoot variation carries an identical canopy, which is the usual variation
+arithmetic below.
 
 An element may own a *second* subtree when it also places prototypes — `terrain`
 authors `/Vineyard/Terrain` and, through `util::planting`, everything standing on

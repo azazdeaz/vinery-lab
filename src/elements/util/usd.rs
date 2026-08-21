@@ -21,12 +21,13 @@ pub struct MeshData {
     pub face_vertex_indices: Vec<i32>,
 }
 
-/// Authors `mesh` as a `UsdGeom.Mesh` at `path`.
+/// Authors `mesh` as a `UsdGeom.Mesh` at `path`, and hands the prim back for
+/// the callers that have something else to say about it.
 ///
 /// Normals are left unauthored on purpose: `usd_bevy` falls back to smooth
 /// normals, which is right for organic geometry and — for a mesh whose faces
 /// don't share vertices — degenerates to flat shading anyway.
-pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result<()> {
+pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result<Mesh> {
     let prim = Mesh::define(stage, openusd::sdf::path(path)?)?;
     prim.create_points_attr()?.set(Value::Vec3fVec(
         mesh.points.iter().copied().map(Into::into).collect(),
@@ -35,7 +36,7 @@ pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result
         .set(Value::IntVec(mesh.face_vertex_counts.clone()))?;
     prim.create_face_vertex_indices_attr()?
         .set(Value::IntVec(mesh.face_vertex_indices.clone()))?;
-    Ok(())
+    Ok(prim)
 }
 
 /// Makes the prim at `path` an internal reference to `target`: the whole

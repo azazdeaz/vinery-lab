@@ -152,7 +152,7 @@ def design_scene() -> tuple[dict, list[list[float]]]:
         # "unitree_go2": unitree_go2,
         # "spot": spot,
     }
-    return scene_entities, origins, layer
+    return scene_entities, origins
 
 
 def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articulation], origins: torch.Tensor):
@@ -223,7 +223,7 @@ def main():
     # Set main camera
     sim.set_camera_view(eye=[2.5, 2.5, 2.5], target=[0.0, 0.0, 0.0])
     # design scene
-    scene_entities, scene_origins, _layer = design_scene()
+    scene_entities, scene_origins = design_scene()
     scene_origins = torch.tensor(scene_origins, device=sim.device)
     # Play the simulator
     sim.reset()

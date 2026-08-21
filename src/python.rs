@@ -10,6 +10,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::elements::VineyardParams;
+use crate::elements::leaf::LeafParams;
 use crate::elements::shoot::ShootParams;
 use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
@@ -159,6 +160,7 @@ impl PlantingParams {
 #[pymethods]
 impl ShootParams {
     #[new]
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         variations=4,
         seed=0,
@@ -167,6 +169,8 @@ impl ShootParams {
         lean=0.06,
         sides=6,
         detail=40,
+        internode=0.07,
+        leaf_droop=0.35,
     ))]
     fn py_new(
         variations: u32,
@@ -176,6 +180,8 @@ impl ShootParams {
         lean: f32,
         sides: u32,
         detail: u32,
+        internode: f32,
+        leaf_droop: f32,
     ) -> Self {
         Self {
             variations,
@@ -185,7 +191,22 @@ impl ShootParams {
             lean,
             sides,
             detail,
+            internode,
+            leaf_droop,
         }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+impl LeafParams {
+    #[new]
+    #[pyo3(signature = (detail=120))]
+    fn py_new(detail: u32) -> Self {
+        Self { detail }
     }
 
     fn __repr__(&self) -> String {
@@ -206,12 +227,13 @@ pub struct PyVineyardParams {
     pub planting: Py<PlantingParams>,
     pub vine: Py<VineParams>,
     pub shoot: Py<ShootParams>,
+    pub leaf: Py<LeafParams>,
 }
 
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (terrain=None, parcel=None, planting=None, vine=None, shoot=None))]
+    #[pyo3(signature = (terrain=None, parcel=None, planting=None, vine=None, shoot=None, leaf=None))]
     fn py_new(
         py: Python<'_>,
         terrain: Option<Py<TerrainParams>>,
@@ -219,6 +241,7 @@ impl PyVineyardParams {
         planting: Option<Py<PlantingParams>>,
         vine: Option<Py<VineParams>>,
         shoot: Option<Py<ShootParams>>,
+        leaf: Option<Py<LeafParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
             terrain: match terrain {
@@ -240,6 +263,10 @@ impl PyVineyardParams {
             shoot: match shoot {
                 Some(v) => v,
                 None => Py::new(py, ShootParams::default())?,
+            },
+            leaf: match leaf {
+                Some(v) => v,
+                None => Py::new(py, LeafParams::default())?,
             },
         })
     }
@@ -285,6 +312,7 @@ impl PyVineyardParams {
             planting: (*self.planting.borrow(py)).clone(),
             vine: (*self.vine.borrow(py)).clone(),
             shoot: (*self.shoot.borrow(py)).clone(),
+            leaf: (*self.leaf.borrow(py)).clone(),
         }
     }
 }
@@ -297,5 +325,6 @@ fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PlantingParams>()?;
     m.add_class::<VineParams>()?;
     m.add_class::<ShootParams>()?;
+    m.add_class::<LeafParams>()?;
     Ok(())
 }

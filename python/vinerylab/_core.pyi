@@ -106,6 +106,14 @@ class ShootParams:
     `detail` is high compared to the rest of the scene because a shoot turns a
     quarter circle within a few centimeters of its bud, and it is cheap
     because a shoot is a shared prototype.
+
+    A shoot also carries the canopy, so the two leaf knobs live here rather
+    than on `LeafParams` -- how many leaves a shoot holds and how they hang is
+    a fact about the shoot, the way `VineParams.shoots_per_spur` is a fact
+    about the vine. `internode` is the spacing between leaf nodes up the
+    shoot; setting it to 0 leaves the shoot bare. Leaf *size* is not set
+    anywhere: it comes out of each leaf's age, as a scale on a prototype of
+    fixed area.
     """
 
     variations: int
@@ -115,6 +123,8 @@ class ShootParams:
     lean: float
     sides: int
     detail: int
+    internode: float
+    leaf_droop: float
 
     def __init__(
         self,
@@ -125,6 +135,36 @@ class ShootParams:
         lean: float = 0.06,
         sides: int = 6,
         detail: int = 40,
+        internode: float = 0.07,
+        leaf_droop: float = 0.35,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class LeafParams:
+    """One blade of the canopy.
+
+    The five blade shapes are *drawn*, not generated -- one SVG outline each
+    under `assets/leaves/`, embedded at build time -- so there is no
+    `variations` or `seed` here the way there is on `VineParams` and
+    `ShootParams`. There are exactly as many variations as there are files.
+
+    Size is not a parameter: every prototype is built at exactly the same
+    area, one full-grown leaf of about 150 cm^2. That is what lets a leaf's
+    size be set purely by the scale it is placed at -- a younger or shadier
+    leaf is the same prototype scaled down, and the scale means the same thing
+    whichever of the five shapes came up.
+
+    `detail` is how many triangles the blade's interior is cut into; the drawn
+    margin costs about 180 on its own whatever it is set to.
+
+    Where leaves hang, and how big each one ends up, is `ShootParams`.
+    """
+
+    detail: int
+
+    def __init__(
+        self,
+        detail: int = 120,
     ) -> None: ...
     def __repr__(self) -> str: ...
 
@@ -166,6 +206,7 @@ class VineyardParams:
     planting: PlantingParams
     vine: VineParams
     shoot: ShootParams
+    leaf: LeafParams
 
     def __init__(
         self,
@@ -174,6 +215,7 @@ class VineyardParams:
         planting: PlantingParams | None = None,
         vine: VineParams | None = None,
         shoot: ShootParams | None = None,
+        leaf: LeafParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
     def generate_usda(self) -> str:

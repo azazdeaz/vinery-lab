@@ -73,6 +73,11 @@ pub struct Placement {
     /// handful of prototypes are used over and over within a single parent —
     /// the shoots on a vine's spurs are a dozen copies of four meshes, and a
     /// per-instance lean is what stops them reading as clones.
+    ///
+    /// Small is how a lean uses it, not a limit: the composition is a full
+    /// `Rz·Ry·Rx`, and the leaves on a shoot spend all three axes outright —
+    /// a bearing round the stem, a droop of twenty-odd degrees, and a twist
+    /// about the blade's own length.
     pub tilt: Vec2,
     /// Uniform scale. Uniform rather than per-axis because the thing it
     /// expresses is age — a young plant is shorter *and* thinner.

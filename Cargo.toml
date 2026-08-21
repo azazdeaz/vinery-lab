@@ -27,6 +27,10 @@ curvo = "0.1.91"
 # API takes and returns nalgebra types.
 nalgebra = "0.35"
 bevy_panorbit_camera = "0.35.0"
+spade = "2.15.1"
+# Only the geometry front-end is wanted: default features pull in text
+# shaping and a system font database, and an outline has no text in it.
+usvg = { version = "0.48.1", default-features = false }
 
 [features]
 # Compiles the PyO3 wrapper code (src/python.rs). Safe to enable for normal
