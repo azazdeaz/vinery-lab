@@ -7,10 +7,10 @@
 //! sampler that [`parcel`](super::parcel) uses to drape row layouts onto the
 //! surface.
 //!
-//! Also owns the scene root (`/Vineyard`, the stage's default prim), so a
-//! consumer referencing the generated layer gets the whole scene. It only
-//! *defines* that root — the subtree it rewrites is `/Vineyard/Terrain`, which
-//! leaves room for sibling elements to place themselves under `/Vineyard`.
+//! The scene root `/Vineyard` is not this element's to define —
+//! [`crate::stage::new_stage`] authors it, along with the default prim it
+//! becomes. This element only rewrites subtrees beneath it, which leaves room
+//! for sibling elements to place themselves under `/Vineyard` too.
 //!
 //! # Two subtrees
 //!
@@ -34,9 +34,6 @@ use usd_bevy::live::LiveStage;
 use super::Grow;
 use super::util::usd::{MeshData, author_mesh};
 use super::util::{parcel, planting};
-
-/// The scene root, and the stage's default prim.
-pub const ROOT: &str = "/Vineyard";
 
 /// The subtree this element owns and rewrites from scratch.
 pub const TERRAIN: &str = "/Vineyard/Terrain";
@@ -124,9 +121,6 @@ fn author(
     mut ground: ResMut<Ground>,
 ) -> Result<()> {
     let stage = &live.stage;
-    define_prim(stage, ROOT, "Xform")?;
-    stage.set_default_prim("Vineyard")?;
-
     remove_prim(stage, TERRAIN)?;
     define_prim(stage, TERRAIN, "Xform")?;
     let (tessellation, divisions) = terrain_tessellation(&params)?;
@@ -566,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn authors_the_scene_root_and_its_default_prim() {
+    fn authors_the_terrain_surface_under_the_scene_root() {
         let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
         let usda = stage.root_layer().export_to_string().unwrap();
 
@@ -586,8 +580,7 @@ mod tests {
     }
 
     /// Re-authoring the terrain must not disturb the sibling subtrees under
-    /// `/Vineyard`: the element defines the scene root but only owns
-    /// `/Vineyard/Terrain`.
+    /// `/Vineyard`: the element owns `/Vineyard/Terrain`, not the root itself.
     #[test]
     fn re_authoring_keeps_the_scene_root_intact() {
         let stage = crate::stage::new_stage("terrain.usda").unwrap();

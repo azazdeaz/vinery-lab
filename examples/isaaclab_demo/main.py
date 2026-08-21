@@ -51,6 +51,27 @@ from isaaclab_assets.robots.spot import SPOT_CFG  # isort:skip
 from isaaclab_assets.robots.unitree import UNITREE_A1_CFG, UNITREE_GO1_CFG, UNITREE_GO2_CFG  # isort:skip
 
 
+# Anonymous layers live only as long as something holds them: drop the last
+# reference and the composition the stage depends on goes with it. Keeping them
+# here pins them for the process lifetime.
+#
+# The generated scene is self-contained under its default prim `/Vineyard` --
+# the prototype library included -- so a plain reference brings in the whole
+# thing. That is what makes it placeable under `/World`, and clonable per env.
+# Composition arcs may cross the default prim boundary; relationship targets
+# (a PointInstancer's `prototypes`, a material binding) may not, and are
+# silently dropped if they do.
+_LAYERS: list[Sdf.Layer] = []
+
+
+def _vineyard_layer(usda: str) -> Sdf.Layer:
+    """The generated USDA as a layer, kept alive for the process lifetime."""
+    layer = Sdf.Layer.CreateAnonymous(".usda")
+    layer.ImportFromString(usda)
+    _LAYERS.append(layer)
+    return layer
+
+
 def define_origins(num_origins: int, spacing: float) -> list[list[float]]:
     """Defines the origins of the scene."""
     # create tensor based on number of environments
@@ -85,18 +106,9 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     p = VineyardParams()
     usda = p.generate_usda()
 
-    print("________________________________________")
-    print(usda)
-    print("________________________________________")
-
     stage = sim_utils.get_current_stage()
-    layer = Sdf.Layer.CreateAnonymous(".usda")
-    layer.ImportFromString(usda)  # or copy from another Usd.Stage
-    root = stage.GetRootLayer()
-    Sdf.CopySpec(layer, "/parts", root, "/parts")
-    Sdf.CopySpec(layer, "/Vineyard", root, "/World/Vineyard")
-    # prim = stage.DefinePrim("/World/Asset", "Xform")
-    # prim.GetReferences().AddReference(layer.identifier)
+    prim = stage.DefinePrim("/World/Vineyard", "Xform")
+    prim.GetReferences().AddReference(_vineyard_layer(usda).identifier)
     # -- Robot
     # anymal_b = Articulation(ANYMAL_B_CFG.replace(prim_path="/World/Origin1/Robot"))
 

@@ -306,25 +306,35 @@ mod tests {
         );
     }
 
-    /// `stage::new_stage` marks `/parts` invisible so prototypes don't render
-    /// as a pile at the origin. A reference composes the target's own opinions,
-    /// not the ancestors it happened to sit under — so a placed vine must come
-    /// out visible, inheriting from `/Vineyard` instead.
+    /// `stage::new_stage` makes the prototype library a `class` so it stays out
+    /// of the viewer's traversal. A placed vine references a prototype from
+    /// inside that class, and must not pick up its abstractness: `place_referenced`
+    /// authors its own `def` first, and the local specifier is what composes.
+    /// If that ever regressed, every vine would vanish from viewer and sim alike.
     #[test]
-    fn a_placed_vine_does_not_inherit_the_prototype_librarys_invisibility() {
+    fn a_placed_vine_is_concrete_despite_referencing_an_abstract_prototype() {
         let (stage, _) = grown(no_misses());
-        let mesh = Mesh::get(
-            &stage,
-            sdf::path("/Vineyard/Planting/Row_000/Vine_000").unwrap(),
-        )
-        .unwrap()
-        .unwrap();
+        let path = sdf::path("/Vineyard/Planting/Row_000/Vine_000").unwrap();
+
+        assert!(
+            stage
+                .prim(sdf::path(crate::elements::vine::PROTOTYPE).unwrap())
+                .is_abstract()
+                .unwrap(),
+            "the prototype library is abstract"
+        );
+
+        let vine = stage.prim(path.clone());
+        assert!(!vine.is_abstract().unwrap(), "a placed vine is concrete");
+        assert!(vine.is_defined().unwrap(), "a placed vine is defined");
+
+        let mesh = Mesh::get(&stage, path).unwrap().unwrap();
         assert!(
             !matches!(
                 mesh.visibility_attr().get::<Visibility>().unwrap(),
                 Some(Visibility::Invisible)
             ),
-            "a placed vine renders; only the library it came from is hidden"
+            "and it renders"
         );
     }
 

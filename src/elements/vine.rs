@@ -55,7 +55,7 @@ use super::util::usd::{author_mesh, merge_meshes};
 use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` mesh per variation.
-pub const PROTOTYPE: &str = "/parts/Vine";
+pub const PROTOTYPE: &str = "/Vineyard/parts/Vine";
 
 // ─── Shape constants ────────────────────────────────────────────────
 //

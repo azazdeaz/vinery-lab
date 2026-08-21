@@ -97,4 +97,66 @@ mod tests {
             "got:\n{usda}"
         );
     }
+
+    /// Every prim on the stage, including the abstract prototype library —
+    /// `Prim::children` is unfiltered, unlike a default traversal predicate.
+    fn every_prim(stage: &openusd::usd::Stage) -> Vec<openusd::sdf::Path> {
+        let mut found = Vec::new();
+        let mut stack = vec![openusd::sdf::Path::abs_root()];
+        while let Some(path) = stack.pop() {
+            for child in stage.prim(path).children().unwrap() {
+                stack.push(child.path().clone());
+                found.push(child.path().clone());
+            }
+        }
+        found
+    }
+
+    /// No relationship target may leave the default prim.
+    ///
+    /// Relationship targets are namespace-mapped through composition arcs, and
+    /// a target outside the arc's scope cannot be mapped, so USD drops it. The
+    /// failure is invisible from in here: opened directly the stage is perfect,
+    /// and only a consumer *referencing* the layer sees the damage — a
+    /// `PointInstancer` keeping all its instances and losing every prototype,
+    /// drawing nothing. Composition arcs may point anywhere; targets may not.
+    ///
+    /// This guards the whole stage rather than any one element, because the
+    /// rule binds every relationship an element might author later — material
+    /// bindings, physics joint bodies, collision groups — not just
+    /// `prototypes`.
+    #[test]
+    fn no_relationship_target_escapes_the_default_prim() {
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
+        let root = crate::stage::ROOT;
+        let inside = |p: &str| p == root || p.starts_with(&format!("{root}/"));
+
+        let prims = every_prim(&stage);
+        assert!(
+            prims.iter().any(|p| p.as_str() == crate::stage::PARTS),
+            "the walk reaches the abstract prototype library, so a stage whose \
+             only escaping targets live in there cannot pass by being skipped"
+        );
+
+        let escapes: Vec<String> = prims
+            .iter()
+            .flat_map(|path| stage.prim(path.clone()).relationships().unwrap())
+            .flat_map(|rel| {
+                let from = rel.path().as_str().to_string();
+                rel.targets()
+                    .unwrap()
+                    .into_iter()
+                    .map(move |t| (from.clone(), t))
+            })
+            .filter(|(_, target)| !inside(target.as_str()))
+            .map(|(from, target)| format!("{from} -> {}", target.as_str()))
+            .collect();
+
+        assert!(
+            escapes.is_empty(),
+            "these targets would be silently dropped when the layer is \
+             referenced:\n  {}",
+            escapes.join("\n  ")
+        );
+    }
 }

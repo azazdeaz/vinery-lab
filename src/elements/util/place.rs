@@ -238,14 +238,19 @@ mod tests {
     use openusd::schemas::geom::{Mesh, PointBased, Xform};
     use usd_bevy::authoring::prim_exists;
 
+    /// A prototype library root inside the scene root, where a real element's
+    /// would be — targets that leave the default prim are dropped the moment
+    /// the layer is referenced, so the fixtures model the shape that works.
+    const THING: &str = "/Vineyard/parts/Thing";
+
     /// A stage with a two-variation prototype library of plain boxes.
     fn library() -> (Stage, &'static str) {
         let stage = crate::stage::new_stage("place.usda").unwrap();
         for i in 0..2 {
-            author_mesh(&stage, &prototype_path("/parts/Thing", i), &box_mesh(1.0)).unwrap();
+            author_mesh(&stage, &prototype_path(THING, i), &box_mesh(1.0)).unwrap();
         }
         define_prim(&stage, "/World", "Xform").unwrap();
-        (stage, "/parts/Thing")
+        (stage, THING)
     }
 
     fn placement(x: f32, variation: usize) -> Placement {
@@ -261,7 +266,7 @@ mod tests {
     fn prototype_count_stops_at_the_first_gap() {
         let (stage, root) = library();
         assert_eq!(prototype_count(&stage, root), 2);
-        assert_eq!(prototype_count(&stage, "/parts/Nothing"), 0);
+        assert_eq!(prototype_count(&stage, "/Vineyard/parts/Nothing"), 0);
     }
 
     /// The trap this function exists to avoid: a reference is a *weaker*
@@ -305,7 +310,7 @@ mod tests {
         place_referenced(
             &stage,
             "/World",
-            "/parts/Nothing",
+            "/Vineyard/parts/Nothing",
             &[("A".to_string(), placement(0.0, 0))],
         )
         .unwrap();
@@ -367,10 +372,18 @@ mod tests {
         let instancer = PointInstancer::get(&stage, sdf::path("/World/Scatter").unwrap())
             .unwrap()
             .expect("the instancer is authored");
-        assert_eq!(
-            instancer.prototypes_rel().targets().unwrap().len(),
-            2,
-            "every variation is a target"
+        let targets = instancer.prototypes_rel().targets().unwrap();
+        assert_eq!(targets.len(), 2, "every variation is a target");
+        // `prototypes` is a relationship, and relationship targets are
+        // namespace-mapped through composition arcs: one pointing outside the
+        // default prim cannot be mapped and USD drops it, leaving an instancer
+        // with every instance and no prototype. Opened directly that stage
+        // looks perfect, so the check has to live here.
+        assert!(
+            targets
+                .iter()
+                .all(|t| t.as_str().starts_with(crate::stage::ROOT)),
+            "prototype targets stay under the default prim, got {targets:?}"
         );
         match instancer.positions_attr().get::<Value>().unwrap() {
             Some(Value::Vec3fVec(v)) => {

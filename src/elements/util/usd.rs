@@ -168,9 +168,9 @@ mod tests {
     #[test]
     fn reference_prim_composes_the_target_subtree() {
         let stage = openusd::usd::Stage::builder().in_memory("ref.usda").unwrap();
-        author_mesh(&stage, "/parts/Group/Box", &box_mesh(1.0)).unwrap();
+        author_mesh(&stage, "/Vineyard/parts/Group/Box", &box_mesh(1.0)).unwrap();
         openusd::schemas::geom::Xform::define(&stage, sdf::path("/World/Nested").unwrap()).unwrap();
-        reference_prim(&stage, "/World/Nested", "/parts/Group").unwrap();
+        reference_prim(&stage, "/World/Nested", "/Vineyard/parts/Group").unwrap();
 
         assert!(
             usd_bevy::authoring::prim_exists(&stage, "/World/Nested/Box"),

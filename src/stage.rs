@@ -6,34 +6,69 @@
 //! [`crate::generate`]) start from [`new_stage`], so they share one
 //! convention.
 
-use openusd::schemas::geom::{Imageable, Scope};
+use openusd::schemas::geom::Scope;
 use openusd::sdf::Value;
 use openusd::usd::Stage;
 
-/// Root of the prototype library. Elements author their reusable geometry
-/// under `/parts/<Element>` and instance each other's by path.
-pub const PARTS: &str = "/parts";
+/// The scene root, and the stage's default prim.
+///
+/// Everything the scene is made of hangs off this one prim — placed geometry
+/// and the prototype library alike — so a consumer referencing the generated
+/// layer gets a complete asset. See [`define_parts_library`] for why that is
+/// not merely tidy.
+pub const ROOT: &str = "/Vineyard";
 
-/// Creates an empty in-memory stage with the project's coordinate convention
-/// and prototype library root already in place.
+/// Root of the prototype library. Elements author their reusable geometry
+/// under `<ROOT>/parts/<Element>` and instance each other's by path.
+pub const PARTS: &str = "/Vineyard/parts";
+
+/// Creates an empty in-memory stage with the project's coordinate convention,
+/// scene root and prototype library already in place.
 pub fn new_stage(identifier: &str) -> anyhow::Result<Stage> {
     let stage = Stage::builder().in_memory(identifier)?;
     set_up_axis_z_meters(&stage)?;
+    define_root(&stage)?;
     define_parts_library(&stage)?;
     Ok(stage)
 }
 
-/// Defines `/parts` and hides it.
+/// Defines [`ROOT`] and names it the stage's default prim.
 ///
-/// Prototypes are ordinary defined prims, so the viewer would otherwise
-/// project them as a pile of stray geometry sitting at the origin alongside
-/// the real scene. Instances are unaffected: they hang off their instancer,
-/// not off `/parts`, so Bevy's visibility inheritance never reaches them.
+/// Runs ahead of [`define_parts_library`] because authoring a prim implicitly
+/// creates its missing ancestors as `over` specs: nesting the library under an
+/// undefined root would leave `defaultPrim` pointing at a non-defining prim
+/// until whichever element got there first upgraded it.
+fn define_root(stage: &Stage) -> anyhow::Result<()> {
+    usd_bevy::authoring::define_prim(stage, ROOT, "Xform")?;
+    stage.set_default_prim("Vineyard")?;
+    Ok(())
+}
+
+/// Defines the prototype library as a `class`, nested inside [`ROOT`].
+///
+/// Both halves of that are load-bearing.
+///
+/// *Inside the root*, because a `PointInstancer`'s `prototypes` is a
+/// **relationship**, and relationship targets are namespace-mapped through
+/// composition arcs: a target outside the referenced subtree cannot be mapped
+/// and is dropped, leaving an instancer holding every instance and no
+/// prototypes — which draws nothing, silently, and only once the layer is
+/// referenced rather than opened directly. References may leave the default
+/// prim; relationship targets may not.
+///
+/// A *`class`*, because prototypes are otherwise ordinary defined prims and
+/// the viewer would project them as a pile of stray geometry at the origin.
+/// `class` makes the subtree abstract, which `usd_bevy`'s traversal predicate
+/// skips, while instancing still resolves prototypes by path. It replaces a
+/// `visibility = "invisible"` opinion that did the same job less well: now
+/// that the library composes into every consumer, that opinion would ride
+/// along with it.
 fn define_parts_library(stage: &Stage) -> anyhow::Result<()> {
-    let parts = Scope::define(stage, openusd::sdf::path(PARTS)?)?;
-    parts
-        .create_visibility_attr()?
-        .set(Value::token("invisible"))?;
+    Scope::define(stage, openusd::sdf::path(PARTS)?)?;
+    stage.prim(openusd::sdf::path(PARTS)?).set_metadata(
+        openusd::sdf::FieldKey::Specifier.as_str(),
+        Value::Specifier(openusd::sdf::Specifier::Class),
+    )?;
     Ok(())
 }
 
@@ -98,19 +133,45 @@ mod tests {
         );
     }
 
+    /// `new_stage` owns the scene root, so the layer is a referenceable asset
+    /// from the moment it exists — before any element has authored anything.
     #[test]
-    fn new_stage_hides_the_parts_library() {
+    fn new_stage_defines_the_root_as_the_default_prim() {
+        let stage = new_stage("root_test.usda").unwrap();
+        let usda = stage.root_layer().export_to_string().unwrap();
+
+        assert!(
+            usda.contains("defaultPrim = \"Vineyard\""),
+            "got:\n{usda}"
+        );
+        assert!(usda.contains("def Xform \"Vineyard\""), "got:\n{usda}");
+        assert!(
+            matches!(
+                stage.prim(openusd::sdf::path(ROOT).unwrap()).specifier(),
+                Ok(Some(openusd::sdf::Specifier::Def))
+            ),
+            "the root is a defining prim, not the `over` an implicit ancestor \
+             would have produced"
+        );
+    }
+
+    /// The library is a `class` nested under the root: abstract so the viewer
+    /// skips it, and inside the default prim so `prototypes` relationship
+    /// targets survive being referenced.
+    #[test]
+    fn new_stage_encapsulates_the_parts_library() {
         let stage = new_stage("parts_test.usda").unwrap();
         let usda = stage.root_layer().export_to_string().unwrap();
 
-        assert!(usda.contains("def Scope \"parts\""), "got:\n{usda}");
+        assert!(usda.contains("class Scope \"parts\""), "got:\n{usda}");
         assert!(
-            usda.contains("token visibility = \"invisible\""),
-            "got:\n{usda}"
+            !usda.contains("visibility"),
+            "`class` replaces the visibility opinion, which would otherwise \
+             compose into every consumer; got:\n{usda}"
         );
         assert!(
-            !usda.contains("custom token visibility"),
-            "visibility is a UsdGeomImageable attribute, not a custom one; got:\n{usda}"
+            PARTS.starts_with(&format!("{ROOT}/")),
+            "the library must live under the default prim, got `{PARTS}`"
         );
     }
 }
