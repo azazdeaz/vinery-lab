@@ -10,6 +10,7 @@
 //! layout solver, the placement helpers — lives in [`util`], which holds
 //! everything under this directory that isn't an element.
 
+pub mod shoot;
 pub mod terrain;
 pub mod util;
 pub mod vine;
@@ -52,7 +53,7 @@ pub fn plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_plugins((terrain::plugin, vine::plugin));
+    .add_plugins((terrain::plugin, shoot::plugin, vine::plugin));
 }
 
 /// A plain snapshot of every element's params.
@@ -67,6 +68,7 @@ pub struct VineyardParams {
     pub parcel: util::parcel::ParcelParams,
     pub planting: util::planting::PlantingParams,
     pub vine: vine::VineParams,
+    pub shoot: shoot::ShootParams,
 }
 
 impl VineyardParams {
@@ -77,6 +79,7 @@ impl VineyardParams {
         world.insert_resource(self.parcel);
         world.insert_resource(self.planting);
         world.insert_resource(self.vine);
+        world.insert_resource(self.shoot);
     }
 }
 

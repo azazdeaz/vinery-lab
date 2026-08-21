@@ -46,7 +46,7 @@ Design notes for development.
 ## Elements
 
 The scene is built from **elements** — self-contained producers of USD, one per
-thing that exists in a vineyard (terrain, pole, vine, cane, leaf, grape, weed).
+thing that exists in a vineyard (terrain, pole, vine, shoot, leaf, grape, weed).
 
 Parts are named the way viticulture names them: a vine's **trunk** rises from
 the ground to its **head**, where it turns into one or two **cordons** running
@@ -106,9 +106,11 @@ instance hangs off the instancer rather than off `/parts`.
 **Elements compose by prim path only.** An element that instances another just
 targets its `PROTOTYPE` path and trusts it to exist — no Rust data is passed
 between elements. Placement is computed by whoever does the placing, in its own
-local space: `cane` decides where leaves sit on a cane, `vine` where canes sit on
-its spurs, `terrain` where vines, poles and weeds sit on the ground. This nests,
-so `/parts/Vine` already contains its canes, which already contain their leaves.
+local space: `vine` decides where shoots sit on its spurs, `shoot` will decide
+where leaves sit on a shoot, `terrain` where vines, poles and weeds sit on the
+ground. This nests, so `/parts/Vine` already contains its shoots, which will in
+turn contain their leaves — which is why a prototype is an `Xform` over its own
+mesh rather than a bare `Mesh` as soon as anything grows on it.
 
 An element may own a *second* subtree when it also places prototypes — `terrain`
 authors `/Vineyard/Terrain` and, through `util::planting`, everything standing on

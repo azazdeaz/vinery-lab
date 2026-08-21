@@ -140,6 +140,9 @@ fn row_vines(
             Placement {
                 position,
                 yaw,
+                // A vine stands upright; the row's direction is the whole
+                // rotation. Tilt is for nested placement — see `Placement`.
+                tilt: Vec2::ZERO,
                 scale: age_scale(params, age) as f32,
                 variation: (pick * variations as f64) as usize % variations,
             },
@@ -288,21 +291,56 @@ mod tests {
     /// was defined with the prototype's *own* type — a `Mesh` reference under
     /// an `Xform` composes to an `Xform` carrying stray `points`, which no
     /// renderer dispatches on.
+    ///
+    /// The wood is a child rather than the placed prim itself because a vine
+    /// prototype is an `Xform` over its wood *and* its shoots — see
+    /// [`a_planted_vine_composes_its_shoots`].
     #[test]
     fn the_referenced_prototype_composes_in() {
         let (stage, _) = grown(no_misses());
         let mesh = Mesh::get(
             &stage,
-            sdf::path("/Vineyard/Planting/Row_000/Vine_000").unwrap(),
+            sdf::path("/Vineyard/Planting/Row_000/Vine_000/Wood").unwrap(),
         )
         .unwrap()
-        .expect("the placed prim is typed as the Mesh it references");
+        .expect("the vine's wood composes in as the Mesh it references");
         assert!(
             matches!(
                 mesh.points_attr().get::<Value>().unwrap(),
                 Some(Value::Vec3fVec(p)) if !p.is_empty()
             ),
             "the prototype's points resolve through the reference"
+        );
+    }
+
+    /// The nesting the whole element layout rests on, end to end: a shoot
+    /// prototype is referenced into a vine prototype, and that vine prototype
+    /// is referenced onto the ground. The inner arc has to survive the outer
+    /// one.
+    ///
+    /// It is worth its own test because the failure is silent and one-sided —
+    /// `/parts/Vine` would look perfect in isolation while every vine actually
+    /// standing in the vineyard came out pruned bare. A relationship target
+    /// *would* fail this way (see `stage::define_parts_library`); a reference
+    /// does not, because it composes in the layer stack it was authored in.
+    #[test]
+    fn a_planted_vine_composes_its_shoots() {
+        let (stage, _) = grown(no_misses());
+        let path = "/Vineyard/Planting/Row_000/Vine_000/Shoot_00_0";
+
+        assert!(
+            usd_bevy::authoring::prim_exists(&stage, path),
+            "the vine prototype's shoots compose in under the planted vine"
+        );
+        let shoot = Mesh::get(&stage, sdf::path(path).unwrap())
+            .unwrap()
+            .expect("and arrive typed as the Mesh they reference");
+        assert!(
+            matches!(
+                shoot.points_attr().get::<Value>().unwrap(),
+                Some(Value::Vec3fVec(p)) if !p.is_empty()
+            ),
+            "with points resolved through both references"
         );
     }
 
@@ -328,10 +366,15 @@ mod tests {
         assert!(!vine.is_abstract().unwrap(), "a placed vine is concrete");
         assert!(vine.is_defined().unwrap(), "a placed vine is defined");
 
-        let mesh = Mesh::get(&stage, path).unwrap().unwrap();
+        let wood = Mesh::get(
+            &stage,
+            sdf::path("/Vineyard/Planting/Row_000/Vine_000/Wood").unwrap(),
+        )
+        .unwrap()
+        .unwrap();
         assert!(
             !matches!(
-                mesh.visibility_attr().get::<Visibility>().unwrap(),
+                wood.visibility_attr().get::<Visibility>().unwrap(),
                 Some(Visibility::Invisible)
             ),
             "and it renders"

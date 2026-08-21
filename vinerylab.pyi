@@ -71,6 +71,7 @@ class VineParams:
     cordon_radius: float
     spur_spacing: float
     spur_length: float
+    shoots_per_spur: float
     roughness: float
     sides: int
     detail: int
@@ -87,9 +88,43 @@ class VineParams:
         cordon_radius: float = 0.022,
         spur_spacing: float = 0.12,
         spur_length: float = 0.05,
+        shoots_per_spur: float = 1.8,
         roughness: float = 0.14,
         sides: int = 8,
         detail: int = 20,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class ShootParams:
+    """One season's green growth off a spur.
+
+    Shoots are shaped here and placed by `VineParams` -- how many a spur
+    pushes is `VineParams.shoots_per_spur`, since that is a fact about the
+    vine's pruning rather than about a shoot.
+
+    `length` is bud to tip; whoever places one varies it slightly per shoot.
+    `detail` is high compared to the rest of the scene because a shoot turns a
+    quarter circle within a few centimeters of its bud, and it is cheap
+    because a shoot is a shared prototype.
+    """
+
+    variations: int
+    seed: int
+    length: float
+    radius: float
+    lean: float
+    sides: int
+    detail: int
+
+    def __init__(
+        self,
+        variations: int = 4,
+        seed: int = 0,
+        length: float = 0.75,
+        radius: float = 0.006,
+        lean: float = 0.06,
+        sides: int = 6,
+        detail: int = 40,
     ) -> None: ...
     def __repr__(self) -> str: ...
 
@@ -130,6 +165,7 @@ class VineyardParams:
     parcel: ParcelParams
     planting: PlantingParams
     vine: VineParams
+    shoot: ShootParams
 
     def __init__(
         self,
@@ -137,6 +173,7 @@ class VineyardParams:
         parcel: ParcelParams | None = None,
         planting: PlantingParams | None = None,
         vine: VineParams | None = None,
+        shoot: ShootParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
     def generate_usda(self) -> str:

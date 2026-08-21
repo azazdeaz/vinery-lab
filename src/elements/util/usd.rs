@@ -178,6 +178,71 @@ mod tests {
         );
     }
 
+    /// Nesting one prototype library inside another: a vine prototype holds
+    /// shoot prims that reference `/parts/Shoot`, and the whole vine prototype
+    /// is then referenced onto the ground. The inner arc has to survive the
+    /// outer one, or every *placed* plant would come out bare while the
+    /// prototype it references looked perfect.
+    ///
+    /// It survives because a reference is composed in the layer stack where it
+    /// was authored, unlike a relationship target — which is namespace-mapped
+    /// through the arc and dropped when it points outside the referenced
+    /// subtree (see `crate::stage::define_parts_library`).
+    #[test]
+    fn a_reference_inside_a_referenced_subtree_composes_through_both() {
+        let stage = crate::stage::new_stage("nested.usda").unwrap();
+        author_mesh(&stage, "/Vineyard/parts/Shoot/Var_0", &box_mesh(1.0)).unwrap();
+
+        // The vine prototype: its own geometry, plus a shoot referencing the
+        // other library.
+        openusd::schemas::geom::Xform::define(
+            &stage,
+            sdf::path("/Vineyard/parts/Vine/Var_0").unwrap(),
+        )
+        .unwrap();
+        author_mesh(&stage, "/Vineyard/parts/Vine/Var_0/Wood", &box_mesh(2.0)).unwrap();
+        usd_bevy::authoring::define_prim(&stage, "/Vineyard/parts/Vine/Var_0/Shoot_00", "Mesh")
+            .unwrap();
+        reference_prim(
+            &stage,
+            "/Vineyard/parts/Vine/Var_0/Shoot_00",
+            "/Vineyard/parts/Shoot/Var_0",
+        )
+        .unwrap();
+
+        // And the placed vine, referencing that.
+        usd_bevy::authoring::define_prim(&stage, "/Vineyard/Planting/Vine_000", "Xform").unwrap();
+        reference_prim(
+            &stage,
+            "/Vineyard/Planting/Vine_000",
+            "/Vineyard/parts/Vine/Var_0",
+        )
+        .unwrap();
+
+        assert!(
+            usd_bevy::authoring::prim_exists(&stage, "/Vineyard/Planting/Vine_000/Wood"),
+            "the prototype's own geometry composes in"
+        );
+        assert!(
+            usd_bevy::authoring::prim_exists(&stage, "/Vineyard/Planting/Vine_000/Shoot_00"),
+            "and so does the prim that references the nested library"
+        );
+
+        let shoot = openusd::schemas::geom::Mesh::get(
+            &stage,
+            sdf::path("/Vineyard/Planting/Vine_000/Shoot_00").unwrap(),
+        )
+        .unwrap()
+        .expect("the shoot composes as a Mesh");
+        assert!(
+            matches!(
+                shoot.points_attr().get::<Value>().unwrap(),
+                Some(Value::Vec3fVec(p)) if p.len() == 24
+            ),
+            "the shoot's points resolve through both references"
+        );
+    }
+
     #[test]
     fn author_mesh_writes_schema_attributes() {
         let stage = openusd::usd::Stage::builder().in_memory("mesh.usda").unwrap();

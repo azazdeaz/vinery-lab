@@ -10,6 +10,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::elements::VineyardParams;
+use crate::elements::shoot::ShootParams;
 use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
@@ -92,6 +93,7 @@ impl VineParams {
         cordon_radius=0.022,
         spur_spacing=0.12,
         spur_length=0.05,
+        shoots_per_spur=1.8,
         roughness=0.14,
         sides=8,
         detail=20,
@@ -108,6 +110,7 @@ impl VineParams {
         cordon_radius: f32,
         spur_spacing: f32,
         spur_length: f32,
+        shoots_per_spur: f32,
         roughness: f32,
         sides: u32,
         detail: u32,
@@ -123,6 +126,7 @@ impl VineParams {
             cordon_radius,
             spur_spacing,
             spur_length,
+            shoots_per_spur,
             roughness,
             sides,
             detail,
@@ -152,6 +156,43 @@ impl PlantingParams {
     }
 }
 
+#[pymethods]
+impl ShootParams {
+    #[new]
+    #[pyo3(signature = (
+        variations=4,
+        seed=0,
+        length=0.75,
+        radius=0.006,
+        lean=0.06,
+        sides=6,
+        detail=40,
+    ))]
+    fn py_new(
+        variations: u32,
+        seed: u64,
+        length: f32,
+        radius: f32,
+        lean: f32,
+        sides: u32,
+        detail: u32,
+    ) -> Self {
+        Self {
+            variations,
+            seed,
+            length,
+            radius,
+            lean,
+            sides,
+            detail,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 /// The full parameter set, one field per element.
 ///
 /// Fragments are held as `Py<T>` rather than by value so attribute access
@@ -164,18 +205,20 @@ pub struct PyVineyardParams {
     pub parcel: Py<ParcelParams>,
     pub planting: Py<PlantingParams>,
     pub vine: Py<VineParams>,
+    pub shoot: Py<ShootParams>,
 }
 
 #[pymethods]
 impl PyVineyardParams {
     #[new]
-    #[pyo3(signature = (terrain=None, parcel=None, planting=None, vine=None))]
+    #[pyo3(signature = (terrain=None, parcel=None, planting=None, vine=None, shoot=None))]
     fn py_new(
         py: Python<'_>,
         terrain: Option<Py<TerrainParams>>,
         parcel: Option<Py<ParcelParams>>,
         planting: Option<Py<PlantingParams>>,
         vine: Option<Py<VineParams>>,
+        shoot: Option<Py<ShootParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
             terrain: match terrain {
@@ -193,6 +236,10 @@ impl PyVineyardParams {
             vine: match vine {
                 Some(v) => v,
                 None => Py::new(py, VineParams::default())?,
+            },
+            shoot: match shoot {
+                Some(v) => v,
+                None => Py::new(py, ShootParams::default())?,
             },
         })
     }
@@ -237,6 +284,7 @@ impl PyVineyardParams {
             parcel: (*self.parcel.borrow(py)).clone(),
             planting: (*self.planting.borrow(py)).clone(),
             vine: (*self.vine.borrow(py)).clone(),
+            shoot: (*self.shoot.borrow(py)).clone(),
         }
     }
 }
@@ -248,5 +296,6 @@ fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ParcelParams>()?;
     m.add_class::<PlantingParams>()?;
     m.add_class::<VineParams>()?;
+    m.add_class::<ShootParams>()?;
     Ok(())
 }

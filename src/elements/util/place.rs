@@ -35,6 +35,16 @@ pub struct Placement {
     /// prototype needs: elements author their prototypes upright with +X
     /// along the row, so a yaw is all that is ever left to apply.
     pub yaw: f32,
+    /// Small rotations about local X and Y, in radians, applied *before* the
+    /// yaw — so a prototype tips in its own frame and is then turned into
+    /// place.
+    ///
+    /// Zero for anything planted on the ground: a vine stands upright, and a
+    /// yaw is the whole story. It earns its keep in nested placement, where a
+    /// handful of prototypes are used over and over within a single parent —
+    /// the shoots on a vine's spurs are a dozen copies of four meshes, and a
+    /// per-instance lean is what stops them reading as clones.
+    pub tilt: Vec2,
     /// Uniform scale. Uniform rather than per-axis because the thing it
     /// expresses is age — a young plant is shorter *and* thinner.
     pub scale: f32,
@@ -112,10 +122,17 @@ fn author_transform(prim: Prim, placement: &Placement) -> anyhow::Result<()> {
             placement.position.z as f64,
         )),
     )?;
+    // `rotateXYZ` is Rz·Ry·Rx — X first, then Y, then the yaw last, which is
+    // the order the tilt is defined in. One op rather than three keeps the
+    // authored stack the same length it was when a yaw was all there was.
     set(
-        OP_ROTATE_Z,
-        "float",
-        Value::Float(placement.yaw.to_degrees()),
+        OP_ROTATE_XYZ,
+        "float3",
+        Value::Vec3f(gf::vec3f(
+            placement.tilt.x.to_degrees(),
+            placement.tilt.y.to_degrees(),
+            placement.yaw.to_degrees(),
+        )),
     )?;
     set(
         OP_SCALE,
@@ -126,12 +143,12 @@ fn author_transform(prim: Prim, placement: &Placement) -> anyhow::Result<()> {
     // USD applies the *last* op first, so this order scales the instance,
     // turns it along its row, and only then moves it onto the ground — rather
     // than scaling it about the origin after it got there.
-    Placed(prim).set_xform_op_order([OP_TRANSLATE, OP_ROTATE_Z, OP_SCALE])?;
+    Placed(prim).set_xform_op_order([OP_TRANSLATE, OP_ROTATE_XYZ, OP_SCALE])?;
     Ok(())
 }
 
 const OP_TRANSLATE: &str = "xformOp:translate";
-const OP_ROTATE_Z: &str = "xformOp:rotateZ";
+const OP_ROTATE_XYZ: &str = "xformOp:rotateXYZ";
 const OP_SCALE: &str = "xformOp:scale";
 
 /// The type name to define a referencing prim with: the prototype's own.
@@ -198,7 +215,7 @@ pub fn place_instanced(
             .collect(),
     ))?;
     instancer.create_orientations_attr()?.set(Value::QuathVec(
-        placements.iter().map(|p| yaw_about_z(p.yaw)).collect(),
+        placements.iter().map(orientation).collect(),
     ))?;
     instancer.create_scales_attr()?.set(Value::Vec3fVec(
         placements
@@ -215,20 +232,25 @@ pub fn place_instanced(
     Ok(())
 }
 
-/// A rotation of `yaw` radians about Z, as USD types instance orientations.
+/// A placement's rotation, as USD types instance orientations.
+///
+/// `EulerRot::ZYX` composes to Rz·Ry·Rx, the same rotation
+/// [`author_transform`]'s `rotateXYZ` op applies — the two placement paths
+/// have to agree, or a prototype would lean one way planted and another way
+/// instanced.
 ///
 /// `orientations` is `quath[]`, so the components are half floats — about
 /// three decimal digits, which is far finer than a row's direction is ever
 /// known to.
-fn yaw_about_z(yaw: f32) -> gf::Quath {
-    let half = yaw * 0.5;
+fn orientation(placement: &Placement) -> gf::Quath {
+    let q = Quat::from_euler(
+        EulerRot::ZYX,
+        placement.yaw,
+        placement.tilt.y,
+        placement.tilt.x,
+    );
     let half16 = |v: f32| f16::from_f32(v);
-    gf::quath(
-        half16(half.cos()),
-        half16(0.0),
-        half16(0.0),
-        half16(half.sin()),
-    )
+    gf::quath(half16(q.w), half16(q.x), half16(q.y), half16(q.z))
 }
 
 #[cfg(test)]
@@ -257,6 +279,7 @@ mod tests {
         Placement {
             position: Vec3::new(x, 0.0, 0.0),
             yaw: 0.0,
+            tilt: Vec2::ZERO,
             scale: 1.0,
             variation,
         }
@@ -332,6 +355,7 @@ mod tests {
                 Placement {
                     position: Vec3::new(3.0, 5.0, 7.0),
                     yaw: std::f32::consts::FRAC_PI_2,
+                    tilt: Vec2::ZERO,
                     scale: 2.0,
                     variation: 0,
                 },
@@ -346,7 +370,7 @@ mod tests {
             mesh.xform_op_order().unwrap(),
             Some(vec![
                 "xformOp:translate".to_string(),
-                "xformOp:rotateZ".to_string(),
+                "xformOp:rotateXYZ".to_string(),
                 "xformOp:scale".to_string(),
             ])
         );
@@ -360,6 +384,88 @@ mod tests {
         assert!(
             along[0].abs() < 1e-6 && (along[1] - 2.0).abs() < 1e-6,
             "got {along:?}"
+        );
+    }
+
+    /// A tilt has to tip the prototype in its *own* frame and only then be
+    /// turned by the yaw. Authored the other way round, a shoot leaning
+    /// "outward" would lean outward in the vine's frame rather than its own,
+    /// and every shoot on a spur would lean the same way.
+    #[test]
+    fn a_tilt_leans_the_prototype_before_the_yaw_turns_it() {
+        let (stage, root) = library();
+        let tilt = 0.2_f32;
+        place_referenced(
+            &stage,
+            "/World",
+            root,
+            &[(
+                "A".to_string(),
+                Placement {
+                    yaw: std::f32::consts::FRAC_PI_2,
+                    tilt: Vec2::new(tilt, 0.0),
+                    ..placement(0.0, 0)
+                },
+            )],
+        )
+        .unwrap();
+
+        let mesh = Mesh::get(&stage, sdf::path("/World/A").unwrap())
+            .unwrap()
+            .unwrap();
+        let m = mesh.local_to_parent_transform(0.0).unwrap();
+        let column = |i: usize| {
+            Vec3::new(m.0[i * 4] as f32, m.0[i * 4 + 1] as f32, m.0[i * 4 + 2] as f32)
+        };
+
+        // Local +Z is off vertical by exactly the tilt...
+        let up = column(2);
+        assert!(
+            (up.angle_between(Vec3::Z) - tilt).abs() < 1e-5,
+            "local +Z leans by the tilt, got {up:?}"
+        );
+        // ...and the yaw still turns local +X onto +Y, which is what says the
+        // tilt was applied first rather than in the parent's frame.
+        let along = column(0);
+        assert!(
+            (along - Vec3::Y).length() < 1e-5,
+            "the yaw survives the tilt, got {along:?}"
+        );
+    }
+
+    /// Both placement paths have to apply the same rotation, or a prototype
+    /// would lean one way planted and another way instanced.
+    #[test]
+    fn instanced_and_referenced_placements_agree_on_the_rotation() {
+        let p = Placement {
+            yaw: 0.7,
+            tilt: Vec2::new(0.15, -0.1),
+            ..placement(0.0, 0)
+        };
+        let q = orientation(&p);
+        let instanced = Quat::from_xyzw(
+            q.x.to_f32(),
+            q.y.to_f32(),
+            q.z.to_f32(),
+            q.w.to_f32(),
+        )
+        .normalize();
+
+        let (stage, root) = library();
+        place_referenced(&stage, "/World", root, &[("A".to_string(), p)]).unwrap();
+        let m = Mesh::get(&stage, sdf::path("/World/A").unwrap())
+            .unwrap()
+            .unwrap()
+            .local_to_parent_transform(0.0)
+            .unwrap();
+        let referenced = Mat4::from_cols_array(&m.0.map(|v| v as f32))
+            .to_scale_rotation_translation()
+            .1;
+
+        // Half floats, so the instanced quat is only good to ~3 digits.
+        assert!(
+            (referenced * Vec3::Z - instanced * Vec3::Z).length() < 1e-2,
+            "{referenced:?} vs {instanced:?}"
         );
     }
 
