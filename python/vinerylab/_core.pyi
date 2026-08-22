@@ -231,9 +231,9 @@ class VineyardParams:
         """Generates the scene and writes it directly to `path` (format
         chosen by extension -- `.usda`, `.usdc`, `.usd`, `.usdz`).
 
-        Prefer `.usda`. The crate-file writer behind the binary formats
-        produces files Pixar USD rejects on open ("Invalid children found in
-        primChildren field"), so anything that has to be read back by Isaac
-        Sim, usdview or `pxr` needs the text format.
+        The binary formats depend on the `openusd` `[patch]` in `Cargo.toml`;
+        without it they are written with `TfTokenVector` fields typed as
+        `VtArray<TfToken>`, which Pixar USD rejects on open ("Invalid children
+        found in primChildren field"). `.usda` is unaffected either way.
         """
         ...

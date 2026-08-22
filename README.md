@@ -45,9 +45,22 @@ on the generator itself.
 
 ## Python bindings
 
-Requires `bevy_openusd` checked out as a sibling directory (path dependency
-in `Cargo.toml`). No need to install `maturin` yourself — uv fetches it
-automatically as a PEP 517 build backend.
+Requires `bevy_openusd` **and** `openusd` checked out as sibling directories
+(both are path dependencies in `Cargo.toml`). No need to install `maturin`
+yourself — uv fetches it automatically as a PEP 517 build backend.
+
+`openusd` is patched rather than used from git: its crate-file writer types
+`TfTokenVector` fields (`primChildren`, `xformOpOrder`) as `VtArray<TfToken>`,
+which Pixar USD refuses to open, so every generated `.usd`/`.usdc` was
+unreadable by Isaac Sim. The fix is two tokens in `write_token_vec`; see the
+`[patch]` stanza in `Cargo.toml`. Check it out at the rev `usd_bevy` pins:
+
+    git clone https://github.com/mxpv/openusd ../openusd
+    git -C ../openusd checkout -b fix/token-vector-value-type \
+        7934d9f3a375fabc93c14dc96b7900cbd035204d
+
+A `[patch]` is only honoured in the workspace root, so building `usdview` in
+`bevy_openusd` standalone needs the same stanza there.
 
 The project uses maturin's *mixed* layout: hand-written Python lives in
 `python/vinerylab/`, and the compiled Rust extension is built into it as the

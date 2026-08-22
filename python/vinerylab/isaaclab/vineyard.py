@@ -10,12 +10,15 @@ own USD-file spawn path do the rest.
 The shape here follows `spawn_from_urdf`: produce a USD file, then delegate to
 the undecorated `_spawn_from_usd_file`.
 
-The cache holds `.usda` (text), not one of the binary crate formats. That is
-not a preference: the generator's crate writer produces `.usd`/`.usdc` files
-that Pixar USD refuses to open ("Invalid children found in primChildren
-field"), so text is the only format that survives the trip. It costs roughly
-5x the bytes and a slower parse, and `SCENE_SUFFIX` is where to change it if
-the writer is ever fixed.
+The cache holds `.usd` (binary crate) -- about a third the bytes of the text
+form and roughly 4x faster for USD to parse.
+
+That depends on the `[patch]` in the root `Cargo.toml`: unpatched, `openusd`
+writes `TfTokenVector` fields (`primChildren`, `xformOpOrder`) as
+`VtArray<TfToken>`, and Pixar USD rejects the result with "Invalid children
+found in primChildren field". Its own reader accepts both forms, so the file
+looks fine from Rust and fails only here. If that patch is ever dropped, this
+must go back to `.usda`, which is unaffected.
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ if TYPE_CHECKING:
 
     from .vineyard_cfg import VineyardCfg
 
-SCENE_SUFFIX = ".usda"
+SCENE_SUFFIX = ".usd"
 """Extension the cached scene is written with -- see the module docstring."""
 
 

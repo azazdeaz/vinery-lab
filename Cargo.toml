@@ -42,6 +42,15 @@ python = ["dep:pyo3"]
 # is why it's kept out of the default feature set.
 extension-module = ["python", "pyo3/extension-module"]
 
+# `openusd`'s crate-file writer emits `TfTokenVector` fields (primChildren,
+# propertyChildren, xformOpOrder) as `VtArray<TfToken>`, which Pixar USD
+# refuses to open. Patched rather than pointed at a fork by URL: `usd_bevy`
+# depends on the same git source, and a different URL would resolve to a
+# second, incompatible `openusd` crate in the graph. `[patch]` rewrites the
+# source for every dependent at once. Only honoured in the workspace root.
+[patch."https://github.com/mxpv/openusd"]
+openusd = { path = "../openusd" }
+
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
