@@ -186,9 +186,12 @@ arithmetic below.
 
 An element may own a *second* subtree when it also places prototypes — `terrain`
 authors `/Vineyard/Terrain` and, through `util::planting`, everything standing on
-it at `/Vineyard/Planting`. The rule is unchanged: nobody else touches either.
-`vine` owns only `/parts/Vine`; it authors shapes and never decides where they
-stand.
+it at `/Vineyard/Planting`. Or when one thing comes in two shapes: `vine` also
+authors `/parts/YoungVine`, a replant in its first season, which is a `shoot`
+buried deep enough to hide the bend at its base and no wood at all. The rule is
+unchanged: nobody else touches any of them, and `vine` still authors shapes only
+— where a vine stands, and whether a slot got the young one, is `planting`'s
+call.
 
 **Ordering is a `SystemSet` enum**, chained once in `elements::plugin`, with
 prototype authoring first so the path contract always holds:
@@ -239,7 +242,13 @@ instance while losing every prototype — the same silent failure that puts
 Placed prims are named for their *slot*, not their rank: `Row_000/Vine_007` is
 the eighth planting position of the first row whether or not slots before it
 were skipped, so a config keyed on a path doesn't silently repoint when
-`miss_rate` moves.
+`miss_rate` moves. It keeps that name whichever library it was planted from, so
+`young_rate` can't repoint one either.
+
+A row is placed as one batch per library — its mature vines, its replants, its
+posts — since a batch draws from a single `/parts/<Name>`. Referenced, all of
+them land as prims directly under the row; instanced, each becomes its own
+`PointInstancer`.
 
 ### Variations
 

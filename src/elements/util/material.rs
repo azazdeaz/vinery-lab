@@ -154,11 +154,35 @@ pub fn bind_material(stage: &Stage, path: &str, material: &str) -> anyhow::Resul
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
+    use crate::elements::util::testing;
+    use crate::elements::vine;
     use openusd::tf::Token;
     use usd_bevy::authoring::prim_exists;
 
     /// All-purpose, which is what everything here binds at.
     const ANY: &str = "";
+
+    /// Path of the first replant a generated parcel planted.
+    ///
+    /// Found rather than named: which slots come out young is the planting
+    /// seed's business, and a fixed `Vine_007` would quietly stop testing a
+    /// young vine the moment the stream moved.
+    fn a_planted_replant(stage: &Stage) -> String {
+        stage
+            .prim(sdf::path("/Vineyard/Planting").unwrap())
+            .children()
+            .unwrap()
+            .iter()
+            .find_map(|row| {
+                let row = row.path().as_str().to_string();
+                testing::instances(stage, &row)
+                    .into_iter()
+                    .find(|i| i.prototype.starts_with(vine::YOUNG_PROTOTYPE))
+                    .and_then(|i| i.name)
+                    .map(|name| format!("{row}/{name}"))
+            })
+            .expect("the default planting holds some replants")
+    }
 
     fn stage_with_material() -> Stage {
         let stage = crate::stage::new_stage("material.usda").unwrap();
@@ -269,6 +293,7 @@ mod tests {
         let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
         let row = "/Vineyard/Planting/Row_000";
         let (vine, pole) = (format!("{row}/Vine_000"), format!("{row}/Pole_000"));
+        let young = a_planted_replant(&stage);
 
         // Every kind of thing the export places, with the prims under it that
         // have to come out shaded. A vine's wood binds directly and its stem
@@ -283,6 +308,18 @@ mod tests {
                     format!("{vine}/Shoot_00_0"),
                     format!("{vine}/Shoot_00_0/Stem"),
                     format!("{vine}/Shoot_00_0/Leaf_00"),
+                ],
+            ),
+            // A replant is placed from a library of its own, so its binding
+            // is a second one that has to survive the same trip — and the only
+            // one where the material and the geometry it shades arrive through
+            // *different* references.
+            (
+                &young,
+                vec![
+                    format!("{young}/Shoot"),
+                    format!("{young}/Shoot/Stem"),
+                    format!("{young}/Shoot/Leaf_00"),
                 ],
             ),
             (&pole, vec![format!("{pole}/Pole")]),

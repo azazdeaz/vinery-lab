@@ -205,6 +205,11 @@ class PlantingParams:
     a rigid body, randomize it. A name refers to a planting *slot*, so a vine
     skipped by `miss_rate` leaves a gap in the numbering rather than shifting
     every name after it.
+
+    A slot that comes out young by `young_rate` is planted as a replant in its
+    first season -- one green shoot out of the bare ground, not a shrunken
+    mature vine -- and `young_scale` says how much of a full-grown shoot the
+    youngest of them has put out.
     """
 
     seed: int

@@ -24,6 +24,13 @@
 //! on a spur and a yaw, and the shoot leaves it sideways at that bearing and
 //! stands up on its own. No frame has to be transported along the spur.
 //!
+//! The same frame is what lets a shoot stand in for a whole plant: a replant in
+//! its first season is one of these out of the bare ground, with the bend
+//! buried — [`PLANT_DEPTH`] deep, and [`vine::YOUNG_PROTOTYPE`] is what does
+//! the burying.
+//!
+//! [`vine::YOUNG_PROTOTYPE`]: super::vine::YOUNG_PROTOTYPE
+//!
 //! # One subtree
 //!
 //! The prototype library under [`PROTOTYPE`]. Each `Var_<i>` is an `Xform`
@@ -86,6 +93,22 @@ const BEND_RADIUS: f64 = 0.045;
 /// 90°, which is enough for the cubic fit to sit on the arc rather than cut
 /// the corner.
 const BEND_NODES: usize = 4;
+
+/// How deep a shoot has to be planted for its bend to be out of sight, in
+/// meters.
+///
+/// The bend is exactly right on a spur and exactly wrong in the ground: a
+/// shoot planted at the surface would leave the soil sideways and turn up in
+/// front of everyone. Sunk this far, everything above ground is the straight
+/// rise — the margin past [`BEND_RADIUS`] is what makes the tube cross the
+/// surface already vertical rather than just as it finishes turning.
+///
+/// Public because a shoot is what a young vine is made of — see
+/// [`vine::YOUNG_PROTOTYPE`] — and whoever plants a bare shoot is the one who
+/// has to bury it. It is the only thing about this frame they need.
+///
+/// [`vine::YOUNG_PROTOTYPE`]: super::vine::YOUNG_PROTOTYPE
+pub const PLANT_DEPTH: f64 = BEND_RADIUS + 0.03;
 
 /// Spacing of the control points up the straight run.
 const RISE_STEP: f64 = 0.08;

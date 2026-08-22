@@ -71,6 +71,12 @@ pub const PLANTING: &str = "/Vineyard/Planting";
 /// instanced rather than reference-placed. A row is a `Scope` either way.
 pub const VINES: &str = "Vines";
 
+/// The same, for the row's young vines. A third batch for the same reason the
+/// posts are a second one: a batch draws from one prototype library, and a
+/// replant is not a variation of a mature vine — it is a shoot out of the bare
+/// ground, with no wood on it at all.
+pub const YOUNG: &str = "Young";
+
 /// The same, for the row's posts. They are a second batch rather than part of
 /// the first: a batch draws from one prototype library, and a post is not a
 /// variation of a vine.
@@ -116,8 +122,13 @@ pub struct PlantingParams {
     /// happen.
     pub miss_rate: f32,
     /// Fraction of vines that are recent replants rather than mature.
+    ///
+    /// A replant is planted from [`vine::YOUNG_PROTOTYPE`] rather than from a
+    /// shrunk mature vine: in its first season it is one green shoot out of
+    /// the ground, and a scaled-down trunk-and-cordons is the one thing it is
+    /// certainly not.
     pub young_rate: f32,
-    /// How small the youngest replant is, relative to a mature vine.
+    /// How small the youngest replant is, relative to a full-grown shoot.
     pub young_scale: f32,
 }
 
@@ -151,6 +162,11 @@ pub fn author(
     define_prim(stage, PLANTING, "Xform")?;
 
     let variations = place::prototype_count(stage, vine::PROTOTYPE).max(1);
+    // Not `max(1)`, unlike the others: an empty young library is a real
+    // state — nothing to plant a replant *from* — and `row_plants` reads the
+    // zero as "every slot gets a mature vine" rather than referencing a
+    // prototype that was never authored.
+    let young = place::prototype_count(stage, vine::YOUNG_PROTOTYPE);
     let poles = place::prototype_count(stage, pole::PROTOTYPE).max(1);
     let mut rng = Rng::new(params.seed);
     // Its own stream, so a nudge to the vines never moves a post — see
@@ -163,12 +179,12 @@ pub fn author(
         // plants are already placed in stage space, draped individually onto
         // terrain that a single row transform could not follow.
         define_prim(stage, &group, "Scope")?;
-        let vines = row_vines(row, &ground, &params, variations, &mut rng);
+        let plants = row_plants(row, &ground, &params, variations, young, &mut rng);
         // One instancer per row rather than one for the whole planting: the
         // row grouping survives either way, and eighteen prims is already flat
         // enough. Collapsing to a single instancer is the next step if it ever
         // isn't.
-        // No material: a vine prototype carries its own, which is the only
+        // No material: a plant's prototype carries its own, which is the only
         // place a binding survives being referenced onto the ground.
         place::place(
             stage,
@@ -177,9 +193,31 @@ pub fn author(
             VINES,
             vine::PROTOTYPE,
             variations,
-            &vines,
+            &plants.vines,
             None,
         )?;
+        // A second batch off a second library, and the reason a young vine
+        // costs a placement rather than a scale: the two draw different
+        // geometry. Referenced, both land as prims directly under the row, so
+        // `Vine_007` is the same path whichever age it came out — which is
+        // what keeps a config keyed on it pointing at the same slot when the
+        // young rate moves.
+        //
+        // Skipped entirely when a row drew no replants, rather than authored
+        // empty: the instanced path would leave a `PointInstancer` holding
+        // nothing but a relationship to a library that may not even exist.
+        if !plants.young.is_empty() {
+            place::place(
+                stage,
+                *style,
+                &group,
+                YOUNG,
+                vine::YOUNG_PROTOTYPE,
+                young,
+                &plants.young,
+                None,
+            )?;
+        }
         place::place(
             stage,
             *style,
@@ -194,40 +232,65 @@ pub fn author(
     Ok(())
 }
 
-/// The vines of one row, named by planting slot.
+/// One row's plants, split by the library each is placed from.
+///
+/// Both halves are named by planting slot and both go under the same row, so
+/// the split is about which geometry a plant draws and nothing else.
+struct RowPlants {
+    /// The mature vines, from [`vine::PROTOTYPE`].
+    vines: Vec<(String, Placement)>,
+    /// The recent replants, from [`vine::YOUNG_PROTOTYPE`]. Empty when the
+    /// young library is, whatever [`PlantingParams::young_rate`] says.
+    young: Vec<(String, Placement)>,
+}
+
+/// The plants of one row, named by planting slot.
 ///
 /// The *draw order* of `rng` is part of this module's output: all three draws
 /// happen before the miss test, so the stream stays aligned no matter which
 /// slots are skipped. Rolling them lazily instead would make every vine past
-/// the first change re-roll whenever `miss_rate` was nudged.
-fn row_vines(
+/// the first change re-roll whenever `miss_rate` was nudged. The same reason
+/// the age draw is spent whether or not there is a young library to honour it
+/// with.
+fn row_plants(
     row: &Row,
     ground: &Ground,
     params: &PlantingParams,
     variations: usize,
+    young_variations: usize,
     rng: &mut Rng,
-) -> Vec<(String, Placement)> {
+) -> RowPlants {
     let yaw = row.direction().to_angle();
-    let mut placed = Vec::new();
+    let mut plants = RowPlants {
+        vines: Vec::new(),
+        young: Vec::new(),
+    };
     for (slot, position) in row.vine_positions(ground).enumerate() {
         let (miss, age, pick) = (rng.unit(), rng.unit(), rng.unit());
         if miss < params.miss_rate as f64 {
             continue;
         }
-        placed.push((
-            format!("Vine_{slot:03}"),
-            Placement {
-                position,
-                yaw,
-                // A vine stands upright; the row's direction is the whole
-                // rotation. Tilt is for nested placement — see `Placement`.
-                tilt: Vec2::ZERO,
-                scale: age_scale(params, age) as f32,
-                variation: (pick * variations as f64) as usize % variations,
-            },
-        ));
+        let name = format!("Vine_{slot:03}");
+        // A plant stands upright and the row's direction is the whole
+        // rotation, whichever library it comes from. Tilt is for nested
+        // placement — see `Placement`.
+        let placement = |scale: f64, variations: usize| Placement {
+            position,
+            yaw,
+            tilt: Vec2::ZERO,
+            scale: scale as f32,
+            variation: (pick * variations as f64) as usize % variations,
+        };
+        match young_scale(params, age) {
+            Some(scale) if young_variations > 0 => plants
+                .young
+                .push((name, placement(scale, young_variations))),
+            // Full size and full grown: a mature vine is the only thing the
+            // vine library holds, so nothing here is ever scaled by age.
+            _ => plants.vines.push((name, placement(1.0, variations))),
+        }
     }
-    placed
+    plants
 }
 
 /// The posts of one row, named by post slot.
@@ -277,18 +340,24 @@ fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Placemen
     placed
 }
 
-/// Uniform scale for a vine whose age draw came out at `age`.
+/// The scale a plant whose age draw came out at `age` stands at, or `None` if
+/// it drew a mature vine.
 ///
-/// Young vines are shorter *and* thinner, which one uniform scale gives for
-/// free. Ramping across the young band rather than stepping means a replanted
+/// The scale is the *replant's* own — a young vine is a shoot, and this is how
+/// much of a full-grown one it has put out so far. Shorter *and* thinner,
+/// which one uniform scale gives for free, and it takes the shoot's burial
+/// down with it so the bend at its base stays underground at any size — see
+/// [`vine::YOUNG_PROTOTYPE`].
+///
+/// Ramping across the young band rather than stepping means a replanted
 /// stretch of row shows a spread of ages, not one clone repeated.
-fn age_scale(params: &PlantingParams, age: f64) -> f64 {
+fn young_scale(params: &PlantingParams, age: f64) -> Option<f64> {
     let young_rate = params.young_rate as f64;
     let young_scale = params.young_scale as f64;
     if young_rate <= 0.0 || age >= young_rate {
-        return 1.0;
+        return None;
     }
-    young_scale + (1.0 - young_scale) * (age / young_rate)
+    Some(young_scale + (1.0 - young_scale) * (age / young_rate))
 }
 
 pub fn ui() -> impl Scene {
@@ -360,8 +429,8 @@ mod tests {
     }
 
     /// Everything placed from the library at `prototype`, read back whichever
-    /// way it was placed. A row carries two batches — its vines and its posts
-    /// — and no test wants both at once.
+    /// way it was placed. A row carries three batches — its vines, its
+    /// replants and its posts — and no test wants all of them at once.
     fn placed(stage: &Stage, prototype: &str) -> Vec<Instance> {
         stage
             .prim(sdf::path(PLANTING).unwrap())
@@ -373,9 +442,22 @@ mod tests {
             .collect()
     }
 
-    /// Every planted vine.
+    /// Every plant standing in the parcel, mature or young. The two come off
+    /// different libraries, so anything counting *slots* wants both.
     fn planted(stage: &Stage) -> Vec<Instance> {
+        let mut all = mature(stage);
+        all.extend(young(stage));
+        all
+    }
+
+    /// Just the grown vines.
+    fn mature(stage: &Stage) -> Vec<Instance> {
         placed(stage, vine::PROTOTYPE)
+    }
+
+    /// Just the recent replants — a shoot out of the bare ground.
+    fn young(stage: &Stage) -> Vec<Instance> {
+        placed(stage, vine::YOUNG_PROTOTYPE)
     }
 
     /// Every post standing in the parcel.
@@ -648,12 +730,77 @@ mod tests {
         }
     }
 
+    /// The age draw picks a *library*, not a size: a replant is its own plant
+    /// — a shoot out of the bare ground — and a mature vine is never shrunk to
+    /// stand in for one.
     #[test]
-    fn young_vines_are_scaled_down_uniformly() {
+    fn a_replant_is_planted_from_the_young_library() {
+        let mostly_young = VineyardParams {
+            planting: PlantingParams {
+                miss_rate: 0.0,
+                young_rate: 0.4,
+                ..default()
+            },
+            ..default()
+        };
+        for style in STYLES {
+            let (stage, _) = testing::grown(mostly_young.clone(), style);
+            let (grown, replants) = (mature(&stage), young(&stage));
+
+            assert!(!replants.is_empty(), "{style:?}: some slots drew a replant");
+            assert!(!grown.is_empty(), "{style:?}: and most did not");
+            assert!(
+                replants
+                    .iter()
+                    .all(|v| v.prototype.starts_with(vine::YOUNG_PROTOTYPE)),
+                "{style:?}: a replant draws the young library"
+            );
+            for vine in &grown {
+                assert!(
+                    (vine.scale() - Vec3::ONE).length() < 1e-6,
+                    "{style:?}: a mature vine stands at full size, got {:?}",
+                    vine.scale()
+                );
+            }
+        }
+    }
+
+    /// Turning the rate off leaves a parcel of nothing but mature vines — and,
+    /// with no replants to hold, no young batch on any row at all.
+    #[test]
+    fn no_young_rate_plants_no_replants() {
+        for style in STYLES {
+            let (stage, _) = testing::grown(
+                VineyardParams {
+                    planting: PlantingParams {
+                        miss_rate: 0.0,
+                        young_rate: 0.0,
+                        ..default()
+                    },
+                    ..default()
+                },
+                style,
+            );
+            assert!(young(&stage).is_empty(), "{style:?}");
+            assert!(
+                !usd_bevy::authoring::prim_exists(
+                    &stage,
+                    &format!("/Vineyard/Planting/Row_000/{YOUNG}")
+                ),
+                "{style:?}: and no empty instancer left standing in for them"
+            );
+        }
+    }
+
+    /// A replant's shoot is still growing, so it stands somewhere between
+    /// `young_scale` and full size — uniformly, which is what takes its burial
+    /// down with it and keeps the bend at its base underground.
+    #[test]
+    fn replants_are_scaled_across_the_age_band() {
         let p = PlantingParams::default();
-        assert_eq!(age_scale(&p, 0.5), 1.0, "a mature vine is full size");
-        assert!((age_scale(&p, 0.0) - p.young_scale as f64).abs() < 1e-9);
-        assert!(age_scale(&p, 0.04) > p.young_scale as f64);
+        assert_eq!(young_scale(&p, 0.5), None, "a mature vine is not a replant");
+        assert!((young_scale(&p, 0.0).unwrap() - p.young_scale as f64).abs() < 1e-9);
+        assert!(young_scale(&p, 0.04).unwrap() > p.young_scale as f64);
 
         let params = VineyardParams {
             planting: PlantingParams {
@@ -665,11 +812,12 @@ mod tests {
         };
         for style in STYLES {
             let (stage, _) = testing::grown(params.clone(), style);
-            let scales: Vec<Vec3> = planted(&stage).iter().map(Instance::scale).collect();
+            let scales: Vec<Vec3> = young(&stage).iter().map(Instance::scale).collect();
 
+            assert!(!scales.is_empty(), "{style:?}: some vines are young");
             assert!(
                 scales.iter().any(|s| s.x < 0.999),
-                "{style:?}: some vines are young"
+                "{style:?}: and the youngest of them are the smallest"
             );
             for s in &scales {
                 assert!(

@@ -136,13 +136,17 @@ pub fn instances(stage: &Stage, parent: &str) -> Vec<Instance> {
             continue;
         }
         // The prim stack names every site contributing an opinion; for a
-        // referencing prim that includes the target it pulled in.
+        // referencing prim that includes the target it pulled in. Its own spec
+        // is in there too, and is not what it references — which only shows up
+        // when the parent is itself inside the library, as a prototype nested
+        // in another one is.
+        let own = child.path().as_str().to_string();
         let Some(prototype) = child
             .prim_stack()
             .unwrap()
             .into_iter()
             .map(|(_, path)| path.as_str().to_string())
-            .find(|path| path.starts_with(crate::stage::PARTS))
+            .find(|path| *path != own && path.starts_with(crate::stage::PARTS))
         else {
             continue;
         };

@@ -31,7 +31,7 @@
 //! it. The placer therefore only ever needs a yaw about Z, and never has to
 //! know which way a strand was authored.
 //!
-//! # One subtree
+//! # Two libraries, one plant
 //!
 //! The prototype library under [`PROTOTYPE`]. Each `Var_<i>` is an `Xform`
 //! over a single `Wood` mesh — the trunk, cordons and spurs merged — plus its
@@ -42,6 +42,16 @@
 //! prototypes by path alone. That split is what lets a vine be planted as an
 //! addressable prim, as a `PointInstancer` instance, or nested inside another
 //! prototype, without this module knowing which.
+//!
+//! And a second library under [`YOUNG_PROTOTYPE`], for the same plant a couple
+//! of years earlier: a replant is a rooted cutting that has pushed one green
+//! shoot and no wood at all, so a young vine has no geometry of its own — it
+//! is a [`shoot`](super::shoot) buried to [`shoot::PLANT_DEPTH`], which is
+//! what keeps the bend at its base underground. Both libraries are planted the
+//! same way, and [`planting`](super::util::planting) picks between them per
+//! slot. The two are one element because they are one plant at two ages, and
+//! because a plant's materials have to live in whatever gets planted — see the
+//! `Looks` scope each variation carries.
 
 use std::f64::consts::{PI, TAU};
 
@@ -50,6 +60,7 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::{Point3, Vector3};
+use openusd::usd::Stage;
 use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
@@ -64,20 +75,34 @@ use super::{Grow, Rng};
 /// The prototype library this element owns: one `Var_<i>` mesh per variation.
 pub const PROTOTYPE: &str = "/Vineyard/parts/Vine";
 
+/// The second library this element owns: a vine young enough to be nothing but
+/// this season's shoot, one `Var_<i>` per [`shoot`] variation.
+///
+/// Deliberately not a prefix of [`PROTOTYPE`], so telling the two apart is a
+/// `starts_with` and nothing subtler.
+pub const YOUNG_PROTOTYPE: &str = "/Vineyard/parts/YoungVine";
+
+/// Name the shoot standing in for a young vine takes under its variation —
+/// the prim, when the shoot is reference-placed, and the `PointInstancer`
+/// holding the one of it when it isn't.
+const YOUNG_SHOOT: &str = "Shoot";
+
 /// Name the `PointInstancer` holding a variation's shoots takes, when they are
 /// instanced rather than reference-placed. A variation is an `Xform` over its
 /// `Wood` either way.
 pub const SHOOTS: &str = "Shoots";
 
-/// Where a vine variation keeps the plant's materials, relative to its own
-/// prototype root.
+/// Where a variation of either library keeps the plant's materials, relative
+/// to its own prototype root.
 ///
-/// Here rather than in a scene-wide `/Vineyard/Looks` because a vine prototype
-/// is the outermost thing the export places by reference, and a
+/// Here rather than in a scene-wide `/Vineyard/Looks` because these prototypes
+/// are the outermost thing the export places by reference, and a
 /// `material:binding` target outside the referenced subtree is silently
 /// dropped — [`material`](super::util::material) has the full account. So the
-/// whole plant's shading has to be reachable from inside a vine, which is also
-/// why `Foliage` lives here rather than with the shoots and leaves it shades.
+/// whole plant's shading has to be reachable from inside whatever gets
+/// planted, which is also why `Foliage` lives here rather than with the shoots
+/// and leaves it shades, and why a young vine carries its own copy of it
+/// rather than reaching for the mature library's.
 const LOOKS: &str = "Looks";
 
 // ─── Shape constants ────────────────────────────────────────────────
@@ -169,6 +194,10 @@ const SHOOT_LENGTH_JITTER: f64 = 0.15;
 /// Salt that splits the shoot placements off the wood's random stream. An
 /// arbitrary odd constant; only its fixedness matters.
 const SHOOT_STREAM: u64 = 0xA076_1D64_78BD_642F;
+
+/// The same, for the young library: which way each young vine's shoot leaves
+/// the ground is drawn here, so it never moves when a mature vine is tuned.
+const YOUNG_STREAM: u64 = 0x1D8E_4E27_C47D_124F;
 
 /// Shortest cordon we will build. Load-bearing rather than cosmetic: a
 /// `cordon_gap` wider than the vine spacing would otherwise ask for a
@@ -687,7 +716,8 @@ fn bark(params: &VineParams, rng: &mut Rng) -> Bark {
 
 // ─── Authoring ──────────────────────────────────────────────────────
 
-/// Authors one merged mesh per variation under [`PROTOTYPE`].
+/// Authors one merged mesh per variation under [`PROTOTYPE`], and the young
+/// library beside it.
 ///
 /// Reads [`ParcelParams`] directly rather than the solved
 /// [`VineyardLayout`] — only `vine_spacing` is needed, and taking it from the
@@ -759,6 +789,79 @@ fn author_prototypes(
                 Some(&foliage_material),
             )?;
         }
+    }
+
+    author_young_prototypes(stage, *style, &params, shoot_variations)
+}
+
+/// Authors one young vine per shoot variation under [`YOUNG_PROTOTYPE`].
+///
+/// A young vine is a shoot and a material, and the only shaping done here is
+/// the burial: the shoot is sunk [`shoot::PLANT_DEPTH`] below the variation's
+/// origin, so that a young vine placed on the ground like any other plant
+/// comes out of the soil already standing up, with the bend at its base out of
+/// sight. Sinking it inside the prototype rather than at planting time is what
+/// makes that survive the age scale — the burial shrinks along with the plant,
+/// so a half-size replant is buried half as deep and hides exactly as much.
+///
+/// One draw per variation: the bearing its shoot leaves the ground on. Without
+/// it every young vine in the parcel would break the surface a bend's radius
+/// down-row of the position it was planted at, since a shoot leaves its bud
+/// along +X and the placer only ever turns one to face along the row.
+///
+/// Authors nothing when there are no shoots to plant — the same "count the
+/// prototypes off the stage" contract the mature library follows, and what
+/// leaves [`planting`](super::util::planting) with nothing to place rather
+/// than with references to prims that were never authored.
+fn author_young_prototypes(
+    stage: &Stage,
+    style: place::Style,
+    params: &VineParams,
+    shoot_variations: usize,
+) -> Result<()> {
+    remove_prim(stage, YOUNG_PROTOTYPE)?;
+    define_prim(stage, YOUNG_PROTOTYPE, "Scope")?;
+
+    let mut rng = Rng::new(params.seed ^ YOUNG_STREAM);
+    for i in 0..shoot_variations {
+        // An `Xform` over its shoot and its materials, the way a mature vine
+        // is one over its wood: a reference is the only thing under here, and
+        // a reference needs a parent that can have children.
+        let variation = format!("{YOUNG_PROTOTYPE}/Var_{i}");
+        define_prim(stage, &variation, "Xform")?;
+
+        define_prim(stage, &format!("{variation}/{LOOKS}"), "Scope")?;
+        let foliage_material = format!("{variation}/{LOOKS}/Foliage");
+        material::author_preview_material(stage, &foliage_material, material::FOLIAGE)?;
+
+        // Variation `i` of the young library is variation `i` of the shoot
+        // library, buried. Picking one at random here instead would spend the
+        // library's whole variety on a second roll of the same dice the placer
+        // already throws.
+        let planted = vec![(
+            YOUNG_SHOOT.to_string(),
+            Placement {
+                position: Vec3::new(0.0, 0.0, -shoot::PLANT_DEPTH as f32),
+                yaw: (rng.unit() * TAU) as f32,
+                // Upright: a first-year vine is trained up a stake, and the
+                // wander in one is the shoot's own lean.
+                tilt: Vec2::ZERO,
+                scale: 1.0,
+                variation: i,
+            },
+        )];
+        // One binding covers the stem and every leaf on it, since a binding
+        // inherits down namespace.
+        place::place(
+            stage,
+            style,
+            &variation,
+            YOUNG_SHOOT,
+            shoot::PROTOTYPE,
+            shoot_variations,
+            &planted,
+            Some(&foliage_material),
+        )?;
     }
     Ok(())
 }
@@ -918,6 +1021,7 @@ mod tests {
     use super::*;
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, Authoring, STYLES, bounds};
+    use openusd::schemas::geom::PointBased;
     use place::prototype_count;
 
     fn params() -> VineParams {
@@ -1241,6 +1345,100 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// A young vine is a shoot in the ground and nothing else, and the burial
+    /// is the whole of the shaping: a shoot leaves its bud sideways, so a
+    /// replant planted at the surface would come out of the soil at a right
+    /// angle before turning up.
+    ///
+    /// Checked on the geometry rather than on the translate alone — the
+    /// translate is only right if it is deeper than the bend, and the thing
+    /// worth pinning is that nothing above ground is bent. At the surface the
+    /// tube is a stem's width across; unburied it would be a bend's, four
+    /// times that.
+    #[test]
+    fn a_young_vine_buries_the_bend_at_its_base() {
+        let (stage, _) = testing::grown(VineyardParams::default(), place::Style::Referenced);
+        let variation = format!("{YOUNG_PROTOTYPE}/Var_0");
+
+        let shoot = testing::instances(&stage, &variation)
+            .into_iter()
+            .find(|i| i.prototype.starts_with(shoot::PROTOTYPE))
+            .expect("a young vine is a shoot, placed under its own variation");
+        assert!(
+            (shoot.position().z + shoot::PLANT_DEPTH as f32).abs() < 1e-6,
+            "sunk to the depth the shoot's own frame asks for, got {:?}",
+            shoot.position()
+        );
+
+        // In the prototype's frame, where the origin is where the soil is.
+        let stem = openusd::schemas::geom::Mesh::get(
+            &stage,
+            openusd::sdf::path(format!("{variation}/{YOUNG_SHOOT}/Stem")).unwrap(),
+        )
+        .unwrap()
+        .expect("with a stem composing in through the reference");
+        let Some(openusd::sdf::Value::Vec3fVec(points)) = stem.points_attr().get().unwrap() else {
+            panic!("a stem without points");
+        };
+        let points: Vec<Vec3> = points
+            .iter()
+            .map(|p| shoot.transform.transform_point3(Vec3::new(p.x, p.y, p.z)))
+            .collect();
+
+        assert!(
+            points.iter().any(|p| p.z < -(shoot::PLANT_DEPTH as f32)),
+            "the bud itself is underground"
+        );
+        let surface: Vec<Vec3> = points
+            .iter()
+            .copied()
+            .filter(|p| (0.0..0.02).contains(&p.z))
+            .collect();
+        assert!(!surface.is_empty(), "and the shoot crosses the surface");
+        let spread = surface
+            .iter()
+            .flat_map(|a| surface.iter().map(|b| a.truncate().distance(b.truncate())))
+            .fold(0.0f32, f32::max);
+        assert!(
+            spread < 0.03,
+            "the tube leaves the soil vertical: {spread} m across at the surface"
+        );
+    }
+
+    /// One replant per shoot on offer — the young library's whole variety is
+    /// the shoot library's, since that is all a young vine is made of.
+    #[test]
+    fn the_young_library_holds_one_replant_per_shoot_variation() {
+        for style in STYLES {
+            let (stage, _) = testing::grown(
+                VineyardParams {
+                    shoot: shoot::ShootParams {
+                        variations: 3,
+                        ..default()
+                    },
+                    ..default()
+                },
+                style,
+            );
+            assert_eq!(prototype_count(&stage, YOUNG_PROTOTYPE), 3, "{style:?}");
+
+            let variation = format!("{YOUNG_PROTOTYPE}/Var_0");
+            assert!(
+                openusd::schemas::geom::Xform::get(&stage, openusd::sdf::path(&variation).unwrap())
+                    .unwrap()
+                    .is_some(),
+                "{style:?}: a replant is an Xform, so it can hold its shoot"
+            );
+            // Its own copy rather than the mature library's: a binding whose
+            // target sits outside the subtree being referenced is dropped, and
+            // a young vine is referenced onto the ground on its own.
+            assert!(
+                usd_bevy::authoring::prim_exists(&stage, &format!("{variation}/{LOOKS}/Foliage")),
+                "{style:?}: and carries the material it shades from"
+            );
         }
     }
 
