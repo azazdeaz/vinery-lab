@@ -68,6 +68,14 @@ pub const FOLIAGE: Surface = Surface {
     ior: 1.45,
 };
 
+/// A trellis post. Smoother than bark and rougher than a leaf, which is where
+/// both a planed softwood post and a galvanized steel one sit — neither has a
+/// highlight worth naming without a texture to break it up.
+pub const POLE: Surface = Surface {
+    roughness: 0.7,
+    ior: 1.5,
+};
+
 /// Dry cultivated loam. The roughest thing in the scene.
 pub const GROUND: Surface = Surface {
     roughness: 0.95,
@@ -259,38 +267,50 @@ mod tests {
     #[test]
     fn a_binding_survives_being_referenced_onto_the_ground() {
         let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        let vine = "/Vineyard/Planting/Row_000/Vine_000";
-        assert!(prim_exists(&stage, vine), "the fixture planted a vine");
+        let row = "/Vineyard/Planting/Row_000";
+        let (vine, pole) = (format!("{row}/Vine_000"), format!("{row}/Pole_000"));
 
-        // The wood binds directly; the stem and the blade inherit it from the
-        // shoot they hang off, which is what saves a relationship on each of
-        // six figures' worth of leaves.
-        for prim in [
-            format!("{vine}/Wood"),
-            format!("{vine}/Shoot_00_0"),
-            format!("{vine}/Shoot_00_0/Stem"),
-            format!("{vine}/Shoot_00_0/Leaf_00"),
+        // Every kind of thing the export places, with the prims under it that
+        // have to come out shaded. A vine's wood binds directly and its stem
+        // and blades inherit from the shoot they hang off, which is what saves
+        // a relationship on each of six figures' worth of leaves; a post is
+        // one mesh, and binds its own.
+        for (placed, prims) in [
+            (
+                &vine,
+                vec![
+                    format!("{vine}/Wood"),
+                    format!("{vine}/Shoot_00_0"),
+                    format!("{vine}/Shoot_00_0/Stem"),
+                    format!("{vine}/Shoot_00_0/Leaf_00"),
+                ],
+            ),
+            (&pole, vec![format!("{pole}/Pole")]),
         ] {
-            assert!(prim_exists(&stage, &prim), "{prim} composes in");
-            let resolved = MaterialBindingAPI::apply(&stage, sdf::path(&prim).unwrap())
-                .unwrap()
-                .compute_bound_material(ANY)
-                .unwrap()
-                .unwrap_or_else(|| panic!("{prim} resolves no material"))
-                .as_str()
-                .to_string();
+            assert!(prim_exists(&stage, placed), "the fixture placed {placed}");
+            for prim in prims {
+                assert!(prim_exists(&stage, &prim), "{prim} composes in");
+                let resolved = MaterialBindingAPI::apply(&stage, sdf::path(&prim).unwrap())
+                    .unwrap()
+                    .compute_bound_material(ANY)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{prim} resolves no material"))
+                    .as_str()
+                    .to_string();
 
-            // Remapped through the arc onto the placed vine — not still
-            // pointing into `/parts`, which is the shape that composes away to
-            // nothing the moment a consumer references this layer.
-            assert!(
-                resolved.starts_with(&format!("{vine}/")),
-                "{prim} resolved to `{resolved}`, outside the vine it was placed as"
-            );
-            assert!(
-                prim_exists(&stage, &resolved),
-                "{prim} resolved to `{resolved}`, which is not on the stage"
-            );
+                // Remapped through the arc onto the prim it was placed as —
+                // not still pointing into `/parts`, which is the shape that
+                // composes away to nothing the moment a consumer references
+                // this layer.
+                assert!(
+                    resolved.starts_with(&format!("{placed}/")),
+                    "{prim} resolved to `{resolved}`, outside the {placed} it was placed as"
+                );
+                assert!(
+                    prim_exists(&stage, &resolved),
+                    "{prim} resolved to `{resolved}`, which is not on the stage"
+                );
+            }
         }
     }
 }

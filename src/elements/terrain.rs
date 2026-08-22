@@ -107,17 +107,19 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .in_set(Grow::Terrain),
         )
-        // `VineParams` is a coarse trigger: planting reads no vine params, but
-        // it does count the prototypes on the stage, and changing
-        // `variations` is what changes that count. When a second element
-        // needs planting, replace this with a registry the prototype authors
-        // push into.
+        // `VineParams` and `PoleParams` are coarse triggers: planting reads
+        // neither, but it does count each element's prototypes on the stage,
+        // and re-placing is also what picks up a prototype subtree that was
+        // rewritten underneath the prims referencing it. Now that two
+        // elements need planting, the next change here should be a registry
+        // the prototype authors push into.
         .add_systems(
             PreUpdate,
             planting::author.in_set(Grow::Plants).run_if(
                 resource_changed::<planting::PlantingParams>
                     .or_else(resource_changed::<parcel::VineyardLayout>)
                     .or_else(resource_changed::<super::vine::VineParams>)
+                    .or_else(resource_changed::<super::pole::PoleParams>)
                     .or_else(resource_changed::<super::util::place::Style>),
             ),
         );

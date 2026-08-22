@@ -11,6 +11,7 @@
 //! everything under this directory that isn't an element.
 
 pub mod leaf;
+pub mod pole;
 pub mod shoot;
 pub mod terrain;
 pub mod util;
@@ -58,7 +59,13 @@ pub fn plugin(app: &mut App) {
         )
             .chain(),
     )
-    .add_plugins((terrain::plugin, shoot::plugin, vine::plugin, leaf::plugin));
+    .add_plugins((
+        terrain::plugin,
+        pole::plugin,
+        shoot::plugin,
+        vine::plugin,
+        leaf::plugin,
+    ));
 }
 
 /// A plain snapshot of every element's params.
@@ -72,6 +79,7 @@ pub struct VineyardParams {
     pub terrain: terrain::TerrainParams,
     pub parcel: util::parcel::ParcelParams,
     pub planting: util::planting::PlantingParams,
+    pub pole: pole::PoleParams,
     pub vine: vine::VineParams,
     pub shoot: shoot::ShootParams,
     pub leaf: leaf::LeafParams,
@@ -84,6 +92,7 @@ impl VineyardParams {
         world.insert_resource(self.terrain);
         world.insert_resource(self.parcel);
         world.insert_resource(self.planting);
+        world.insert_resource(self.pole);
         world.insert_resource(self.vine);
         world.insert_resource(self.shoot);
         world.insert_resource(self.leaf);
@@ -100,6 +109,7 @@ impl VineyardParams {
             terrain: world.resource::<terrain::TerrainParams>().clone(),
             parcel: world.resource::<util::parcel::ParcelParams>().clone(),
             planting: world.resource::<util::planting::PlantingParams>().clone(),
+            pole: world.resource::<pole::PoleParams>().clone(),
             vine: world.resource::<vine::VineParams>().clone(),
             shoot: world.resource::<shoot::ShootParams>().clone(),
             leaf: world.resource::<leaf::LeafParams>().clone(),

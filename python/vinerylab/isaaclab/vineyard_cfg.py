@@ -62,6 +62,23 @@ class PlantingCfg:
 
 
 @configclass
+class PoleCfg:
+    """One trellis post: a plain grey cylinder.
+
+    How tall a post is comes from `ParcelCfg.trellis_height` -- the posts are
+    what hold the wires up there -- and where the posts stand comes from
+    `ParcelCfg.post_spacing`, so neither is here.
+
+    There is no `variations` or `seed` either: a post is a manufactured
+    object, and the only variety a row of them shows is in how each was
+    driven, which is applied per placement.
+    """
+
+    radius: float = 0.04
+    sides: int = 8
+
+
+@configclass
 class VineCfg:
     """The permanent woody framework of a grapevine.
 
@@ -158,6 +175,7 @@ class VineyardCfg(FileCfg):
     terrain: TerrainCfg = TerrainCfg()
     parcel: ParcelCfg = ParcelCfg()
     planting: PlantingCfg = PlantingCfg()
+    pole: PoleCfg = PoleCfg()
     vine: VineCfg = VineCfg()
     shoot: ShootCfg = ShootCfg()
     leaf: LeafCfg = LeafCfg()
@@ -174,6 +192,7 @@ FRAGMENTS: tuple[tuple[str, type], ...] = (
     ("terrain", TerrainCfg),
     ("parcel", ParcelCfg),
     ("planting", PlantingCfg),
+    ("pole", PoleCfg),
     ("vine", VineCfg),
     ("shoot", ShootCfg),
     ("leaf", LeafCfg),

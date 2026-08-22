@@ -62,8 +62,10 @@ pub struct ParcelParams {
     /// rectangle, are dropped rather than planted.
     pub min_row_length: f32,
     /// Height of the trellis above the ground, in meters. Not consumed by
-    /// the solver — carried here for the gizmo and for the vine/pole
-    /// elements this layout will eventually drive.
+    /// the solver — it is how tall [`pole`] builds its posts, and how tall
+    /// the layout gizmo draws them.
+    ///
+    /// [`pole`]: crate::elements::pole
     pub trellis_height: f32,
 }
 

@@ -2,7 +2,7 @@
 //!
 //! [`parcel`](super::parcel) solves *where* things go; this authors *what* is
 //! there. It walks the solved [`VineyardLayout`], draping it onto
-//! [`Ground`], and places one prim per plant through
+//! [`Ground`], and places one prim per vine and per post through
 //! [`place`](super::place).
 //!
 //! Terrain's placement helper, exactly the standing [`parcel`] has as its
@@ -11,6 +11,13 @@
 //! [`elements::plugin`]. What it does own is the `/Vineyard/Planting`
 //! subtree — so `terrain` is an element with two subtrees, its surface and
 //! everything planted on it.
+//!
+//! # Nothing is planted exactly where it was solved
+//!
+//! The layout is a set of straight lines at exact spacings, and a vineyard
+//! planted to it looks stamped out. So each thing placed here is nudged off
+//! the position it was solved for — see [`row_poles`] for the three ways a
+//! post is, and why they are drawn from a stream of their own.
 //!
 //! # Why every plant gets its own prim
 //!
@@ -50,6 +57,7 @@ use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
 use crate::elements::Rng;
+use crate::elements::pole;
 use crate::elements::terrain::Ground;
 use crate::elements::vine;
 
@@ -62,6 +70,37 @@ pub const PLANTING: &str = "/Vineyard/Planting";
 /// Name the `PointInstancer` holding a row's vines takes, when the vines are
 /// instanced rather than reference-placed. A row is a `Scope` either way.
 pub const VINES: &str = "Vines";
+
+/// The same, for the row's posts. They are a second batch rather than part of
+/// the first: a batch draws from one prototype library, and a post is not a
+/// variation of a vine.
+pub const POLES: &str = "Poles";
+
+/// Salt splitting the post placements off the vine stream, so that nudging one
+/// never re-rolls the other. An arbitrary odd constant; only its fixedness
+/// matters — the same split [`vine`] keeps between its wood and its shoots.
+///
+/// [`vine`]: crate::elements::vine
+const POLE_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// How far a post's foot may end up from the position the layout solved, in
+/// meters, along the row and across it. A post is driven by a machine walking
+/// the row against a string line, not surveyed onto a point.
+const POLE_OFFSET: f64 = 0.02;
+
+/// How far a post may stand off plumb, in radians — a bit over a degree. It
+/// leans about its own foot, so the top of a trellis-height post moves by
+/// something under four centimeters.
+const POLE_TILT: f64 = 0.02;
+
+/// How much deeper than nominal a post may have been driven, in meters.
+///
+/// Deeper only, and that is the point: a pole prototype stands from the ground
+/// up, so sinking one takes the same few centimeters off the *top*. What the
+/// draw actually buys is a row whose post tops don't sit on one perfect line,
+/// which is the thing that reads as a real vineyard from a distance at which
+/// nothing else here is visible.
+const POLE_SINK: f64 = 0.05;
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(
@@ -112,7 +151,11 @@ pub fn author(
     define_prim(stage, PLANTING, "Xform")?;
 
     let variations = place::prototype_count(stage, vine::PROTOTYPE).max(1);
+    let poles = place::prototype_count(stage, pole::PROTOTYPE).max(1);
     let mut rng = Rng::new(params.seed);
+    // Its own stream, so a nudge to the vines never moves a post — see
+    // [`POLE_STREAM`].
+    let mut pole_rng = Rng::new(params.seed ^ POLE_STREAM);
 
     for (index, row) in layout.rows.iter().enumerate() {
         let group = format!("{PLANTING}/Row_{index:03}");
@@ -135,6 +178,16 @@ pub fn author(
             vine::PROTOTYPE,
             variations,
             &vines,
+            None,
+        )?;
+        place::place(
+            stage,
+            *style,
+            &group,
+            POLES,
+            pole::PROTOTYPE,
+            poles,
+            &row_poles(row, &ground, &mut pole_rng),
             None,
         )?;
     }
@@ -171,6 +224,53 @@ fn row_vines(
                 tilt: Vec2::ZERO,
                 scale: age_scale(params, age) as f32,
                 variation: (pick * variations as f64) as usize % variations,
+            },
+        ));
+    }
+    placed
+}
+
+/// The posts of one row, named by post slot.
+///
+/// Every post is placed; nothing here is the posts' equivalent of
+/// [`PlantingParams::miss_rate`], because a missing post is a broken trellis
+/// rather than a dead plant, and the row it was in would be lying on the
+/// ground.
+///
+/// Five draws per post, in this order: the foot's offset along the row and
+/// across it, the lean about each of the post's own horizontal axes, and how
+/// deep it was driven. All five are taken for every post, so the stream stays
+/// aligned however the parcel is re-solved around it.
+///
+/// The foot is re-draped after being offset rather than keeping the height it
+/// was solved at. The offset is two centimeters and the correction is under a
+/// millimeter on anything this terrain generates — but "a post sits on the
+/// ground" is worth being exactly true rather than nearly, since it is what
+/// every check of this placement rests on.
+fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Placement)> {
+    let (along, across) = (row.direction(), row.direction().perp());
+    let yaw = row.direction().to_angle();
+    let mut placed = Vec::new();
+    for (slot, position) in row.post_positions(ground).enumerate() {
+        let offset = along * rng.range(-POLE_OFFSET, POLE_OFFSET) as f32
+            + across * rng.range(-POLE_OFFSET, POLE_OFFSET) as f32;
+        let tilt = Vec2::new(
+            rng.range(-POLE_TILT, POLE_TILT) as f32,
+            rng.range(-POLE_TILT, POLE_TILT) as f32,
+        );
+        let sink = rng.range(0.0, POLE_SINK) as f32;
+        placed.push((
+            format!("Pole_{slot:03}"),
+            Placement {
+                position: ground.lift(position.truncate() + offset) - Vec3::Z * sink,
+                // Round, so the yaw changes nothing today. It is the row's all
+                // the same: a post that grows a wire notch or a profile has to
+                // face along the row, and this is where that is already true.
+                yaw,
+                tilt,
+                scale: 1.0,
+                // There is only one — see [`pole::VARIATIONS`].
+                variation: 0,
             },
         ));
     }
@@ -247,6 +347,7 @@ mod tests {
     use openusd::schemas::geom::{Imageable, Mesh, PointBased, Visibility};
     use openusd::sdf::{self, Value};
     use openusd::usd::Stage;
+    use std::f64::consts::SQRT_2;
 
     fn no_misses() -> VineyardParams {
         VineyardParams {
@@ -258,14 +359,38 @@ mod tests {
         }
     }
 
-    /// Every planted vine, read back whichever way it was placed.
-    fn planted(stage: &Stage) -> Vec<Instance> {
+    /// Everything placed from the library at `prototype`, read back whichever
+    /// way it was placed. A row carries two batches — its vines and its posts
+    /// — and no test wants both at once.
+    fn placed(stage: &Stage, prototype: &str) -> Vec<Instance> {
         stage
             .prim(sdf::path(PLANTING).unwrap())
             .children()
             .unwrap()
             .iter()
             .flat_map(|row| testing::instances(stage, row.path().as_str()))
+            .filter(|instance| instance.prototype.starts_with(prototype))
+            .collect()
+    }
+
+    /// Every planted vine.
+    fn planted(stage: &Stage) -> Vec<Instance> {
+        placed(stage, vine::PROTOTYPE)
+    }
+
+    /// Every post standing in the parcel.
+    fn poles(stage: &Stage) -> Vec<Instance> {
+        placed(stage, pole::PROTOTYPE)
+    }
+
+    /// Where the layout put the posts, before this module nudged them.
+    fn solved_posts(app: &App) -> Vec<Vec3> {
+        let layout = app.world().resource::<VineyardLayout>();
+        let ground = app.world().resource::<Ground>();
+        layout
+            .rows
+            .iter()
+            .flat_map(|row| row.post_positions(ground).collect::<Vec<_>>())
             .collect()
     }
 
@@ -579,6 +704,108 @@ mod tests {
                 "{style:?}: picks actually vary"
             );
         }
+    }
+
+    /// A post at every position the layout solved for one, in both placement
+    /// shapes — and, in the export's, one addressable by the slot it stands
+    /// in. Unlike a vine, a post is never skipped.
+    #[test]
+    fn a_pole_stands_at_every_solved_post_position() {
+        for style in STYLES {
+            let (stage, app) = testing::grown(no_misses(), style);
+            let solved = solved_posts(&app);
+            assert!(solved.len() > 20, "{style:?}: the fixture solved posts");
+            assert_eq!(poles(&stage).len(), solved.len(), "{style:?}");
+        }
+        let (stage, _) = testing::grown(no_misses(), place::Style::Referenced);
+        assert!(
+            usd_bevy::authoring::prim_exists(&stage, "/Vineyard/Planting/Row_000/Pole_000"),
+            "the first post of the first row is addressable"
+        );
+    }
+
+    /// Every post is off the line the solver drew — but only just. Both
+    /// directions matter: a post that drifted far enough would be standing in
+    /// the row rather than in the trellis, and one that didn't drift at all
+    /// leaves the parcel looking stamped out, which is the whole reason the
+    /// nudges are here.
+    #[test]
+    fn poles_are_nudged_off_the_layout_without_leaving_it() {
+        for style in STYLES {
+            let (stage, app) = testing::grown(no_misses(), style);
+            let ground = app.world().resource::<Ground>();
+            let solved = solved_posts(&app);
+
+            let (mut offsets, mut sinks, mut leans) = (Vec::new(), Vec::new(), Vec::new());
+            for post in poles(&stage) {
+                let at = post.position();
+                offsets.push(
+                    solved
+                        .iter()
+                        .map(|s| s.truncate().distance(at.truncate()))
+                        .fold(f32::MAX, f32::min),
+                );
+                sinks.push(ground.height(at.x, at.y) - at.z);
+                // Where the post's own +Z — the axis it was authored standing
+                // up — ended up.
+                leans.push((post.rotation() * Vec3::Z).angle_between(Vec3::Z));
+            }
+            let spread = |v: &[f32]| {
+                v.iter()
+                    .fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(*x), hi.max(*x)))
+            };
+
+            // A foot may move in both directions at once, so the two draws
+            // compose to a diagonal.
+            let (_, furthest) = spread(&offsets);
+            assert!(
+                furthest <= (POLE_OFFSET * SQRT_2) as f32 + 1e-4,
+                "{style:?}: a post landed {furthest} m off the layout"
+            );
+            assert!(furthest > 0.005, "{style:?}: the posts are all on the line");
+
+            let (shallowest, deepest) = spread(&sinks);
+            assert!(
+                (-1e-4..=POLE_SINK as f32 + 1e-4).contains(&shallowest)
+                    && deepest <= POLE_SINK as f32 + 1e-4,
+                "{style:?}: driven {shallowest}..{deepest} m into the ground"
+            );
+            assert!(
+                deepest - shallowest > POLE_SINK as f32 / 2.0,
+                "{style:?}: every post was driven to the same depth"
+            );
+
+            let (_, worst) = spread(&leans);
+            assert!(
+                worst <= (POLE_TILT * SQRT_2) as f32 + 1e-3,
+                "{style:?}: a post leans {worst} rad off plumb"
+            );
+            assert!(worst > 0.005, "{style:?}: every post is dead plumb");
+        }
+    }
+
+    /// The posts draw from a stream of their own, so re-rolling the planting
+    /// seed moves both — but changing what the *vines* do must leave the
+    /// trellis exactly where it was.
+    #[test]
+    fn the_trellis_does_not_move_when_the_planting_around_it_changes() {
+        let at = |miss_rate: f32| {
+            let (stage, _) = testing::grown(
+                VineyardParams {
+                    planting: PlantingParams {
+                        miss_rate,
+                        ..default()
+                    },
+                    ..default()
+                },
+                place::Style::Referenced,
+            );
+            poles(&stage)
+                .iter()
+                .map(Instance::position)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(0.0), at(0.4));
     }
 
     /// Planting owns its subtree and rewrites it from scratch, so shrinking

@@ -5,6 +5,8 @@
 //! helpers author `custom = false`, so the output declares schema attributes
 //! rather than `custom point3f[] points`.
 
+use std::f32::consts::TAU;
+
 use openusd::gf;
 use openusd::schemas::geom::{
     Boundable, Gprim, Interpolation, Mesh, PointBased, SubdivisionScheme,
@@ -171,10 +173,64 @@ pub fn box_mesh(size: f32) -> MeshData {
     }
 }
 
+/// A closed cylinder about the +Z axis, `sides` around: base on the origin,
+/// top at `height`.
+///
+/// The barrel's two rings are *shared* between neighbouring quads, so the
+/// smooth-normal fallback rounds the silhouette and an eight-sided post reads
+/// as round rather than as a prism. The caps carry their own copy of each
+/// ring, so that averaging stops at the rim instead of bevelling it.
+///
+/// Straight, untapered and unjittered: the variety a vineyard's posts show is
+/// in how they were driven rather than in their shape, which is per placement
+/// and needs no geometry of its own. Anything that bends wants
+/// [`strand`](super::strand) instead — this is the cheap case, one ring at
+/// each end and no curve to fit.
+pub fn cylinder_mesh(radius: f32, height: f32, sides: usize) -> MeshData {
+    let sides = sides.max(3);
+    let ring = |z: f32| -> Vec<[f32; 3]> {
+        (0..sides)
+            .map(|i| {
+                let angle = TAU * i as f32 / sides as f32;
+                [radius * angle.cos(), radius * angle.sin(), z]
+            })
+            .collect()
+    };
+    // Barrel rings first, then a private copy of each for its cap.
+    let (bottom, top) = (ring(0.0), ring(height));
+    let points = [bottom.clone(), top.clone(), bottom, top].concat();
+
+    let n = sides as i32;
+    let mut face_vertex_counts = vec![4; sides];
+    let mut face_vertex_indices: Vec<i32> = (0..n)
+        .flat_map(|i| {
+            let next = (i + 1) % n;
+            // Counter-clockwise seen from outside: round the bottom ring in
+            // the direction the angle increases, then back along the top.
+            [i, next, n + next, n + i]
+        })
+        .collect();
+
+    // The caps, one n-gon each. The bottom is wound in reverse because it is
+    // looked at from below.
+    face_vertex_counts.push(n);
+    face_vertex_indices.extend((0..n).rev().map(|i| 2 * n + i));
+    face_vertex_counts.push(n);
+    face_vertex_indices.extend((0..n).map(|i| 3 * n + i));
+
+    MeshData {
+        points,
+        face_vertex_counts,
+        face_vertex_indices,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::testing::{face_centroid, face_normal, faces};
+    use bevy::math::Vec3;
+
+    use crate::elements::util::testing::{bounds, face_centroid, face_normal, faces};
 
     #[test]
     fn box_mesh_is_a_well_formed_hexahedron() {
@@ -199,6 +255,61 @@ mod tests {
                 "face {i} normal points away from the center"
             );
         }
+    }
+
+    /// A cylinder has to be closed and correctly wound whichever way it is
+    /// looked at: the barrel outward from the axis, the caps along it. A ring
+    /// wound the other way turns the post inside out, which under USD's
+    /// default `rightHanded` orientation is a black tube with a bright hole.
+    #[test]
+    fn cylinder_mesh_is_a_closed_tube_wound_outward() {
+        let (radius, height, sides) = (0.05, 1.8, 8);
+        let m = cylinder_mesh(radius, height, sides);
+
+        assert_eq!(m.points.len(), sides * 4, "a ring each for barrel and cap");
+        assert_eq!(
+            m.face_vertex_counts.len(),
+            sides + 2,
+            "barrel plus two caps"
+        );
+        assert_eq!(
+            m.face_vertex_counts.iter().sum::<i32>() as usize,
+            m.face_vertex_indices.len()
+        );
+        assert!(
+            m.face_vertex_indices
+                .iter()
+                .all(|i| (*i as usize) < m.points.len())
+        );
+
+        let (z0, z1) = bounds(&m, 2);
+        assert_eq!((z0, z1), (0.0, height), "it stands on its base");
+        for p in &m.points {
+            let r = (p[0] * p[0] + p[1] * p[1]).sqrt();
+            assert!((r - radius).abs() < 1e-6, "{p:?} is off the barrel");
+        }
+
+        for (i, face) in faces(&m).enumerate() {
+            let normal = face_normal(&m, face).normalize();
+            let centroid = face_centroid(&m, face);
+            match i {
+                // The barrel: away from the axis, and level with it.
+                i if i < sides => {
+                    let outward = Vec3::new(centroid.x, centroid.y, 0.0).normalize();
+                    assert!(normal.dot(outward) > 0.99, "side {i} faces {normal:?}");
+                }
+                // Then the bottom cap, then the top.
+                i if i == sides => assert!(normal.z < -0.99, "the base faces down"),
+                _ => assert!(normal.z > 0.99, "the top faces up"),
+            }
+        }
+    }
+
+    /// The floor exists because two sides have no inside: the "barrel" would
+    /// be two coincident quads and both caps degenerate.
+    #[test]
+    fn a_cylinder_is_never_asked_for_fewer_than_three_sides() {
+        assert_eq!(cylinder_mesh(0.05, 1.0, 1).points.len(), 3 * 4);
     }
 
     #[test]

@@ -54,6 +54,29 @@ class ParcelParams:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class PoleParams:
+    """One trellis post: a plain grey cylinder.
+
+    How tall a post is comes from `ParcelCfg.trellis_height` -- the posts are
+    what hold the wires up there -- and where the posts stand comes from
+    `ParcelParams.post_spacing`, so neither is here.
+
+    There is no `variations` or `seed` either. A post is a manufactured
+    object, and the only variety a row of them shows is in how each was
+    driven: a centimeter off line, a degree off plumb, a few centimeters
+    deeper. That is applied per placement and needs no geometry of its own.
+    """
+
+    radius: float
+    sides: int
+
+    def __init__(
+        self,
+        radius: float = 0.04,
+        sides: int = 8,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 class VineParams:
     """The permanent woody framework of a grapevine.
 
@@ -210,6 +233,7 @@ class VineyardParams:
     terrain: TerrainParams
     parcel: ParcelParams
     planting: PlantingParams
+    pole: PoleParams
     vine: VineParams
     shoot: ShootParams
     leaf: LeafParams
@@ -219,6 +243,7 @@ class VineyardParams:
         terrain: TerrainParams | None = None,
         parcel: ParcelParams | None = None,
         planting: PlantingParams | None = None,
+        pole: PoleParams | None = None,
         vine: VineParams | None = None,
         shoot: ShootParams | None = None,
         leaf: LeafParams | None = None,

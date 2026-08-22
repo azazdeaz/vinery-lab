@@ -17,6 +17,7 @@
 
 use crate::elements::VineyardParams;
 use crate::elements::leaf::LeafParams;
+use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
 use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
@@ -91,6 +92,12 @@ fn planting(p: &PlantingParams, out: &mut Fields) {
     out.float("young_scale", p.young_scale, d.young_scale);
 }
 
+fn pole(p: &PoleParams, out: &mut Fields) {
+    let d = PoleParams::default();
+    out.float("radius", p.radius, d.radius);
+    out.int("sides", p.sides as u64, d.sides as u64);
+}
+
 fn vine(p: &VineParams, out: &mut Fields) {
     let d = VineParams::default();
     out.int("variations", p.variations as u64, d.variations as u64);
@@ -127,14 +134,15 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     out.int("detail", p.detail as u64, d.detail as u64);
 }
 
-/// The six fragments, as the attribute name and cfg class the snippet uses.
+/// The seven fragments, as the attribute name and cfg class the snippet uses.
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
-const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 6] = [
+const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 7] = [
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),
     ("parcel", "ParcelCfg", |p, out| parcel(&p.parcel, out)),
     ("planting", "PlantingCfg", |p, out| planting(&p.planting, out)),
+    ("pole", "PoleCfg", |p, out| pole(&p.pole, out)),
     ("vine", "VineCfg", |p, out| vine(&p.vine, out)),
     ("shoot", "ShootCfg", |p, out| shoot(&p.shoot, out)),
     ("leaf", "LeafCfg", |p, out| leaf(&p.leaf, out)),
@@ -214,6 +222,7 @@ mod tests {
             format!("{:?}", params.terrain),
             format!("{:?}", params.parcel),
             format!("{:?}", params.planting),
+            format!("{:?}", params.pole),
             format!("{:?}", params.vine),
             format!("{:?}", params.shoot),
             format!("{:?}", params.leaf),

@@ -44,6 +44,11 @@ pub const CANE: u32 = 0x6E8B3D;
 /// Permanent wood: trunk, cordons, spurs. Grey-brown shaggy bark.
 pub const WOOD: u32 = 0x5A4A38;
 
+/// A trellis post. Grey with the faintest warm cast — weathered softwood and
+/// galvanized steel both land here, and at row distance nothing separates
+/// them but their silhouette.
+pub const POLE: u32 = 0x8C8981;
+
 /// Bare cultivated ground between the rows. Dry loam, no cover crop yet.
 pub const GROUND: u32 = 0x6B5744;
 
