@@ -10,4 +10,5 @@ dynamic = ["version"]
 
 [tool.maturin]
 features = ["extension-module"]
-module-name = "vinerylab"
+module-name = "vinerylab._core"
+python-source = "python"

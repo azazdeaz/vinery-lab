@@ -292,6 +292,11 @@ impl PyVineyardParams {
 
     /// Generates the scene and writes it directly to `path` (format chosen
     /// by extension — `.usda`, `.usdc`, `.usd`, `.usdz`).
+    ///
+    /// Prefer `.usda`. The crate-file writer behind the binary formats
+    /// produces files Pixar USD rejects on open ("Invalid children found in
+    /// primChildren field"), so anything that has to be read back by Isaac
+    /// Sim, usdview or `pxr` needs the text format.
     fn write_usd(&self, py: Python<'_>, path: &str) -> PyResult<()> {
         let params = self.snapshot(py);
         py.detach(|| {
@@ -317,8 +322,15 @@ impl PyVineyardParams {
     }
 }
 
+/// The extension module is `vinerylab._core`, re-exported by the Python
+/// package's `__init__.py` — PyO3 takes the module's init symbol from this
+/// function's name, so it has to match the last component of
+/// `module-name` in `pyproject.toml`.
 #[pymodule]
-fn vinerylab(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Part of the cache key `vinerylab.isaaclab` builds: the same params
+    // authored by a different generator are a different scene.
+    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyVineyardParams>()?;
     m.add_class::<TerrainParams>()?;
     m.add_class::<ParcelParams>()?;

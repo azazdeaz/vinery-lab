@@ -9,15 +9,19 @@
 //! [`ValueChange`](bevy::ui_widgets::ValueChange), including mid-drag, so a
 //! drag re-authors that element's subtree every frame it moves.
 
+use bevy::clipboard::Clipboard;
 use bevy::feathers::{
     FeathersPlugins,
     containers::{pane, pane_body, pane_header},
+    controls::{ButtonVariant, FeathersButton},
     dark_theme::create_dark_theme,
     theme::{ThemeBackgroundColor, ThemedText, UiTheme},
     tokens,
 };
 use bevy::prelude::*;
-use bevy::ui_widgets::ScrollArea;
+use bevy::ui_widgets::{Activate, ScrollArea};
+
+use crate::elements::VineyardParams;
 
 use crate::elements::leaf::ui as leaf_ui;
 use crate::elements::shoot::ui as shoot_ui;
@@ -58,24 +62,65 @@ fn params_panel() -> impl Scene {
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children [ pane() Children [
             pane_header() Children [ (Text("Vineyard") ThemedText) ],
-            pane_body() Children [ (
-                Node {
-                    display: Display::Flex,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: px(4),
-                    max_height: vh(75),
-                    overflow: Overflow::scroll_y(),
-                }
-                ScrollArea
-                Children [
-                    terrain_ui(),
-                    parcel_ui(),
-                    vine_ui(),
-                    shoot_ui(),
-                    leaf_ui(),
-                    planting_ui(),
-                ]
-            ) ],
+            pane_body() Children [
+                (
+                    Node {
+                        display: Display::Flex,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: px(4),
+                        max_height: vh(75),
+                        overflow: Overflow::scroll_y(),
+                    }
+                    ScrollArea
+                    Children [
+                        terrain_ui(),
+                        parcel_ui(),
+                        vine_ui(),
+                        shoot_ui(),
+                        leaf_ui(),
+                        planting_ui(),
+                    ]
+                ),
+                // Outside the scroll area, so it stays reachable however far
+                // down the panel is scrolled.
+                copy_cfg_button(),
+            ],
         ]]
+    }
+}
+
+/// Puts the current parameters on the clipboard as an Isaac Lab config.
+///
+/// The other half of the workflow the viewer exists for: tune the scene here,
+/// paste the result into an environment config there.
+fn copy_cfg_button() -> impl Scene {
+    bsn! {
+        Node { margin: UiRect::top(px(8)) }
+        Children [ (
+            @FeathersButton {
+                @caption: bsn! { Text("Copy Isaac Lab cfg") ThemedText },
+                @variant: ButtonVariant::Primary,
+            }
+            on(|_activate: On<Activate>, mut commands: Commands| {
+                // Queued rather than done here: reading every element's params
+                // needs the whole world, which rules out taking `Clipboard` as
+                // a `ResMut` alongside it.
+                commands.queue(copy_cfg_to_clipboard);
+            })
+        ) ]
+    }
+}
+
+/// Emits the snippet for the params currently in `world` and copies it.
+///
+/// Logged as well as copied. The clipboard is the point, but it is the part
+/// that can fail for reasons outside the app — no backend on a bare Wayland
+/// session, no X11 display — and the snippet is worth more than the error.
+fn copy_cfg_to_clipboard(world: &mut World) {
+    let snippet = crate::snippet::vineyard_cfg(&VineyardParams::from_world(world));
+    info!("Isaac Lab config for the current scene:\n\n{snippet}");
+    match world.resource_mut::<Clipboard>().set_text(snippet) {
+        Ok(()) => info!("copied to clipboard"),
+        Err(err) => warn!("could not reach the clipboard: {err}"),
     }
 }

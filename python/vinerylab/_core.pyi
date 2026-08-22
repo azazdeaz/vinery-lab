@@ -1,10 +1,16 @@
-"""Type stubs for the `vinerylab` extension module.
+"""Type stubs for the `vinerylab._core` extension module.
 
 Manually maintained — keep this in sync with the `#[pymethods]` blocks in
-`src/python.rs`. Maturin picks this file up automatically (pure Rust project
-layout: no `python/` source dir) and bundles it into the wheel along with an
-auto-generated `py.typed` marker.
+`src/python.rs`. Sits next to the compiled `_core` extension in the mixed
+maturin layout (`python-source = "python"`), alongside the `py.typed` marker
+that makes the whole package's annotations visible to type checkers.
+
+`vinerylab/__init__.py` re-exports everything declared here, so consumers
+write `from vinerylab import VineyardParams` rather than reaching into
+`_core` themselves.
 """
+
+__version__: str
 
 class TerrainParams:
     width: float
@@ -223,5 +229,11 @@ class VineyardParams:
         ...
     def write_usd(self, path: str) -> None:
         """Generates the scene and writes it directly to `path` (format
-        chosen by extension -- `.usda`, `.usdc`, `.usd`, `.usdz`)."""
+        chosen by extension -- `.usda`, `.usdc`, `.usd`, `.usdz`).
+
+        Prefer `.usda`. The crate-file writer behind the binary formats
+        produces files Pixar USD rejects on open ("Invalid children found in
+        primChildren field"), so anything that has to be read back by Isaac
+        Sim, usdview or `pxr` needs the text format.
+        """
         ...

@@ -39,9 +39,8 @@ from isaaclab_newton.physics import NewtonCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab_newton.physics import NewtonManager, NewtonSolverCfg
 from isaaclab.utils.configclass import configclass
-from pxr import Sdf
 
-from vinerylab import VineyardParams
+from vinerylab.isaaclab import ParcelCfg, VineyardCfg
 
 ##
 # Pre-defined configs
@@ -51,25 +50,9 @@ from isaaclab_assets.robots.spot import SPOT_CFG  # isort:skip
 from isaaclab_assets.robots.unitree import UNITREE_A1_CFG, UNITREE_GO1_CFG, UNITREE_GO2_CFG  # isort:skip
 
 
-# Anonymous layers live only as long as something holds them: drop the last
-# reference and the composition the stage depends on goes with it. Keeping them
-# here pins them for the process lifetime.
-#
-# The generated scene is self-contained under its default prim `/Vineyard` --
-# the prototype library included -- so a plain reference brings in the whole
-# thing. That is what makes it placeable under `/World`, and clonable per env.
-# Composition arcs may cross the default prim boundary; relationship targets
-# (a PointInstancer's `prototypes`, a material binding) may not, and are
-# silently dropped if they do.
-_LAYERS: list[Sdf.Layer] = []
-
-
-def _vineyard_layer(usda: str) -> Sdf.Layer:
-    """The generated USDA as a layer, kept alive for the process lifetime."""
-    layer = Sdf.Layer.CreateAnonymous(".usda")
-    layer.ImportFromString(usda)
-    _LAYERS.append(layer)
-    return layer
+# The scene is generated on first use and cached on these parameters, so a
+# second run of this script spawns it without re-running the generator.
+VINEYARD_CFG = VineyardCfg(parcel=ParcelCfg(row_spacing=2.4))
 
 
 def define_origins(num_origins: int, spacing: float) -> list[list[float]]:
@@ -103,12 +86,7 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     # Origin 1 with Anymal B
     sim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
 
-    p = VineyardParams()
-    usda = p.generate_usda()
-
-    stage = sim_utils.get_current_stage()
-    prim = stage.DefinePrim("/World/Vineyard", "Xform")
-    prim.GetReferences().AddReference(_vineyard_layer(usda).identifier)
+    VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
     # -- Robot
     # anymal_b = Articulation(ANYMAL_B_CFG.replace(prim_path="/World/Origin1/Robot"))
 

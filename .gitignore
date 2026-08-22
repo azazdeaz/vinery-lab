@@ -1,2 +1,4 @@
 /target
 /.venv
+/python/vinerylab/*.so
+__pycache__/

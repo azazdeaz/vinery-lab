@@ -6,8 +6,36 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 ## Workflow
  - Start the viewer `cargo run --release`.
  - Edit the scene parameters in the UI.
- - // TODO: Copy the generated Isaac Lab configuration and paste it into your Isaac Lab envionment configuration file.
- - Run Isaac Lab environment. The provided python wrapper will generate the USD scene,
+ - Press **Copy Isaac Lab cfg** to put the current settings on the clipboard as
+   a `VineyardCfg(...)` construction — only the fields you moved.
+ - Paste it into your Isaac Lab environment config and spawn it:
+
+```python
+from vinerylab.isaaclab import VineyardCfg, ParcelCfg, VineCfg
+
+VINEYARD_CFG = VineyardCfg(
+    parcel=ParcelCfg(row_spacing=2.8, vine_spacing=1.05),
+    vine=VineCfg(arms=1, seed=42),
+)
+
+# a plain script, or a direct env's `_setup_scene()`
+VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
+
+# or a manager-based scene config
+vineyard = AssetBaseCfg(prim_path="/World/Vineyard", spawn=VINEYARD_CFG)
+```
+
+The scene is generated on first use and cached as a USD file keyed on those
+parameters, so only the first run pays for it — and an env regex prim path
+(`{ENV_REGEX_NS}/Vineyard`) generates once and clones, whatever `num_envs` is.
+`VineyardCfg` is a `FileCfg`, so `scale`, `semantic_tags`, `rigid_props`,
+`collision_props` and visual materials all work on it as they would on a
+`UsdFileCfg`. See `examples/isaaclab_demo/main.py`.
+
+Cached scenes live in `$VINERYLAB_CACHE_DIR`, else
+`$XDG_CACHE_HOME/vinerylab/scenes`, else `~/.cache/vinerylab/scenes`; set
+`cache_dir` on the cfg to override, or `force_regenerate=True` while iterating
+on the generator itself.
 
 ## Features
 
@@ -20,6 +48,12 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 Requires `bevy_openusd` checked out as a sibling directory (path dependency
 in `Cargo.toml`). No need to install `maturin` yourself — uv fetches it
 automatically as a PEP 517 build backend.
+
+The project uses maturin's *mixed* layout: hand-written Python lives in
+`python/vinerylab/`, and the compiled Rust extension is built into it as the
+`_core` submodule, which `__init__.py` re-exports. `vinerylab.isaaclab` is the
+only part that imports Isaac Lab, so plain `import vinerylab` stays usable
+without it.
 
 ### Iterating on the wrapper itself (rebuilds on every change)
 
