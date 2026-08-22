@@ -173,6 +173,100 @@ mod tests {
         }
     }
 
+    /// The colour of every mesh on the stage, keyed by prim path.
+    fn display_colors(stage: &openusd::usd::Stage) -> Vec<(String, [f32; 3])> {
+        every_prim(stage)
+            .into_iter()
+            .filter_map(|path| {
+                let mesh = openusd::schemas::geom::Mesh::get(stage, path.clone()).ok()??;
+                let value = openusd::schemas::geom::Gprim::display_color_attr(&mesh)
+                    .get::<openusd::sdf::Value>()
+                    .ok()?;
+                let openusd::sdf::Value::Vec3fVec(v) = value? else {
+                    return None;
+                };
+                let c = v.first()?;
+                Some((path.as_str().to_string(), [c.x, c.y, c.z]))
+            })
+            .collect()
+    }
+
+    /// Nothing may reach a consumer untinted. `displayColor` is the one
+    /// channel both consumers read — it is what the viewer draws, and what a
+    /// bound material's `diffuseColor` reads back through its primvar reader —
+    /// so a mesh without one is a mesh that renders grey everywhere.
+    #[test]
+    fn every_mesh_on_the_stage_carries_a_color() {
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
+        let meshes: Vec<String> = every_prim(&stage)
+            .into_iter()
+            .filter(|p| {
+                matches!(stage.prim(p.clone()).type_name(), Ok(Some(t)) if t.as_str() == "Mesh")
+            })
+            .map(|p| p.as_str().to_string())
+            .collect();
+        assert!(!meshes.is_empty(), "the walk found meshes to check");
+
+        let colored: Vec<String> = display_colors(&stage).into_iter().map(|(p, _)| p).collect();
+        let bare: Vec<&String> = meshes.iter().filter(|m| !colored.contains(m)).collect();
+        assert!(bare.is_empty(), "meshes with no displayColor: {bare:?}");
+    }
+
+    /// Every prototype variation of one element must come out a different
+    /// shade, or a parcel reads as one plant stamped out a thousand times.
+    ///
+    /// The meshes are named rather than discovered, because a walk cannot tell
+    /// an element's own geometry from what it composed in: under the export's
+    /// reference placement a shoot prototype holds a dozen leaf prims, and two
+    /// shoots drawing the same blade legitimately share its colour.
+    ///
+    /// Grouped per element, because two *different* elements landing on the
+    /// same shade is a palette choice, while two variations of one element
+    /// landing on it is the jitter stream wired to a constant seed — the
+    /// mistake that leaves every other check here passing.
+    #[test]
+    fn a_prototypes_variations_are_each_their_own_shade() {
+        use crate::elements::util::place::{prototype_count, prototype_path};
+        use crate::elements::{leaf, shoot, vine};
+
+        let stage = generate_stage(&VineyardParams::default()).unwrap();
+        let colors: std::collections::HashMap<String, [f32; 3]> =
+            display_colors(&stage).into_iter().collect();
+
+        // The one mesh each element authors per variation. `Leaf`'s variation
+        // prim *is* its blade; the other two are an `Xform` over theirs.
+        for (element, root, geometry) in [
+            ("Leaf", leaf::PROTOTYPE, None),
+            ("Shoot", shoot::PROTOTYPE, Some("Stem")),
+            ("Vine", vine::PROTOTYPE, Some("Wood")),
+        ] {
+            let count = prototype_count(&stage, root);
+            assert!(
+                count > 1,
+                "{element} has only {count} variation(s) to tell apart"
+            );
+
+            let shades: Vec<(String, [f32; 3])> = (0..count)
+                .map(|i| {
+                    let path = match geometry {
+                        Some(name) => format!("{}/{name}", prototype_path(root, i)),
+                        None => prototype_path(root, i),
+                    };
+                    let color = *colors
+                        .get(&path)
+                        .unwrap_or_else(|| panic!("{path} carries no displayColor"));
+                    (path, color)
+                })
+                .collect();
+
+            for (i, (path_a, a)) in shades.iter().enumerate() {
+                for (path_b, b) in shades.iter().skip(i + 1) {
+                    assert_ne!(a, b, "{element}: {path_a} and {path_b} are the same shade");
+                }
+            }
+        }
+    }
+
     /// The viewer's save key calls this from inside a system of the app it is
     /// already running, so the nesting has to hold: a second `App` with its own
     /// `MinimalPlugins` and its own single `update()`, while the outer one is
@@ -243,4 +337,3 @@ mod tests {
         );
     }
 }
-

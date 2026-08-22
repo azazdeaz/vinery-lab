@@ -32,13 +32,20 @@ use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
 use super::Grow;
-use super::util::usd::{MeshData, author_mesh};
-use super::util::{parcel, planting};
+use super::util::usd::{MeshData, author_mesh, set_display_color};
+use super::util::{color, material, parcel, planting};
 
 /// The subtree this element owns and rewrites from scratch.
 pub const TERRAIN: &str = "/Vineyard/Terrain";
 
 const SURFACE: &str = "/Vineyard/Terrain/Surface";
+
+/// Where this element keeps its material. Inside [`TERRAIN`] rather than in a
+/// scene-wide `/Vineyard/Looks`, so that `remove_prim(TERRAIN)` still rewrites
+/// the whole subtree in one call — and for the same reason every other
+/// material is namespaced under what it shades, which
+/// [`material`](super::util::material) explains at length.
+const LOOKS: &str = "/Vineyard/Terrain/Looks";
 
 /// Degree of the lofted surface in both directions, clamped down when there
 /// are too few control points to support it.
@@ -124,8 +131,17 @@ fn author(
     let stage = &live.stage;
     remove_prim(stage, TERRAIN)?;
     define_prim(stage, TERRAIN, "Xform")?;
+    define_prim(stage, LOOKS, "Scope")?;
+    let ground_material = format!("{LOOKS}/Ground");
+    material::author_preview_material(stage, &ground_material, material::GROUND)?;
+
     let (tessellation, divisions) = terrain_tessellation(&params)?;
-    author_mesh(stage, SURFACE, &mesh_data(&tessellation))?;
+    let surface = author_mesh(stage, SURFACE, &mesh_data(&tessellation))?;
+    // Unjittered: there is one ground, so there is nothing for a per-variation
+    // drift to tell apart.
+    set_display_color(&surface, color::srgb(color::GROUND))?;
+    material::bind_material(stage, SURFACE, &ground_material)?;
+
     *ground = Ground::from_tessellation(&tessellation, divisions);
     Ok(())
 }

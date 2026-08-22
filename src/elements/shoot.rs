@@ -52,9 +52,10 @@ use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
 use super::leaf;
+use super::util::color;
 use super::util::place::{self, Placement};
 use super::util::strand::{Bark, Strand, strand_mesh};
-use super::util::usd::{author_mesh, merge_meshes};
+use super::util::usd::{author_mesh, merge_meshes, set_display_color};
 use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` per variation, each
@@ -518,14 +519,25 @@ pub fn author_prototypes(
         // `Xform` over its wood.
         let variation = format!("{PROTOTYPE}/Var_{i}");
         define_prim(stage, &variation, "Xform")?;
-        author_mesh(
+        let stem = author_mesh(
             stage,
             &format!("{variation}/Stem"),
             &merge_meshes(&[strand_mesh(&strand)?]),
         )?;
+        set_display_color(
+            &stem,
+            color::shade(
+                color::srgb(color::CANE),
+                &mut Rng::new(seed ^ color::COLOR_STREAM),
+            ),
+        )?;
 
         if leaf_variations > 0 {
             let leaves = leaf_placements(&params, &axis, leaf_variations, seed);
+            // No material: a leaf takes whatever the shoot it hangs from was
+            // bound to, which is `vine`'s `Foliage`. Binding here instead
+            // would put a relationship on every leaf in the parcel — six
+            // figures of them — to say the same thing.
             place::place(
                 stage,
                 *style,
@@ -534,6 +546,7 @@ pub fn author_prototypes(
                 leaf::PROTOTYPE,
                 leaf_variations,
                 &leaves,
+                None,
             )?;
         }
     }

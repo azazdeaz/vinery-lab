@@ -5,9 +5,16 @@
 //! helpers author `custom = false`, so the output declares schema attributes
 //! rather than `custom point3f[] points`.
 
-use openusd::schemas::geom::{Mesh, PointBased};
+use openusd::gf;
+use openusd::schemas::geom::{
+    Boundable, Gprim, Interpolation, Mesh, PointBased, SubdivisionScheme,
+};
 use openusd::sdf::{self, Value};
 use openusd::usd::Stage;
+
+/// The metadata key that says how many values a primvar carries per element.
+/// `openusd` has no `UsdGeomPrimvar` wrapper yet, so it goes on by hand.
+const INTERPOLATION: &str = "interpolation";
 
 /// A polygonal mesh in USD's layout, ready to author.
 ///
@@ -27,6 +34,18 @@ pub struct MeshData {
 /// Normals are left unauthored on purpose: `usd_bevy` falls back to smooth
 /// normals, which is right for organic geometry and — for a mesh whose faces
 /// don't share vertices — degenerates to flat shading anyway.
+///
+/// `subdivisionScheme` and `extent` are *not* left to the schema defaults,
+/// and both matter:
+///
+/// - USD's default scheme is `catmullClark`, which declares every mesh here a
+///   subdivision *cage* rather than the surface it is. A renderer that honours
+///   that — Isaac, usdview, anything on Hydra — rounds the drawn teeth off a
+///   leaf's margin and sands away the [`Bark`](super::strand) ridges that
+///   `strand` exists to produce. The viewer has been hiding this, because
+///   `usd_bevy` defaults the same way we want it set.
+/// - `extent` is what a consumer frustum-culls against. Unauthored, it has to
+///   walk every point of every prim to find one; we already hold the points.
 pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result<Mesh> {
     let prim = Mesh::define(stage, openusd::sdf::path(path)?)?;
     prim.create_points_attr()?.set(Value::Vec3fVec(
@@ -36,7 +55,48 @@ pub fn author_mesh(stage: &Stage, path: &str, mesh: &MeshData) -> anyhow::Result
         .set(Value::IntVec(mesh.face_vertex_counts.clone()))?;
     prim.create_face_vertex_indices_attr()?
         .set(Value::IntVec(mesh.face_vertex_indices.clone()))?;
+    prim.create_subdivision_scheme_attr()?
+        .set(SubdivisionScheme::None)?;
+    if let Some((min, max)) = extent(mesh) {
+        prim.create_extent_attr()?
+            .set(Value::Vec3fVec(vec![min, max]))?;
+    }
     Ok(prim)
+}
+
+/// Authors one flat colour across the whole of `prim`.
+///
+/// A single-element `color3f[]` at `constant` interpolation — the cheapest
+/// thing that says "this mesh is this colour", and what every prototype
+/// carries until something wants a gradient across it.
+///
+/// This is the *only* channel that reaches both consumers. `usd_bevy` reads
+/// `displayColor` into a vertex-colour attribute but bakes instanced
+/// prototypes with a default material, so a bound material is invisible in the
+/// viewer; and a bound material's `diffuseColor` reads this back out through a
+/// primvar reader (see [`material`](super::material)), so the two agree.
+pub fn set_display_color(prim: &Mesh, color: [f32; 3]) -> anyhow::Result<()> {
+    prim.create_display_color_attr()?
+        .set(Value::Vec3fVec(vec![color.into()]))?
+        .set_metadata(
+            INTERPOLATION,
+            Value::token(Interpolation::Constant.as_token()),
+        )?;
+    Ok(())
+}
+
+/// The corners of `mesh`'s axis-aligned bounding box, or `None` when it has no
+/// points to bound.
+fn extent(mesh: &MeshData) -> Option<(gf::Vec3f, gf::Vec3f)> {
+    let mut points = mesh.points.iter();
+    let first = *points.next()?;
+    let (min, max) = points.fold((first, first), |(min, max), p| {
+        (
+            [0, 1, 2].map(|i| min[i].min(p[i])),
+            [0, 1, 2].map(|i| max[i].max(p[i])),
+        )
+    });
+    Some((min.into(), max.into()))
 }
 
 /// Makes the prim at `path` an internal reference to `target`: the whole
@@ -236,6 +296,77 @@ mod tests {
                 Some(Value::Vec3fVec(p)) if p.len() == 24
             ),
             "the shoot's points resolve through both references"
+        );
+    }
+
+    /// USD's default is `catmullClark`, which declares every mesh here a
+    /// subdivision *cage*. A renderer that honours it rounds the drawn teeth
+    /// off a leaf margin and sands away the bark ridges `strand` exists to
+    /// produce — and the viewer cannot show the difference, because `usd_bevy`
+    /// defaults to the value we want rather than to USD's.
+    #[test]
+    fn author_mesh_declares_a_polygon_mesh_rather_than_a_subdivision_cage() {
+        let stage = crate::stage::new_stage("subdiv.usda").unwrap();
+        let prim = author_mesh(&stage, "/Vineyard/Box", &box_mesh(1.0)).unwrap();
+        assert_eq!(
+            prim.subdivision_scheme_attr()
+                .get::<openusd::schemas::geom::SubdivisionScheme>()
+                .unwrap(),
+            Some(SubdivisionScheme::None)
+        );
+    }
+
+    /// `extent` is what a consumer frustum-culls against, and it has to be the
+    /// *real* bound — a stale or too-small box culls geometry that was on
+    /// screen, which reads as flickering rather than as a wrong number.
+    #[test]
+    fn author_mesh_bounds_its_own_points() {
+        let stage = crate::stage::new_stage("extent.usda").unwrap();
+        let mesh = merge_meshes(&[box_mesh(2.0), box_mesh(6.0)]);
+        let prim = author_mesh(&stage, "/Vineyard/Box", &mesh).unwrap();
+
+        match prim.extent_attr().get::<Value>().unwrap() {
+            Some(Value::Vec3fVec(v)) => {
+                assert_eq!(v.len(), 2, "extent is the two corners");
+                let (min, max) = (v[0], v[1]);
+                assert_eq!([min.x, min.y, min.z], [-3.0, -3.0, -3.0]);
+                assert_eq!([max.x, max.y, max.z], [3.0, 3.0, 3.0]);
+            }
+            other => panic!("extent not authored as float3[]: {other:?}"),
+        }
+    }
+
+    /// A mesh with nothing in it has no bound to author, and must not author a
+    /// nonsense one built from `f32::MAX`.
+    #[test]
+    fn an_empty_mesh_is_authored_without_an_extent() {
+        let stage = crate::stage::new_stage("empty.usda").unwrap();
+        let prim = author_mesh(&stage, "/Vineyard/Nothing", &MeshData::default()).unwrap();
+        assert_eq!(prim.extent_attr().get::<Value>().unwrap(), None);
+    }
+
+    #[test]
+    fn set_display_color_authors_one_constant_value() {
+        let stage = crate::stage::new_stage("color.usda").unwrap();
+        let prim = author_mesh(&stage, "/Vineyard/Box", &box_mesh(1.0)).unwrap();
+        set_display_color(&prim, [0.25, 0.5, 0.75]).unwrap();
+
+        let attr = prim.display_color_attr();
+        match attr.get::<Value>().unwrap() {
+            Some(Value::Vec3fVec(v)) => {
+                assert_eq!(v.len(), 1, "one value for the whole mesh");
+                assert_eq!([v[0].x, v[0].y, v[0].z], [0.25, 0.5, 0.75]);
+            }
+            other => panic!("displayColor not authored as color3f[]: {other:?}"),
+        }
+        // Without the token a reader is entitled to take the schema default —
+        // `UsdGeomPrimvar`'s is `constant`, but `usd_bevy`'s is `vertex`, and
+        // one value where a vertex each was promised falls through to white.
+        assert_eq!(
+            attr.get_metadata::<openusd::tf::Token>("interpolation")
+                .unwrap()
+                .as_deref(),
+            Some("constant")
         );
     }
 

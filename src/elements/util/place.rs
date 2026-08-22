@@ -29,6 +29,7 @@ use openusd::sdf::{self, Value};
 use openusd::usd::{Prim, SchemaBase, SchemaKind, Stage};
 use usd_bevy::authoring::define_prim;
 
+use super::material::bind_material;
 use super::usd::reference_prim;
 
 /// Which of the two placement paths an authoring pass takes.
@@ -113,6 +114,12 @@ pub fn prototype_count(stage: &Stage, root: &str) -> usize {
 /// Keeping the instancer a child rather than letting it replace `parent` means
 /// the caller's own subtree shape — a `Scope` per row, an `Xform` over a
 /// vine's wood — is the same either way, and only what hangs below it changes.
+///
+/// `material` binds every placed prim, and so everything the prototype brings
+/// with it, unless a descendant binds something of its own. It is silently
+/// dropped on the instanced path, which has no per-instance prim to carry a
+/// relationship — that path is the viewer's, and the viewer ignores material
+/// bindings anyway (see [`material`](super::material)).
 #[allow(clippy::too_many_arguments)]
 pub fn place(
     stage: &Stage,
@@ -122,9 +129,10 @@ pub fn place(
     proto_root: &str,
     variations: usize,
     placements: &[(String, Placement)],
+    material: Option<&str>,
 ) -> anyhow::Result<()> {
     match style {
-        Style::Referenced => place_referenced(stage, parent, proto_root, placements),
+        Style::Referenced => place_referenced(stage, parent, proto_root, placements, material),
         Style::Instanced => {
             // The names are the referenced path's whole point, and the
             // instanced path has nowhere to put them: an instance is a row in
@@ -153,6 +161,7 @@ pub fn place_referenced(
     parent: &str,
     proto_root: &str,
     placements: &[(String, Placement)],
+    material: Option<&str>,
 ) -> anyhow::Result<()> {
     for (name, placement) in placements {
         let target = prototype_path(proto_root, placement.variation);
@@ -161,6 +170,11 @@ pub fn place_referenced(
         reference_prim(stage, &path, &target)?;
 
         author_transform(stage.prim(sdf::path(&path)?), placement)?;
+        // After `define_prim`: applying the binding API opens the prim as an
+        // `over`, which on an undefined prim would bind a prim with no type.
+        if let Some(material) = material {
+            bind_material(stage, &path, material)?;
+        }
     }
     Ok(())
 }
@@ -373,6 +387,7 @@ mod tests {
             "/World",
             root,
             &[("A".to_string(), placement(0.0, 0))],
+            None,
         )
         .unwrap();
 
@@ -404,6 +419,7 @@ mod tests {
             "/World",
             "/Vineyard/parts/Nothing",
             &[("A".to_string(), placement(0.0, 0))],
+            None,
         )
         .unwrap();
         assert!(prim_exists(&stage, "/World/A"));
@@ -429,6 +445,7 @@ mod tests {
                     variation: 0,
                 },
             )],
+            None,
         )
         .unwrap();
 
@@ -476,6 +493,7 @@ mod tests {
                     ..placement(0.0, 0)
                 },
             )],
+            None,
         )
         .unwrap();
 
@@ -521,7 +539,7 @@ mod tests {
         .normalize();
 
         let (stage, root) = library();
-        place_referenced(&stage, "/World", root, &[("A".to_string(), p)]).unwrap();
+        place_referenced(&stage, "/World", root, &[("A".to_string(), p)], None).unwrap();
         let m = Mesh::get(&stage, sdf::path("/World/A").unwrap())
             .unwrap()
             .unwrap()
@@ -584,7 +602,7 @@ mod tests {
         ];
         let author = |style| {
             let (stage, root) = library();
-            place(&stage, style, "/World", "Batch", root, 2, &batch).unwrap();
+            place(&stage, style, "/World", "Batch", root, 2, &batch, None).unwrap();
             stage
         };
 

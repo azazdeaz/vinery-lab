@@ -125,6 +125,8 @@ pub fn author(
         // row grouping survives either way, and eighteen prims is already flat
         // enough. Collapsing to a single instancer is the next step if it ever
         // isn't.
+        // No material: a vine prototype carries its own, which is the only
+        // place a binding survives being referenced onto the ground.
         place::place(
             stage,
             *style,
@@ -133,6 +135,7 @@ pub fn author(
             vine::PROTOTYPE,
             variations,
             &vines,
+            None,
         )?;
     }
     Ok(())

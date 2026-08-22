@@ -6,6 +6,10 @@
 //!
 //! - [`usd`] — authoring plumbing over `openusd`'s typed schemas: meshes,
 //!   internal references, mesh merging.
+//! - [`color`] — the palette, and the per-variation jitter applied to it.
+//!   Authors no USD; hands elements the linear RGB their meshes carry.
+//! - [`material`] — `UsdPreviewSurface` networks and the binding helper, plus
+//!   the composition rule that decides where in the namespace they may live.
 //! - [`strand`] — the geometry kernel that skins a polyline of radii into a
 //!   tube. Knows no botany and authors no USD.
 //! - [`outline`] — the other geometry kernel: reads a shape traced in SVG and
@@ -23,6 +27,8 @@
 //! a thing that exists in a vineyard, so nothing here gets a `/parts/<Name>`
 //! prototype or a line in [`elements::plugin`](super::plugin).
 
+pub mod color;
+pub mod material;
 pub mod outline;
 pub mod parcel;
 pub mod place;

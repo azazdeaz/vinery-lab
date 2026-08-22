@@ -50,9 +50,10 @@ use openusd::sdf::Value;
 use usd_bevy::authoring::{define_prim, remove_prim};
 use usd_bevy::live::LiveStage;
 
-use super::Grow;
+use super::util::color;
 use super::util::outline::{Outline, outline_mesh};
-use super::util::usd::{MeshData, author_mesh};
+use super::util::usd::{MeshData, author_mesh, set_display_color};
+use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` mesh per outline.
 pub const PROTOTYPE: &str = "/Vineyard/parts/Leaf";
@@ -154,12 +155,22 @@ pub fn author_prototypes(live: NonSend<LiveStage>, params: Res<LeafParams>) -> R
     for (i, svg) in OUTLINES.iter().enumerate() {
         let mesh = blade_mesh(svg, &params)
             .with_context(|| format!("leaf variation {i} could not be built"))?;
+        let blade = author_mesh(stage, &format!("{PROTOTYPE}/Var_{i}"), &mesh)?;
         // A blade is a surface with no inside, so it has to be lit and drawn
         // from underneath as well — a canopy is looked up into as often as
         // down onto. Single-sided, every leaf above the camera would vanish.
-        author_mesh(stage, &format!("{PROTOTYPE}/Var_{i}"), &mesh)?
-            .create_double_sided_attr()?
-            .set(Value::Bool(true))?;
+        blade.create_double_sided_attr()?.set(Value::Bool(true))?;
+        // Seeded off the variation index alone, because the shapes are drawn
+        // rather than generated and this element has no `seed` param to salt
+        // with — see [`VARIATIONS`]. Deterministic either way, which is what
+        // the stage needs.
+        set_display_color(
+            &blade,
+            color::shade(
+                color::srgb(color::LEAF),
+                &mut Rng::new(color::COLOR_STREAM ^ i as u64),
+            ),
+        )?;
     }
     Ok(())
 }

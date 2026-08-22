@@ -57,7 +57,8 @@ use super::shoot;
 use super::util::parcel::ParcelParams;
 use super::util::place::{self, Placement};
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
-use super::util::usd::{author_mesh, merge_meshes};
+use super::util::usd::{author_mesh, merge_meshes, set_display_color};
+use super::util::{color, material};
 use super::{Grow, Rng};
 
 /// The prototype library this element owns: one `Var_<i>` mesh per variation.
@@ -67,6 +68,17 @@ pub const PROTOTYPE: &str = "/Vineyard/parts/Vine";
 /// instanced rather than reference-placed. A variation is an `Xform` over its
 /// `Wood` either way.
 pub const SHOOTS: &str = "Shoots";
+
+/// Where a vine variation keeps the plant's materials, relative to its own
+/// prototype root.
+///
+/// Here rather than in a scene-wide `/Vineyard/Looks` because a vine prototype
+/// is the outermost thing the export places by reference, and a
+/// `material:binding` target outside the referenced subtree is silently
+/// dropped — [`material`](super::util::material) has the full account. So the
+/// whole plant's shading has to be reachable from inside a vine, which is also
+/// why `Foliage` lives here rather than with the shoots and leaves it shades.
+const LOOKS: &str = "Looks";
 
 // ─── Shape constants ────────────────────────────────────────────────
 //
@@ -714,10 +726,28 @@ fn author_prototypes(
         // the cost of projecting the stage.
         let variation = format!("{PROTOTYPE}/Var_{i}");
         define_prim(stage, &variation, "Xform")?;
-        author_mesh(stage, &format!("{variation}/Wood"), &merge_meshes(&parts))?;
+
+        define_prim(stage, &format!("{variation}/{LOOKS}"), "Scope")?;
+        let wood_material = format!("{variation}/{LOOKS}/Wood");
+        let foliage_material = format!("{variation}/{LOOKS}/Foliage");
+        material::author_preview_material(stage, &wood_material, material::WOOD)?;
+        material::author_preview_material(stage, &foliage_material, material::FOLIAGE)?;
+
+        let wood_path = format!("{variation}/Wood");
+        let wood = author_mesh(stage, &wood_path, &merge_meshes(&parts))?;
+        set_display_color(
+            &wood,
+            color::shade(
+                color::srgb(color::WOOD),
+                &mut Rng::new(seed ^ color::COLOR_STREAM),
+            ),
+        )?;
+        material::bind_material(stage, &wood_path, &wood_material)?;
 
         if shoot_variations > 0 {
             let shoots = shoot_placements(&params, &shape.spurs, shoot_variations, seed);
+            // One binding per shoot covers its stem and every leaf under it,
+            // since a binding inherits down namespace.
             place::place(
                 stage,
                 *style,
@@ -726,6 +756,7 @@ fn author_prototypes(
                 shoot::PROTOTYPE,
                 shoot_variations,
                 &shoots,
+                Some(&foliage_material),
             )?;
         }
     }
