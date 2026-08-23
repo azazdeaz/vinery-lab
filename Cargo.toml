@@ -42,9 +42,16 @@ python = ["dep:pyo3"]
 # is why it's kept out of the default feature set.
 extension-module = ["python", "pyo3/extension-module"]
 
-# `openusd`'s crate-file writer emits `TfTokenVector` fields (primChildren,
-# propertyChildren, xformOpOrder) as `VtArray<TfToken>`, which Pixar USD
-# refuses to open. Patched rather than pointed at a fork by URL: `usd_bevy`
+# `openusd`'s writers need two fixes before Pixar USD will read what they
+# produce. In the crate (binary) writer, a token list is a `TfTokenVector` or a
+# `VtArray<TfToken>` depending on which *field* holds it, and it used to emit
+# one form for both: the namespace-children fields (primChildren,
+# propertyChildren) as arrays, which USD rejects outright, and then — once that
+# was "fixed" by flipping every token list to the vector form — `xformOpOrder`
+# as a vector, which USD accepts and silently cannot read, collapsing every
+# placed prim onto the origin. In the text writer, a one-item list op dropped
+# its brackets, which is legal for the arc ops and a parse error for
+# `apiSchemas`. Patched rather than pointed at a fork by URL: `usd_bevy`
 # depends on the same git source, and a different URL would resolve to a
 # second, incompatible `openusd` crate in the graph. `[patch]` rewrites the
 # source for every dependent at once. Only honoured in the workspace root.

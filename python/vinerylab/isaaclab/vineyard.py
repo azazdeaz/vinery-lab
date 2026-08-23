@@ -13,12 +13,19 @@ the undecorated `_spawn_from_usd_file`.
 The cache holds `.usd` (binary crate) -- about a third the bytes of the text
 form and roughly 4x faster for USD to parse.
 
-That depends on the `[patch]` in the root `Cargo.toml`: unpatched, `openusd`
-writes `TfTokenVector` fields (`primChildren`, `xformOpOrder`) as
-`VtArray<TfToken>`, and Pixar USD rejects the result with "Invalid children
-found in primChildren field". Its own reader accepts both forms, so the file
-looks fine from Rust and fails only here. If that patch is ever dropped, this
-must go back to `.usda`, which is unaffected.
+That depends on the `[patch]` in the root `Cargo.toml`, which teaches
+`openusd`'s crate writer which token lists are `TfTokenVector` (the
+namespace-children and ordering fields) and which are `VtArray<TfToken>`
+(everything else, `xformOpOrder` included). Its own reader accepts both forms,
+so a file with them confused looks perfect from Rust and misbehaves only here
+-- and only one of the two mistakes is loud. Writing an array where USD wants a
+vector fails the open with "Invalid children found in primChildren field";
+writing a vector where it wants an array is silent, and lands as a scene whose
+every prim sits at the origin with its transform plainly authored in the file.
+
+`.usda` is not a way around it: the same patch fixes a text-writer bug where a
+one-item list op dropped its brackets, which USD's parser rejects for
+`apiSchemas`.
 """
 
 from __future__ import annotations
