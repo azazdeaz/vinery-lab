@@ -723,7 +723,7 @@ fn bark(params: &VineParams, rng: &mut Rng) -> Bark {
 /// [`VineyardLayout`] — only `vine_spacing` is needed, and taking it from the
 /// params is what lets this run in [`Grow::Prototypes`], which is ahead of
 /// where the layout is solved.
-fn author_prototypes(
+pub(crate) fn author_prototypes(
     live: NonSend<LiveStage>,
     params: Res<VineParams>,
     parcel: Res<ParcelParams>,

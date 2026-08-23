@@ -125,7 +125,7 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn author(
+pub(crate) fn author(
     live: NonSend<LiveStage>,
     params: Res<TerrainParams>,
     mut ground: ResMut<Ground>,

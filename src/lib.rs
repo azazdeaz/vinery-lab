@@ -5,6 +5,7 @@
 
 pub mod elements;
 pub mod generate;
+pub mod perf;
 pub mod snippet;
 pub mod stage;
 pub mod ui;

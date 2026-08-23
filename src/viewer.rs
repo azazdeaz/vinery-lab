@@ -19,8 +19,8 @@ use crate::elements::util::place;
 use crate::ui::ParamsPanel;
 
 pub fn run() {
-    App::new()
-        .add_plugins((
+    let mut app = App::new();
+    app.add_plugins((
             DefaultPlugins,
             UsdPlugin,
             LiveStagePlugin,
@@ -48,8 +48,15 @@ pub fn run() {
                 save_usd_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
                 sync_camera_enabled_with_ui,
             ),
-        )
-        .run();
+        );
+
+    // Off by default: it logs a line per re-authored frame, which during a
+    // slider drag is every frame. See [`crate::perf`].
+    if std::env::var_os(crate::perf::ENV).is_some() {
+        app.add_plugins(crate::perf::plugin);
+    }
+
+    app.run();
 }
 
 fn open_stage(world: &mut World) -> Result<()> {
