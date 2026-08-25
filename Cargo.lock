@@ -4558,6 +4558,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "openusd"
 version = "0.5.0"
+source = "git+https://github.com/azazdeaz/openusd?rev=21ca55b7d7c3008b33f2e9aca166f43fa3d710f8#21ca55b7d7c3008b33f2e9aca166f43fa3d710f8"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -6029,6 +6030,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 [[package]]
 name = "usd_bevy"
 version = "0.0.1"
+source = "git+https://github.com/azazdeaz/bevy_openusd?rev=06ba93a67042cd7a9a08b6d8f8c7bb7c60bad72e#06ba93a67042cd7a9a08b6d8f8c7bb7c60bad72e"
 dependencies = [
  "anyhow",
  "bevy",
@@ -6041,6 +6043,7 @@ dependencies = [
 [[package]]
 name = "usd_macro"
 version = "0.0.1"
+source = "git+https://github.com/azazdeaz/bevy_openusd?rev=06ba93a67042cd7a9a08b6d8f8c7bb7c60bad72e#06ba93a67042cd7a9a08b6d8f8c7bb7c60bad72e"
 dependencies = [
  "openusd",
  "proc-macro2",

@@ -1,21 +1,27 @@
 ## Python bindings
 
-Requires `bevy_openusd` **and** `openusd` checked out as sibling directories
-(both are path dependencies in `Cargo.toml`). No need to install `maturin`
-yourself — uv fetches it automatically as a PEP 517 build backend.
+By default `usd_bevy` and `openusd` (the latter via `[patch]`) resolve from
+the `azazdeaz/bevy_openusd` and `azazdeaz/openusd` forks over git — nothing
+needs to be checked out locally to build. No need to install `maturin`
+yourself either — uv fetches it automatically as a PEP 517 build backend.
 
-`openusd` is patched rather than used from git: its crate-file writer types
-`TfTokenVector` fields (`primChildren`, `xformOpOrder`) as `VtArray<TfToken>`,
-which Pixar USD refuses to open, so every generated `.usd`/`.usdc` was
-unreadable by Isaac Sim. The fix is two tokens in `write_token_vec`; see the
-`[patch]` stanza in `Cargo.toml`. Check it out at the rev `usd_bevy` pins:
+`openusd` is patched rather than used as a plain git dependency: its
+crate-file writer types `TfTokenVector` fields (`primChildren`,
+`xformOpOrder`) as `VtArray<TfToken>`, which Pixar USD refuses to open, so
+every generated `.usd`/`.usdc` was unreadable by Isaac Sim. The fix lives on
+the fork; see the `[patch]` stanza in `Cargo.toml`.
 
-    git clone https://github.com/mxpv/openusd ../openusd
-    git -C ../openusd checkout -b fix/token-vector-value-type \
-        7934d9f3a375fabc93c14dc96b7900cbd035204d
+### Working on `usd_bevy` / `openusd` locally
+
+Check both out as sibling directories, then uncomment the `path = "../..."`
+line above each git dependency in `Cargo.toml` (and comment out the git
+line):
+
+    git clone git@github.com:azazdeaz/bevy_openusd.git ../bevy_openusd
+    git clone git@github.com:azazdeaz/openusd.git ../openusd
 
 A `[patch]` is only honoured in the workspace root, so building `usdview` in
-`bevy_openusd` standalone needs the same stanza there.
+`bevy_openusd` standalone needs the same stanza there (see its `Cargo.toml`).
 
 The project uses maturin's *mixed* layout: hand-written Python lives in
 `python/vinerylab/`, and the compiled Rust extension is built into it as the
