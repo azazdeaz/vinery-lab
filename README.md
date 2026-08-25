@@ -4,6 +4,9 @@
 
 This is a parametric vineyard generator. It generates USD scenes for robotics simulation. Mainly targeting Isaac Lab.
 
+<img width="2280" height="1138" alt="IsaacLab-Vineyard-test" src="https://github.com/user-attachments/assets/1d290e30-6f75-4984-a730-39a7625c0849" />
+
+
 ## Features
  - GUI based vineyard configurator
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
@@ -42,14 +45,22 @@ VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
 vineyard = AssetBaseCfg(prim_path="/World/Vineyard", spawn=VINEYARD_CFG)
 ```
 
-The scene is generated on first use and cached as a USD file keyed on those
+
+
+https://github.com/user-attachments/assets/0b71d0a7-6847-4c83-9d3f-a9ab9ea2a4cb
+
+
+
+
+
+> The scene is generated on first use and cached as a USD file keyed on those
 parameters, so only the first run pays for it — and an env regex prim path
 (`{ENV_REGEX_NS}/Vineyard`) generates once and clones, whatever `num_envs` is.
 `VineyardCfg` is a `FileCfg`, so `scale`, `semantic_tags`, `rigid_props`,
 `collision_props` and visual materials all work on it as they would on a
 `UsdFileCfg`. See `examples/isaaclab_demo/main.py`.
 
-Cached scenes live in `$VINERYLAB_CACHE_DIR`, else
+> Cached scenes live in `$VINERYLAB_CACHE_DIR`, else
 `$XDG_CACHE_HOME/vinerylab/scenes`, else `~/.cache/vinerylab/scenes`; set
 `cache_dir` on the cfg to override, or `force_regenerate=True` while iterating
 on the generator itself.
