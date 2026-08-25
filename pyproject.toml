@@ -6,6 +6,8 @@ build-backend = "maturin"
 name = "vinerylab"
 description = "Procedural vineyard scene generation, authored to USD."
 requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
 dynamic = ["version"]
 
 [tool.maturin]
