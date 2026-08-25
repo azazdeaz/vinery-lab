@@ -4,8 +4,7 @@
 
 This is a parametric vineyard generator. It generates USD scenes for robotics simulation. Mainly targeting Isaac Lab.
 
-<img width="2280" height="1138" alt="IsaacLab-Vineyard-test" src="https://github.com/user-attachments/assets/1d290e30-6f75-4984-a730-39a7625c0849" />
-
+<img width="2277" height="1317" alt="IsaacLab-Vineyard-test" src="https://github.com/user-attachments/assets/6b59d144-5148-4879-a056-6a5e03692e8a" />
 
 ## Features
  - GUI based vineyard configurator
