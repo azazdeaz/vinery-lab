@@ -38,9 +38,10 @@ from isaaclab.sim import SimulationCfg
 from isaaclab_newton.physics import NewtonCfg
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab_newton.physics import NewtonManager, NewtonSolverCfg
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.utils.configclass import configclass
 
-from vinerylab.isaaclab import ParcelCfg, VineyardCfg
+from vinerylab.isaaclab import ParcelCfg, VineyardCfg, TerrainCfg
 
 ##
 # Pre-defined configs
@@ -52,7 +53,10 @@ from isaaclab_assets.robots.unitree import UNITREE_A1_CFG, UNITREE_GO1_CFG, UNIT
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
-VINEYARD_CFG = VineyardCfg(parcel=ParcelCfg(row_spacing=2.4))
+VINEYARD_CFG = VineyardCfg(
+    terrain=TerrainCfg(height=82.0, max_elevation=8.9),
+    parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
+)
 
 
 def define_origins(num_origins: int, spacing: float) -> list[list[float]]:
@@ -72,11 +76,11 @@ def define_origins(num_origins: int, spacing: float) -> list[list[float]]:
 
 def design_scene() -> tuple[dict, list[list[float]]]:
     """Designs the scene."""
-    # Ground-plane
-    cfg = sim_utils.GroundPlaneCfg()
-    cfg.func("/World/defaultGroundPlane", cfg)
-    # Lights
-    cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
+    # HDR dome light (IBL + visible sky). Outdoor locomotion envs use this map.
+    cfg = sim_utils.DomeLightCfg(
+        intensity=750.0,
+        texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
+    )
     cfg.func("/World/Light", cfg)
 
     # Create separate groups called "Origin1", "Origin2", "Origin3"
@@ -87,6 +91,8 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     sim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
 
     VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
+
+    
     # -- Robot
     # anymal_b = Articulation(ANYMAL_B_CFG.replace(prim_path="/World/Origin1/Robot"))
 
