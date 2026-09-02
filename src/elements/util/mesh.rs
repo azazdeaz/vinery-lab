@@ -59,7 +59,8 @@ impl MeshData {
         Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.points.clone())
             .with_inserted_indices(Indices::U32(indices))
-            .with_computed_normals()
+            // Use area-weighted normals because the angle-weighted normals become zero for small edges
+            .with_computed_area_weighted_normals()
     }
 }
 
@@ -317,6 +318,27 @@ mod tests {
         // axis rather than along a face.
         let n = Vec3::from(normals[0]);
         assert!(n.z.abs() < 0.2, "a barrel normal is level with the axis: {n}");
+    }
+
+    /// Normals must not depend on how big the thing is. A leaf blade is a
+    /// hand's breadth cut into hundreds of triangles, so its edges are
+    /// millimetres, and a smoothing rule with a fixed length epsilon in it
+    /// zeroes every normal at that size and shades the blade black.
+    #[test]
+    fn to_mesh_shades_the_same_at_any_scale() {
+        for size in [10.0, 1.0, 0.1, 0.01, 0.001] {
+            let mesh = box_mesh(size).to_mesh();
+            let normals = mesh
+                .attribute(Mesh::ATTRIBUTE_NORMAL)
+                .and_then(VertexAttributeValues::as_float3)
+                .expect("normals were computed");
+            for n in normals {
+                assert!(
+                    (Vec3::from(*n).length() - 1.0).abs() < 1e-5,
+                    "a box of {size} m has a {n:?} normal on it"
+                );
+            }
+        }
     }
 
     #[test]
