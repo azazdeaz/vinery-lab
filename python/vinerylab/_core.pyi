@@ -12,10 +12,28 @@ write `from vinerylab import VineyardParams` rather than reaching into
 
 __version__: str
 
+class SceneParams:
+    """Parameters that belong to no single element.
+
+    `seed` is the one seed the whole scene is generated from. Every layer salts
+    it with a constant of its own before drawing, so nudging one never re-rolls
+    another -- change it and you get a different vineyard, not a different
+    trunk on the same one.
+    """
+
+    seed: int
+
+    def __init__(
+        self,
+        seed: int = 0,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 class TerrainParams:
     width: float
     height: float
     max_elevation: float
+    variations: int
     detail: int
 
     def __init__(
@@ -61,10 +79,10 @@ class PoleParams:
     what hold the wires up there -- and where the posts stand comes from
     `ParcelParams.post_spacing`, so neither is here.
 
-    There is no `variations` or `seed` either. A post is a manufactured
-    object, and the only variety a row of them shows is in how each was
-    driven: a centimeter off line, a degree off plumb, a few centimeters
-    deeper. That is applied per placement and needs no geometry of its own.
+    There is no `variations` either. A post is a manufactured object, and the
+    only variety a row of them shows is in how each was driven: a centimeter
+    off line, a degree off plumb, a few centimeters deeper. That is applied per
+    placement and needs no geometry of its own.
     """
 
     radius: float
@@ -91,7 +109,6 @@ class VineParams:
     """
 
     variations: int
-    seed: int
     trunk_height: float
     trunk_radius: float
     trunk_wobble: float
@@ -108,7 +125,6 @@ class VineParams:
     def __init__(
         self,
         variations: int = 4,
-        seed: int = 0,
         trunk_height: float = 0.9,
         trunk_radius: float = 0.035,
         trunk_wobble: float = 0.02,
@@ -146,7 +162,6 @@ class ShootParams:
     """
 
     variations: int
-    seed: int
     length: float
     radius: float
     lean: float
@@ -158,7 +173,6 @@ class ShootParams:
     def __init__(
         self,
         variations: int = 4,
-        seed: int = 0,
         length: float = 0.75,
         radius: float = 0.006,
         lean: float = 0.06,
@@ -173,9 +187,9 @@ class LeafParams:
     """One blade of the canopy.
 
     The five blade shapes are *drawn*, not generated -- one SVG outline each
-    under `assets/leaves/`, embedded at build time -- so there is no
-    `variations` or `seed` here the way there is on `VineParams` and
-    `ShootParams`. There are exactly as many variations as there are files.
+    under `assets/leaves/`, embedded at build time -- so `variations` has a
+    natural ceiling here: at 5 every drawing gets a mesh, and above that it
+    buys nothing.
 
     Size is not a parameter: every prototype is built at exactly the same
     area, one full-grown leaf of about 150 cm^2. That is what lets a leaf's
@@ -212,14 +226,12 @@ class PlantingParams:
     youngest of them has put out.
     """
 
-    seed: int
     miss_rate: float
     young_rate: float
     young_scale: float
 
     def __init__(
         self,
-        seed: int = 0,
         miss_rate: float = 0.03,
         young_rate: float = 0.08,
         young_scale: float = 0.55,
@@ -245,6 +257,7 @@ class VineyardParams:
 
     def __init__(
         self,
+        scene: SceneParams | None = None,
         terrain: TerrainParams | None = None,
         parcel: ParcelParams | None = None,
         planting: PlantingParams | None = None,
@@ -254,16 +267,22 @@ class VineyardParams:
         leaf: LeafParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
-    def generate_usda(self) -> str:
-        """Generates the scene and returns it as `usda` text."""
+    def generate_scene_json(self) -> str:
+        """Generates the scene and returns it as a JSON document.
+
+        The whole contract with the USD builder. Public so a caller can cache
+        the bytes, diff two scenes, or build the stage on another machine.
+        """
         ...
     def write_usd(self, path: str) -> None:
-        """Generates the scene and writes it directly to `path` (format
-        chosen by extension -- `.usda`, `.usdc`, `.usd`, `.usdz`).
+        """Generates the scene and writes it to `path` as USD.
 
-        The binary formats depend on the `openusd` `[patch]` in `Cargo.toml`;
-        without it they are written with `TfTokenVector` fields typed as
-        `VtArray<TfToken>`, which Pixar USD rejects on open ("Invalid children
-        found in primChildren field"). `.usda` is unaffected either way.
+        The extension decides the format: `.usd`/`.usdc` for the binary crate
+        form (about a third the bytes and roughly 4x faster for USD to parse),
+        `.usda` for text. The file must not already exist.
+
+        Needs `usd-core`, which is a dependency of this package: the scene is
+        built in Rust and the USD is authored in Python, by
+        `vinerylab.usd.build_usd`.
         """
         ...

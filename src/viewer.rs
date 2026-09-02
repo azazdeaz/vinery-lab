@@ -1,30 +1,30 @@
-//! Interactive viewer: a windowed Bevy app that live-projects the USD stage
-//! and lets you edit its parameters, saving on demand.
+//! Interactive viewer: a windowed Bevy app that draws the generated scene and
+//! lets you edit its parameters, saving on demand.
 //!
-//! The stage is created once at startup and never recreated. Element author
-//! systems edit it in place during `PreUpdate`, and `LiveStagePlugin`'s
-//! `Update` systems project the result — the first frame in full, every
-//! frame after that as a diff against what changed.
+//! Element build systems spawn ordinary Bevy entities during `PreUpdate` and
+//! Bevy renders them directly. Saving exports the same entities as a scene
+//! document for the Python builder to author.
+//!
+//! The scene is authored Z-up and stood upright by the scene root's parent (see
+//! [`scene::z_up_to_y_up`](crate::scene)), so the camera below works in Bevy's
+//! ordinary Y-up world.
 
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
-use usd_bevy::UsdPlugin;
-use usd_bevy::authoring::save_stage_as;
-use usd_bevy::live::{LiveStage, LiveStagePlugin};
 
-use crate::elements::VineyardParams;
 use crate::elements::util::parcel;
-use crate::elements::util::place;
 use crate::ui::ParamsPanel;
+
+/// Where the save key writes the scene document.
+const SCENE_PATH: &str = "scene.json";
 
 pub fn run() {
     let mut app = App::new();
     app.add_plugins((
             DefaultPlugins,
-            UsdPlugin,
-            LiveStagePlugin,
             PanOrbitCameraPlugin,
+            crate::scene::plugin,
             crate::elements::plugin,
             crate::ui::plugin,
             // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
@@ -33,19 +33,11 @@ pub fn run() {
             // from `crate::elements::plugin`.
             parcel::debug_plugin,
         ))
-        // Forced rather than offered as a param: nothing here addresses an
-        // individual plant, and a `PointInstancer` re-authors a parcel in four
-        // array writes rather than a prim and three attributes per vine —
-        // which is what a slider drag pays for on every frame it moves. The
-        // export shape is still what `save_usd_on_key` writes.
-        .insert_resource(place::Style::Instanced)
-        // `open_stage` must land before the first `PreUpdate`, where the
-        // element author systems expect a `LiveStage` to already exist.
-        .add_systems(Startup, (open_stage, setup))
+        .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
-                save_usd_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
+                save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
                 sync_camera_enabled_with_ui,
             ),
         );
@@ -57,12 +49,6 @@ pub fn run() {
     }
 
     app.run();
-}
-
-fn open_stage(world: &mut World) -> Result<()> {
-    let stage = crate::stage::new_stage("scene.usda")?;
-    world.insert_non_send(LiveStage::new(stage));
-    Ok(())
 }
 
 fn setup(mut commands: Commands) {
@@ -83,18 +69,13 @@ fn setup(mut commands: Commands) {
     ));
 }
 
-/// Press `S` to write the scene out as a `.usda` file.
+/// Press `S` to write the scene out as a document for the Python USD builder.
 ///
-/// Re-generates it headlessly rather than saving the stage on screen: the
-/// viewer previews the scene point-instanced, and what a consumer wants is the
-/// addressable, reference-placed shape. Same params and the same author
-/// systems the Python wrapper runs — only [`place::Style`] differs, so this
-/// writes exactly what `write_usd` would.
-fn save_usd_on_key(world: &mut World) -> Result<()> {
-    let params = VineyardParams::from_world(world);
-    let stage = crate::generate::generate_stage(&params)?;
-    save_stage_as(&stage, "scene.usda")?;
-    info!("saved scene.usda");
+/// Exports the entities on screen: the viewer and the export draw from one
+/// scene graph, so there is no preview shape and export shape to keep in step.
+fn save_scene_on_key(world: &mut World) -> Result<()> {
+    std::fs::write(SCENE_PATH, crate::scene::export::scene_json(world)?)?;
+    info!("saved {SCENE_PATH} — build it with `python -m vinerylab.usd {SCENE_PATH} scene.usd`");
     Ok(())
 }
 

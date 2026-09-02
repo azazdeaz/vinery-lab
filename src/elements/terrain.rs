@@ -28,24 +28,21 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use curvo::prelude::{NurbsSurface, SurfaceTessellation3D};
 use nalgebra::Point4;
-use usd_bevy::authoring::{define_prim, remove_prim};
-use usd_bevy::live::LiveStage;
+use crate::scene::{Library, PrimRoot};
 
 use super::Grow;
-use super::util::usd::{MeshData, author_mesh, set_display_color};
+use super::util::mesh::MeshData;
 use super::util::{color, material, parcel, planting};
 
-/// The subtree this element owns and rewrites from scratch.
-pub const TERRAIN: &str = "/Vineyard/Terrain";
+/// The prim this element owns under the scene root.
+pub const TERRAIN: &str = "Terrain";
 
-const SURFACE: &str = "/Vineyard/Terrain/Surface";
+/// The mesh-library prefix this element registers its geometry under.
+const PART: &str = "Terrain";
 
-/// Where this element keeps its material. Inside [`TERRAIN`] rather than in a
-/// scene-wide `/Vineyard/Looks`, so that `remove_prim(TERRAIN)` still rewrites
-/// the whole subtree in one call — and for the same reason every other
-/// material is namespaced under what it shades, which
-/// [`material`](super::util::material) explains at length.
-const LOOKS: &str = "/Vineyard/Terrain/Looks";
+/// Marks the terrain entity, so a rebuild can drop the one before it.
+#[derive(Component)]
+pub struct Terrain;
 
 /// Degree of the lofted surface in both directions, clamped down when there
 /// are too few control points to support it.
@@ -99,7 +96,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                author.run_if(resource_changed::<TerrainParams>),
+                build.run_if(resource_changed::<TerrainParams>),
                 parcel::author.run_if(
                     resource_changed::<parcel::ParcelParams>.or_else(resource_changed::<Ground>),
                 ),
@@ -107,42 +104,51 @@ pub fn plugin(app: &mut App) {
                 .chain()
                 .in_set(Grow::Terrain),
         )
-        // `VineParams` and `PoleParams` are coarse triggers: planting reads
-        // neither, but it does count each element's prototypes on the stage,
-        // and re-placing is also what picks up a prototype subtree that was
-        // rewritten underneath the prims referencing it. Now that two
-        // elements need planting, the next change here should be a registry
-        // the prototype authors push into.
+        // Planting authors every plant's and post's config, so it re-runs
+        // whenever the layout moves or any of the params those configs are
+        // built from change.
         .add_systems(
             PreUpdate,
-            planting::author.in_set(Grow::Plants).run_if(
+            planting::plant.in_set(Grow::Planting).run_if(
                 resource_changed::<planting::PlantingParams>
                     .or_else(resource_changed::<parcel::VineyardLayout>)
+                    .or_else(resource_changed::<parcel::ParcelParams>)
                     .or_else(resource_changed::<super::vine::VineParams>)
-                    .or_else(resource_changed::<super::pole::PoleParams>)
-                    .or_else(resource_changed::<super::util::place::Style>),
+                    .or_else(resource_changed::<super::pole::PoleParams>),
             ),
         );
 }
 
-pub(crate) fn author(
-    live: NonSend<LiveStage>,
+/// Builds the ground surface and publishes the height field under it.
+///
+/// The one layer with nothing to quantize: there is a single ground, so it is
+/// its own single representative and the mesh library gets exactly one entry
+/// from here. It still goes through [`Prototypes`] rather than inlining its
+/// geometry, so that every element reaches the export by the same route.
+pub(crate) fn build(
+    mut commands: Commands,
+    mut library: Library,
     params: Res<TerrainParams>,
+    root: Res<PrimRoot>,
     mut ground: ResMut<Ground>,
+    existing: Query<Entity, With<Terrain>>,
 ) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, TERRAIN)?;
-    define_prim(stage, TERRAIN, "Xform")?;
-    define_prim(stage, LOOKS, "Scope")?;
-    let ground_material = format!("{LOOKS}/Ground");
-    material::author_preview_material(stage, &ground_material, material::GROUND)?;
+    for entity in &existing {
+        commands.entity(entity).despawn();
+    }
+    library.clear(PART);
 
     let (tessellation, divisions) = terrain_tessellation(&params)?;
-    let surface = author_mesh(stage, SURFACE, &mesh_data(&tessellation))?;
-    // Unjittered: there is one ground, so there is nothing for a per-variation
-    // drift to tell apart.
-    set_display_color(&surface, color::srgb(color::GROUND))?;
-    material::bind_material(stage, SURFACE, &ground_material)?;
+    let geometry = library.part(
+        PART,
+        0,
+        mesh_data(&tessellation).to_mesh(),
+        // Unjittered: there is one ground, so nothing for a per-mesh drift to
+        // tell apart.
+        material::GROUND.surface(color::srgb(color::GROUND)),
+    );
+
+    commands.spawn((Terrain, Name::new(TERRAIN), geometry, ChildOf(root.0)));
 
     *ground = Ground::from_tessellation(&tessellation, divisions);
     Ok(())
@@ -402,10 +408,21 @@ pub fn ui() -> impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::VineyardParams;
-    use crate::elements::util::testing::{Authoring, bounds, face_normal, faces};
-    use openusd::schemas::geom::{Mesh, PointBased};
-    use openusd::sdf::{self, Value};
+    use crate::elements::util::testing::{bounds, face_normal, faces, scene_app};
+    use crate::scene::doc::SceneDoc;
+    use crate::scene::export::scene_doc;
+
+    /// Builds the terrain once, and hands back the app together with what the
+    /// export would make of it.
+    fn built(params: TerrainParams) -> (App, SceneDoc) {
+        let mut app = scene_app();
+        app.insert_resource(params)
+            .init_resource::<Ground>()
+            .add_systems(Update, build);
+        app.update();
+        let doc = scene_doc(app.world_mut()).unwrap();
+        (app, doc)
+    }
 
     fn mesh(params: &TerrainParams) -> MeshData {
         let (tessellation, _) = terrain_tessellation(params).expect("terrain lofts");
@@ -571,38 +588,47 @@ mod tests {
     }
 
     #[test]
-    fn authors_the_terrain_surface_under_the_scene_root() {
-        let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        let usda = stage.root_layer().export_to_string().unwrap();
+    fn the_ground_reaches_the_export_as_a_referenced_part() {
+        let (_, doc) = built(TerrainParams::default());
 
-        assert!(usda.contains("defaultPrim = \"Vineyard\""), "got:\n{usda}");
+        let terrain = doc
+            .root
+            .children
+            .iter()
+            .find(|child| child.name == TERRAIN)
+            .expect("the terrain hangs off the scene root");
+        let name = terrain
+            .reference
+            .as_deref()
+            .expect("its geometry comes from the mesh library");
+        assert!(terrain.instanceable);
+
+        let part = doc
+            .parts
+            .iter()
+            .find(|part| part.name == name)
+            .unwrap_or_else(|| panic!("the library holds `{name}`"));
+        assert!(!part.points.is_empty(), "the ground has points");
         assert!(
-            matches!(
-                Mesh::get(&stage, sdf::path(SURFACE).unwrap())
-                    .unwrap()
-                    .expect("terrain mesh authored")
-                    .points_attr()
-                    .get::<Value>()
-                    .unwrap(),
-                Some(Value::Vec3fVec(p)) if !p.is_empty()
-            ),
-            "the terrain mesh has points"
+            part.normals.is_some(),
+            "and normals, which the USD export used to leave to a consumer's guess"
         );
     }
 
-    /// Re-authoring the terrain must not disturb the sibling subtrees under
-    /// `/Vineyard`: the element owns `/Vineyard/Terrain`, not the root itself.
+    /// A rebuild has to *replace* what the last one made. Left alone, a slider
+    /// drag would stack a ground on every frame it moved and fill the mesh
+    /// library with geometry nothing references.
     #[test]
-    fn re_authoring_keeps_the_scene_root_intact() {
-        let mut authoring = Authoring::new("terrain.usda", author);
-        define_prim(&authoring.stage, "/Vineyard/Sibling", "Xform").unwrap();
-        authoring
-            .insert(TerrainParams::default())
-            .insert(Ground::default())
-            .run()
-            .run();
+    fn rebuilding_replaces_what_it_built_before() {
+        let (mut app, _) = built(TerrainParams::default());
+        app.insert_resource(TerrainParams {
+            detail: 8,
+            ..default()
+        });
+        app.update();
 
-        assert!(authoring.has("/Vineyard/Sibling"));
-        assert!(authoring.has(SURFACE));
+        let doc = scene_doc(app.world_mut()).unwrap();
+        assert_eq!(doc.root.children.len(), 1, "one ground, not two");
+        assert_eq!(doc.parts.len(), 1, "and one entry in the library");
     }
 }

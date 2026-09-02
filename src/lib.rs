@@ -1,13 +1,17 @@
-//! `vinerylab` — procedural vineyard scenes, authored to USD via
-//! [`usd_bevy`], usable either as an interactive Bevy viewer
-//! ([`viewer::run`]) or headlessly from Python ([`python`], behind the
-//! `python` feature) to generate a `.usda`/`.usd` file in one shot.
+//! `vinerylab` — procedural vineyard scenes.
+//!
+//! The scene is built in Bevy as ordinary meshes and transforms, and comes out
+//! as a [`SceneDoc`](scene::doc::SceneDoc): a plain JSON description that
+//! `python/vinerylab/usd/build.py` turns into a USD stage. Usable either as an
+//! interactive viewer ([`viewer::run`]) or headlessly from Python ([`python`],
+//! behind the `python` feature).
 
 pub mod elements;
 pub mod generate;
 pub mod perf;
+pub mod quantize;
+pub mod scene;
 pub mod snippet;
-pub mod stage;
 pub mod ui;
 pub mod viewer;
 

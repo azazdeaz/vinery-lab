@@ -23,55 +23,97 @@
 //! every other ground-planted prototype: the placer supplies a position on the
 //! terrain and a yaw along the row, and needs to know nothing else.
 //!
-//! # One subtree
+//! # One layer
 //!
-//! The prototype library under [`PROTOTYPE`] — a single `Var_0`, an `Xform`
-//! over one `Pole` mesh plus the `Looks` scope holding its material. Where
-//! poles stand is [`planting`](super::util::planting)'s business, and so is
-//! the variety they show: a post is a manufactured object, identical to its
-//! neighbour except in how it was driven.
+//! [`planting`](super::util::planting) authors a [`PoleConfig`] per post and
+//! places it; this element turns the distinct configs into meshes. The variety
+//! a row shows is per placement, not per shape: a post is a manufactured
+//! object, identical to its neighbour except in how it was driven.
 //!
 //! [`ParcelParams::trellis_height`]: super::util::parcel::ParcelParams::trellis_height
-//! [`cylinder_mesh`]: super::util::usd::cylinder_mesh
+//! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
 
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use usd_bevy::authoring::{define_prim, remove_prim};
-use usd_bevy::live::LiveStage;
+use crate::quantize::{Metric, farthest_first};
+use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
 
 use super::Grow;
 use super::util::parcel::ParcelParams;
-use super::util::usd::{MeshData, author_mesh, cylinder_mesh, set_display_color};
+use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::{color, material};
 
-/// The prototype library this element owns.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Pole";
+/// The mesh-library prefix this element registers its geometry under.
+pub const PART: &str = "Pole";
 
-/// How many prototypes this element authors.
+/// How many distinct post meshes the scene may hold.
 ///
 /// One, where every other element has a `variations` knob. A post is a
 /// manufactured object: two of them differ in how they were driven — a
 /// centimeter off line, a degree off plumb, a few centimeters deeper — and
 /// that is per *placement*, costs no geometry, and is where
-/// [`planting`](super::util::planting) puts it. Authoring four identical
-/// cylinders to pick between would buy nothing.
+/// [`planting`](super::util::planting) puts it. Raise it if a post's *shape*
+/// ever varies down a row.
 pub const VARIATIONS: usize = 1;
-
-/// The mesh under a variation. Named because the placement tests reach for it,
-/// and because a `Var_0` that is an `Xform` has to say what its geometry is.
-pub const POLE: &str = "Pole";
-
-/// Where a variation keeps its material, inside the subtree that gets
-/// referenced onto the ground — a binding whose target sits outside it is
-/// silently dropped, which [`material`](super::util::material) has the full
-/// account of.
-const LOOKS: &str = "Looks";
 
 /// Shortest post we will build. A trellis height of zero is reachable from
 /// Python, and a zero-length cylinder is a mesh with two coincident rings.
 const MIN_HEIGHT: f32 = 0.1;
+
+// ─── Config ─────────────────────────────────────────────────────────
+
+/// One post's shape.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct PoleConfig {
+    pub radius: f32,
+    /// How far it stands above the ground.
+    pub height: f32,
+    /// Vertices around the post.
+    pub sides: u32,
+}
+
+impl PoleConfig {
+    /// The post a trellis of this height calls for.
+    ///
+    /// Clamped here rather than in the mesh builder, so the config a metric
+    /// compares is the shape that actually gets built.
+    pub fn new(params: &PoleParams, parcel: &ParcelParams) -> Self {
+        Self {
+            radius: params.radius.max(0.001),
+            height: parcel.trellis_height.max(MIN_HEIGHT),
+            sides: params.sides.max(3),
+        }
+    }
+
+    /// One post, standing on the origin and running up +Z.
+    fn mesh(&self) -> MeshData {
+        cylinder_mesh(self.radius, self.height, self.sides as usize)
+    }
+}
+
+/// Two posts share a mesh when they are close in every dimension a post has.
+///
+/// The weights convert each field into roughly how far apart it *looks*: a
+/// centimetre of radius shows on the silhouette, ten centimetres of height
+/// barely does, and a facet either way is close to invisible past the first
+/// few.
+pub struct PoleMetric;
+
+impl Metric<PoleConfig> for PoleMetric {
+    fn distance(&self, a: &PoleConfig, b: &PoleConfig) -> f32 {
+        [
+            a.radius - b.radius,
+            (a.height - b.height) * 0.1,
+            (a.sides as f32 - b.sides as f32) * 0.01,
+        ]
+        .iter()
+        .map(|d| d * d)
+        .sum::<f32>()
+        .sqrt()
+    }
+}
 
 // ─── Params ─────────────────────────────────────────────────────────
 
@@ -104,53 +146,49 @@ pub fn plugin(app: &mut App) {
     // owns it, and `elements::plugin` adds terrain first.
     app.init_resource::<PoleParams>().add_systems(
         PreUpdate,
-        author_prototypes.in_set(Grow::Prototypes).run_if(
-            resource_changed::<PoleParams>
-                // The posts are as tall as the trellis they carry.
-                .or_else(resource_changed::<ParcelParams>),
-        ),
+        build
+            .in_set(Grow::Poles)
+            .run_if(configs_changed::<PoleConfig>),
     );
 }
 
-// ─── Shape ──────────────────────────────────────────────────────────
+// ─── Building ───────────────────────────────────────────────────────
 
-/// One post, in the prototype's local frame: standing on the origin, running
-/// up +Z to the trellis height.
-fn pole_mesh(params: &PoleParams, parcel: &ParcelParams) -> MeshData {
-    cylinder_mesh(
-        params.radius.max(0.001),
-        parcel.trellis_height.max(MIN_HEIGHT),
-        params.sides as usize,
-    )
+/// Builds one mesh per distinct post and gives it to every post that drew it.
+///
+/// A post has no children, so it carries its geometry directly rather than
+/// through a child prim.
+pub fn build(
+    mut commands: Commands,
+    mut library: Library,
+    posts: Query<(Entity, &Order, &PoleConfig)>,
+) {
+    library.clear(PART);
+
+    let mut posts: Vec<(Order, Entity, PoleConfig)> = posts
+        .iter()
+        .map(|(entity, order, config)| (*order, entity, *config))
+        .collect();
+    posts.sort_by_key(|(order, ..)| *order);
+
+    let configs: Vec<PoleConfig> = posts.iter().map(|(_, _, config)| *config).collect();
+    let book = farthest_first(&configs, VARIATIONS, 0.0, &PoleMetric);
+
+    let geometry: Vec<Geometry> = book
+        .representatives
+        .iter()
+        .enumerate()
+        .map(|(i, config)| library.part(PART, i, config.mesh().to_mesh(), surface()))
+        .collect();
+
+    for ((_, entity, _), drew) in posts.iter().zip(&book.assignment) {
+        commands.entity(*entity).insert(geometry[*drew as usize].clone());
+    }
 }
 
-// ─── Authoring ──────────────────────────────────────────────────────
-
-/// Authors the single prototype under [`PROTOTYPE`].
-pub fn author_prototypes(
-    live: NonSend<LiveStage>,
-    params: Res<PoleParams>,
-    parcel: Res<ParcelParams>,
-) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, PROTOTYPE)?;
-    define_prim(stage, PROTOTYPE, "Scope")?;
-
-    // An `Xform` over the mesh rather than a bare `Mesh`, so the variation has
-    // somewhere to keep the material that has to travel with it.
-    let variation = format!("{PROTOTYPE}/Var_0");
-    define_prim(stage, &variation, "Xform")?;
-    define_prim(stage, &format!("{variation}/{LOOKS}"), "Scope")?;
-    let pole_material = format!("{variation}/{LOOKS}/{POLE}");
-    material::author_preview_material(stage, &pole_material, material::POLE)?;
-
-    let path = format!("{variation}/{POLE}");
-    let pole = author_mesh(stage, &path, &pole_mesh(&params, &parcel))?;
-    // No per-variation shade: there is one variation, and a row of posts that
-    // came off the same pallet genuinely is one colour.
-    set_display_color(&pole, color::srgb(color::POLE))?;
-    material::bind_material(stage, &path, &pole_material)?;
-    Ok(())
+/// No per-post shade: a row of posts off the same pallet is one colour.
+fn surface() -> Surface {
+    material::POLE.surface(color::srgb(color::POLE))
 }
 
 // ─── UI ─────────────────────────────────────────────────────────────
@@ -187,36 +225,36 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::place::prototype_count;
-    use crate::elements::util::testing::{Authoring, bounds};
-    use openusd::schemas::shade::MaterialBindingAPI;
-    use openusd::sdf;
+    use crate::elements::util::testing::{self, bounds, organs};
+    use crate::scene::Prototypes;
 
-    fn parcel() -> ParcelParams {
-        ParcelParams::default()
+    fn config(params: PoleParams, trellis_height: f32) -> PoleConfig {
+        PoleConfig::new(
+            &params,
+            &ParcelParams {
+                trellis_height,
+                ..default()
+            },
+        )
     }
 
-    fn authored(params: PoleParams, parcel: ParcelParams) -> Authoring {
-        let mut authoring = Authoring::new("pole.usda", author_prototypes);
-        authoring.insert(params).insert(parcel).run();
-        authoring
+    /// Runs the layer over `posts`, and hands back the mesh library it filled
+    /// together with which post drew what.
+    fn built(posts: &[PoleConfig], budget: usize) -> (Vec<String>, Vec<u32>) {
+        let book = farthest_first(posts, budget, 0.0, &PoleMetric);
+        let names = (0..book.len()).map(|i| format!("{PART}_{i}")).collect();
+        (names, book.assignment)
     }
 
     /// The placement contract: a post stands *on* the origin rather than
     /// straddling it, and reaches the trellis height the layout solved its
-    /// wires for. Authored centered, every post in the parcel would be sunk
-    /// half its length into the ground.
+    /// wires for. Authored centered, every post would be sunk half its length
+    /// into the ground.
     #[test]
     fn a_pole_stands_on_the_origin_and_reaches_the_trellis_height() {
         let params = PoleParams::default();
         for trellis_height in [0.9, 1.8, 3.0] {
-            let mesh = pole_mesh(
-                &params,
-                &ParcelParams {
-                    trellis_height,
-                    ..parcel()
-                },
-            );
+            let mesh = config(params.clone(), trellis_height).mesh();
             assert_eq!(bounds(&mesh, 2), (0.0, trellis_height));
             for axis in [0, 1] {
                 assert_eq!(
@@ -232,7 +270,7 @@ mod tests {
     /// plausible while doing nothing, since a coarser post is still a post.
     #[test]
     fn the_shape_knobs_reach_the_mesh() {
-        let at = |radius, sides| pole_mesh(&PoleParams { radius, sides }, &parcel());
+        let at = |radius, sides| config(PoleParams { radius, sides }, 1.8).mesh();
         let default = PoleParams::default();
 
         assert!(
@@ -246,29 +284,11 @@ mod tests {
     /// viewer's sliders can't reach. Nothing may come back degenerate.
     #[test]
     fn a_post_asked_for_at_the_stops_still_builds() {
-        for (params, parcel) in [
-            (
-                PoleParams {
-                    radius: 0.0,
-                    sides: 0,
-                },
-                ParcelParams {
-                    trellis_height: 0.0,
-                    ..parcel()
-                },
-            ),
-            (
-                PoleParams {
-                    radius: 1.0,
-                    sides: 64,
-                },
-                ParcelParams {
-                    trellis_height: 12.0,
-                    ..parcel()
-                },
-            ),
+        for (params, trellis_height) in [
+            (PoleParams { radius: 0.0, sides: 0 }, 0.0),
+            (PoleParams { radius: 1.0, sides: 64 }, 12.0),
         ] {
-            let mesh = pole_mesh(&params, &parcel);
+            let mesh = config(params.clone(), trellis_height).mesh();
             assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
             let (z0, z1) = bounds(&mesh, 2);
             let height = z1 - z0;
@@ -276,41 +296,48 @@ mod tests {
         }
     }
 
+    /// Posts are identical by construction today, so the whole parcel shares
+    /// one mesh however many posts stand in it.
     #[test]
-    fn authors_one_prototype() {
-        let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        assert_eq!(prototype_count(&stage, PROTOTYPE), VARIATIONS);
+    fn identical_posts_share_one_mesh() {
+        let posts = vec![config(PoleParams::default(), 1.8); 40];
+        let (names, drew) = built(&posts, VARIATIONS);
+
+        assert_eq!(names.len(), 1, "one distinct post, one mesh");
+        assert!(drew.iter().all(|d| *d == 0), "and every post drew it");
     }
 
-    /// The material has to sit *inside* the variation, because that subtree is
-    /// what gets referenced onto the ground and a binding pointing out of it
-    /// is silently dropped — see [`material`](super::super::util::material).
-    /// Resolved rather than read off the prim, so a target that composed away
-    /// to nothing fails here.
+    /// The budget is what makes that true, not luck: given posts that really
+    /// differ, the metric has to tell them apart.
     #[test]
-    fn a_pole_carries_its_own_material() {
-        let authoring = authored(PoleParams::default(), parcel());
-        let path = format!("{PROTOTYPE}/Var_0/{POLE}");
-        let resolved = MaterialBindingAPI::apply(&authoring.stage, sdf::path(&path).unwrap())
-            .unwrap()
-            .compute_bound_material("")
-            .unwrap()
-            .expect("the post resolves a material")
-            .as_str()
-            .to_string();
+    fn posts_that_differ_are_told_apart() {
+        let posts = vec![
+            config(PoleParams::default(), 1.8),
+            config(PoleParams::default(), 1.8),
+            config(PoleParams { radius: 0.2, sides: 8 }, 1.8),
+        ];
+        let (names, drew) = built(&posts, 2);
 
-        assert_eq!(resolved, format!("{PROTOTYPE}/Var_0/{LOOKS}/{POLE}"));
-        assert!(authoring.has(&resolved));
+        assert_eq!(names.len(), 2);
+        assert_eq!(drew[0], drew[1], "the two matching posts share a mesh");
+        assert_ne!(drew[0], drew[2], "the thick one gets its own");
     }
 
-    /// The element owns its subtree and rewrites it from scratch, so a second
-    /// pass must leave exactly what the first one did.
+    /// End to end through the schedule: every post the parcel planted comes out
+    /// carrying geometry, and the library holds exactly what they drew.
     #[test]
-    fn re_authoring_rewrites_rather_than_accumulates() {
-        let mut authoring = authored(PoleParams::default(), parcel());
-        assert!(authoring.has(&format!("{PROTOTYPE}/Var_0/{POLE}")));
+    fn every_planted_post_draws_a_mesh_from_the_library() {
+        let mut app = testing::grown(VineyardParams::default());
+        let posts = organs::<PoleConfig>(app.world_mut());
+        assert!(posts.len() > 20, "the fixture planted posts");
 
-        authoring.insert(PoleParams::default()).run();
-        assert_eq!(prototype_count(&authoring.stage, PROTOTYPE), VARIATIONS);
+        let library = app.world().resource::<Prototypes>();
+        assert!(library.get(&format!("{PART}_0")).is_some());
+        assert_eq!(
+            (0..)
+                .take_while(|i| library.get(&format!("{PART}_{i}")).is_some())
+                .count(),
+            VARIATIONS
+        );
     }
 }

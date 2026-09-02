@@ -18,6 +18,19 @@ from isaaclab.utils.configclass import configclass
 
 
 @configclass
+class SceneCfg:
+    """Parameters that belong to no single element.
+
+    `seed` is the one seed the whole scene is generated from. Every layer salts
+    it with a constant of its own before drawing, so nudging one never re-rolls
+    another -- change it and you get a different vineyard, not a different
+    trunk on the same one.
+    """
+
+    seed: int = 0
+
+
+@configclass
 class TerrainCfg:
     """The ground surface the vineyard stands on."""
 
@@ -60,7 +73,6 @@ class PlantingCfg:
     youngest of them has put out.
     """
 
-    seed: int = 0
     miss_rate: float = 0.03
     young_rate: float = 0.08
     young_scale: float = 0.55
@@ -74,7 +86,7 @@ class PoleCfg:
     what hold the wires up there -- and where the posts stand comes from
     `ParcelCfg.post_spacing`, so neither is here.
 
-    There is no `variations` or `seed` either: a post is a manufactured
+    There is no `variations` either: a post is a manufactured
     object, and the only variety a row of them shows is in how each was
     driven, which is applied per placement.
     """
@@ -94,7 +106,6 @@ class VineCfg:
     """
 
     variations: int = 4
-    seed: int = 0
     trunk_height: float = 0.9
     trunk_radius: float = 0.035
     trunk_wobble: float = 0.02
@@ -122,7 +133,6 @@ class ShootCfg:
     """
 
     variations: int = 4
-    seed: int = 0
     length: float = 0.75
     radius: float = 0.006
     lean: float = 0.06
@@ -137,14 +147,15 @@ class LeafCfg:
     """One blade of the canopy.
 
     The blade shapes are drawn rather than generated -- one SVG outline each,
-    embedded at build time -- so there is no `variations` or `seed` here the
-    way there is on `VineCfg`. Size is not a parameter either: every prototype
-    is built at the same area, and a leaf's size comes from the scale it is
-    placed at.
+    embedded at build time -- so `variations` has a natural ceiling here: at 5
+    every drawing gets a mesh, and above that it buys nothing. Size is not a
+    parameter: every blade is built at the same area, and a leaf's size comes
+    from the scale it is placed at.
 
     `detail` is how many triangles the blade's interior is cut into.
     """
 
+    variations: int = 5
     detail: int = 120
 
 
@@ -162,7 +173,8 @@ class VineyardCfg(FileCfg):
 
         VINEYARD_CFG = VineyardCfg(
             parcel=ParcelCfg(row_spacing=2.8, vine_spacing=1.05),
-            vine=VineCfg(arms=1, seed=42),
+            scene=SceneCfg(seed=42),
+            vine=VineCfg(arms=1),
         )
 
         # plain script or a direct env's _setup_scene()
@@ -177,6 +189,7 @@ class VineyardCfg(FileCfg):
 
     func: Callable | str = "{DIR}.vineyard:spawn_vineyard"
 
+    scene: SceneCfg = SceneCfg()
     terrain: TerrainCfg = TerrainCfg()
     parcel: ParcelCfg = ParcelCfg()
     planting: PlantingCfg = PlantingCfg()
@@ -194,6 +207,7 @@ class VineyardCfg(FileCfg):
 
 
 FRAGMENTS: tuple[tuple[str, type], ...] = (
+    ("scene", SceneCfg),
     ("terrain", TerrainCfg),
     ("parcel", ParcelCfg),
     ("planting", PlantingCfg),

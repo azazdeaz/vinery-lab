@@ -1,40 +1,43 @@
 //! Headless, single-cycle scene generation: no window, no renderer, no
-//! async runner — just `App::update()` once and then read the stage.
+//! async runner — just `App::update()` once, then read the scene graph out.
 
 use bevy::prelude::*;
-use openusd::usd::Stage;
-use usd_bevy::live::LiveStage;
 
 use crate::elements::VineyardParams;
+use crate::scene::doc::SceneDoc;
+use crate::scene::export::scene_doc;
 
-/// Runs one cycle of a minimal headless app and returns the authored USD
-/// `Stage`.
+/// Runs one cycle of a minimal headless app and returns the scene document the
+/// Python USD builder takes.
 ///
-/// Deliberately uses `App::update()` instead of `App::run()`: `run()` hands
-/// off to a runner (which, with a windowed app, never returns and may call
-/// `process::exit`) — exactly what we want to avoid when calling this from
-/// Python. `update()` just runs the schedule once, synchronously, and
-/// returns control to the caller.
-///
-/// Also deliberately uses `MinimalPlugins` rather than `DefaultPlugins`:
-/// `DefaultPlugins` pulls in `LogPlugin`, which installs a *global*
-/// `tracing` subscriber — calling this function twice in one process would
-/// panic on the second call. `MinimalPlugins` skips windowing, rendering and
-/// asset loading entirely, none of which authoring needs.
-///
-/// `LiveStagePlugin` is left out too: the stage is the output here, so
-/// there's nothing to project it into. The `LiveStage` wrapper is still used
-/// (it holds the stage for the author systems, which take it either way), it
-/// just never gets drained.
-pub fn generate_stage(params: &VineyardParams) -> anyhow::Result<Stage> {
-    let stage = crate::stage::new_stage("scene.usda")?;
+/// The export path: hand the JSON to `python -m vinerylab.usd` — or to
+/// [`build_usd`](../python/vinerylab/usd/build.py) directly — and it becomes a
+/// stage.
+pub fn generate_scene(params: &VineyardParams) -> anyhow::Result<SceneDoc> {
+    scene_doc(grow(params)?.world_mut())
+}
 
+/// One build cycle, handing back the app to read the scene graph out of.
+///
+/// Deliberately `App::update()` rather than `App::run()`: `run()` hands off to
+/// a runner (which, with a windowed app, never returns and may call
+/// `process::exit`) — exactly what to avoid when calling this from Python.
+/// `update()` runs the schedule once, synchronously, and returns.
+///
+/// Deliberately `MinimalPlugins` rather than `DefaultPlugins` too:
+/// `DefaultPlugins` pulls in `LogPlugin`, which installs a *global* `tracing`
+/// subscriber, so calling this twice in one process would panic on the second
+/// call. `AssetPlugin` on top of it because meshes and materials are assets and
+/// the plugins that normally register them are the render ones, which nothing
+/// here needs.
+fn grow(params: &VineyardParams) -> anyhow::Result<App> {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .add_plugins(crate::elements::plugin);
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .add_plugins((crate::scene::plugin, crate::elements::plugin));
     // After the element plugins, so these override their defaults.
     params.clone().insert(app.world_mut());
-    app.world_mut().insert_non_send(LiveStage::new(stage.clone()));
 
     // Let plugins finish deferred setup before the first update, as `run()`
     // would have done for us.
@@ -42,298 +45,156 @@ pub fn generate_stage(params: &VineyardParams) -> anyhow::Result<Stage> {
     app.cleanup();
     app.update();
 
-    Ok(stage)
+    Ok(app)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::place::Style;
-    use crate::elements::util::testing::{self, STYLES};
+    use crate::scene::doc::{FORMAT, Node};
+    use std::collections::{BTreeMap, BTreeSet};
 
-    /// The only export target is robotics simulation (Isaac Lab / ROS,
-    /// REP-103 right-handed Z-up), so the generated stage must declare that
-    /// convention itself rather than relying on a consumer to correct for
-    /// Y-up — `upAxis`/`metersPerUnit` don't compose through references, so
-    /// an unauthored (default Y-up) root stage would be silently wrong.
-    #[test]
-    fn generated_stage_declares_z_up_meters() {
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
-        assert!(
-            matches!(
-                stage.stage_metadata("upAxis").unwrap(),
-                Some(openusd::sdf::Value::Token(t)) if t.as_str() == "Z"
-            ),
-            "generated stage must author upAxis = Z"
-        );
-        assert!(
-            matches!(
-                stage.stage_metadata("metersPerUnit").unwrap(),
-                Some(openusd::sdf::Value::Double(d)) if (d - 1.0).abs() < 1e-9
-            ),
-            "generated stage must author metersPerUnit = 1.0"
-        );
-    }
-
-    /// The generated stage must be byte-identical across runs for the same
-    /// params, so a downstream sim gets a reproducible scene.
+    /// Writes the current scene document out, for eyeballing the export or
+    /// building a stage from it by hand:
     ///
-    /// Both placement styles, because they reach the stage by different
-    /// routes: a prim and a reference each, or one ordering of four parallel
-    /// arrays.
+    /// ```text
+    /// cargo test dump_scene -- --ignored --nocapture
+    /// python -m vinerylab.usd scene.json scene.usda --force
+    /// ```
+    ///
+    /// A dev tool rather than a test, and `#[ignore]`d for the same reason
+    /// [`perf::bench`](crate::perf) is: it writes a file and asserts nothing.
     #[test]
-    fn generation_is_reproducible() {
-        for style in STYLES {
-            let export = || {
-                testing::grown(VineyardParams::default(), style)
-                    .0
-                    .root_layer()
-                    .export_to_string()
-                    .unwrap()
-            };
-            assert_eq!(export(), export(), "{style:?}");
-        }
-    }
-
-    #[test]
-    fn generated_stage_has_a_default_prim() {
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
-        let usda = stage.root_layer().export_to_string().unwrap();
-        assert!(
-            usda.contains("defaultPrim = \"Vineyard\""),
-            "got:\n{usda}"
+    #[ignore]
+    fn dump_scene() {
+        let doc = generate_scene(&VineyardParams::default()).unwrap();
+        let json = serde_json::to_string_pretty(&doc).unwrap();
+        std::fs::write("scene.json", &json).unwrap();
+        println!(
+            "wrote scene.json: {} parts, {} bytes",
+            doc.parts.len(),
+            json.len()
         );
     }
 
-    /// Every prim on the stage, including the abstract prototype library —
-    /// `Prim::children` is unfiltered, unlike a default traversal predicate.
-    fn every_prim(stage: &openusd::usd::Stage) -> Vec<openusd::sdf::Path> {
-        let mut found = Vec::new();
-        let mut stack = vec![openusd::sdf::Path::abs_root()];
-        while let Some(path) = stack.pop() {
-            for child in stage.prim(path).children().unwrap() {
-                stack.push(child.path().clone());
-                found.push(child.path().clone());
-            }
+    fn scene() -> SceneDoc {
+        generate_scene(&VineyardParams::default()).expect("the default parcel generates")
+    }
+
+    /// Every prim in the document, depth first.
+    fn walk<'a>(node: &'a Node, into: &mut Vec<(String, &'a Node)>, at: &str) {
+        let path = format!("{at}/{}", node.name);
+        for child in &node.children {
+            walk(child, into, &path);
         }
+        into.push((path, node));
+    }
+
+    fn prims(doc: &SceneDoc) -> Vec<(String, &Node)> {
+        let mut found = Vec::new();
+        walk(&doc.root, &mut found, "");
         found
     }
 
-    /// No relationship target may leave the default prim.
-    ///
-    /// Relationship targets are namespace-mapped through composition arcs, and
-    /// a target outside the arc's scope cannot be mapped, so USD drops it. The
-    /// failure is invisible from in here: opened directly the stage is perfect,
-    /// and only a consumer *referencing* the layer sees the damage — a
-    /// `PointInstancer` keeping all its instances and losing every prototype,
-    /// drawing nothing. Composition arcs may point anywhere; targets may not.
-    ///
-    /// This guards the whole stage rather than any one element, because the
-    /// rule binds every relationship an element might author later — material
-    /// bindings, physics joint bodies, collision groups — not just
-    /// `prototypes`.
-    ///
-    /// Run at both placement styles because `place_instanced` authors the only
-    /// relationship on the stage today: reference-placed alone, this walks a
-    /// scene with nothing to check.
+    /// The only export target is robotics simulation (Isaac Lab / ROS,
+    /// REP-103 right-handed Z-up), so the document has to carry that
+    /// convention itself. `upAxis`/`metersPerUnit` are root-layer-only
+    /// metadata that do not compose through references, so a consumer cannot
+    /// correct for a stage that got them wrong — and USD's unauthored default
+    /// is Y-up, which means silence is not neutral, it is wrong.
     #[test]
-    fn no_relationship_target_escapes_the_default_prim() {
-        let root = crate::stage::ROOT;
-        let inside = |p: &str| p == root || p.starts_with(&format!("{root}/"));
-
-        for style in STYLES {
-            let (stage, _) = testing::grown(VineyardParams::default(), style);
-            let prims = every_prim(&stage);
-            assert!(
-                prims.iter().any(|p| p.as_str() == crate::stage::PARTS),
-                "the walk reaches the abstract prototype library, so a stage whose \
-                 only escaping targets live in there cannot pass by being skipped"
-            );
-
-            let escapes: Vec<String> = prims
-                .iter()
-                .flat_map(|path| stage.prim(path.clone()).relationships().unwrap())
-                .flat_map(|rel| {
-                    let from = rel.path().as_str().to_string();
-                    rel.targets()
-                        .unwrap()
-                        .into_iter()
-                        .map(move |t| (from.clone(), t))
-                })
-                .filter(|(_, target)| !inside(target.as_str()))
-                .map(|(from, target)| format!("{from} -> {}", target.as_str()))
-                .collect();
-
-            assert!(
-                escapes.is_empty(),
-                "{style:?}: these targets would be silently dropped when the \
-                 layer is referenced:\n  {}",
-                escapes.join("\n  ")
-            );
-        }
-    }
-
-    /// The colour of every mesh on the stage, keyed by prim path.
-    fn display_colors(stage: &openusd::usd::Stage) -> Vec<(String, [f32; 3])> {
-        every_prim(stage)
-            .into_iter()
-            .filter_map(|path| {
-                let mesh = openusd::schemas::geom::Mesh::get(stage, path.clone()).ok()??;
-                let value = openusd::schemas::geom::Gprim::display_color_attr(&mesh)
-                    .get::<openusd::sdf::Value>()
-                    .ok()?;
-                let openusd::sdf::Value::Vec3fVec(v) = value? else {
-                    return None;
-                };
-                let c = v.first()?;
-                Some((path.as_str().to_string(), [c.x, c.y, c.z]))
-            })
-            .collect()
+    fn the_document_declares_z_up_meters() {
+        let doc = scene();
+        assert_eq!(doc.format, FORMAT);
+        assert_eq!(doc.up_axis, "Z");
+        assert_eq!(doc.meters_per_unit, 1.0);
     }
 
     /// Nothing may reach a consumer untinted. `displayColor` is the one
-    /// channel both consumers read — it is what the viewer draws, and what a
-    /// bound material's `diffuseColor` reads back through its primvar reader —
-    /// so a mesh without one is a mesh that renders grey everywhere.
-    #[test]
-    fn every_mesh_on_the_stage_carries_a_color() {
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
-        let meshes: Vec<String> = every_prim(&stage)
-            .into_iter()
-            .filter(|p| {
-                matches!(stage.prim(p.clone()).type_name(), Ok(Some(t)) if t.as_str() == "Mesh")
-            })
-            .map(|p| p.as_str().to_string())
-            .collect();
-        assert!(!meshes.is_empty(), "the walk found meshes to check");
-
-        let colored: Vec<String> = display_colors(&stage).into_iter().map(|(p, _)| p).collect();
-        let bare: Vec<&String> = meshes.iter().filter(|m| !colored.contains(m)).collect();
-        assert!(bare.is_empty(), "meshes with no displayColor: {bare:?}");
-    }
-
-    /// Every prototype variation of one element must come out a different
-    /// shade, or a parcel reads as one plant stamped out a thousand times.
+    /// channel both consumers read — the viewer draws it and USD carries it —
+    /// so a part without one renders grey everywhere.
     ///
-    /// The meshes are named rather than discovered, because a walk cannot tell
-    /// an element's own geometry from what it composed in: under the export's
-    /// reference placement a shoot prototype holds a dozen leaf prims, and two
-    /// shoots drawing the same blade legitimately share its colour.
-    ///
-    /// Grouped per element, because two *different* elements landing on the
-    /// same shade is a palette choice, while two variations of one element
-    /// landing on it is the jitter stream wired to a constant seed — the
-    /// mistake that leaves every other check here passing.
+    /// And no two parts *of one layer* may share a shade: two different
+    /// elements landing on the same colour is a palette choice, while two
+    /// meshes of one element landing on it is a jitter stream wired to a
+    /// constant seed, which every other check here would pass.
     #[test]
-    fn a_prototypes_variations_are_each_their_own_shade() {
-        use crate::elements::util::place::{prototype_count, prototype_path};
-        use crate::elements::{leaf, shoot, vine};
+    fn every_part_is_tinted_and_no_layer_repeats_a_shade() {
+        let doc = scene();
+        assert!(doc.parts.len() > 5, "the walk found parts to check");
 
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
-        let colors: std::collections::HashMap<String, [f32; 3]> =
-            display_colors(&stage).into_iter().collect();
-
-        // The one mesh each element authors per variation. `Leaf`'s variation
-        // prim *is* its blade; the other two are an `Xform` over theirs.
-        for (element, root, geometry) in [
-            ("Leaf", leaf::PROTOTYPE, None),
-            ("Shoot", shoot::PROTOTYPE, Some("Stem")),
-            ("Vine", vine::PROTOTYPE, Some("Wood")),
-        ] {
-            let count = prototype_count(&stage, root);
+        let mut by_layer: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for part in &doc.parts {
             assert!(
-                count > 1,
-                "{element} has only {count} variation(s) to tell apart"
+                part.display_color.iter().any(|c| *c > 0.0),
+                "{} is untinted",
+                part.name
             );
+            let layer = part.name.rsplit_once('_').expect("<Layer>_<index>").0;
+            by_layer.entry(layer).or_default().push(&part.name);
+        }
 
-            let shades: Vec<(String, [f32; 3])> = (0..count)
-                .map(|i| {
-                    let path = match geometry {
-                        Some(name) => format!("{}/{name}", prototype_path(root, i)),
-                        None => prototype_path(root, i),
-                    };
-                    let color = *colors
-                        .get(&path)
-                        .unwrap_or_else(|| panic!("{path} carries no displayColor"));
-                    (path, color)
+        for (layer, names) in &by_layer {
+            let shades: BTreeSet<[u32; 3]> = names
+                .iter()
+                .map(|name| {
+                    let part = doc.parts.iter().find(|p| &p.name == name).unwrap();
+                    part.display_color.map(|c| c.to_bits())
                 })
                 .collect();
-
-            for (i, (path_a, a)) in shades.iter().enumerate() {
-                for (path_b, b) in shades.iter().skip(i + 1) {
-                    assert_ne!(a, b, "{element}: {path_a} and {path_b} are the same shade");
-                }
-            }
+            assert_eq!(
+                shades.len(),
+                names.len(),
+                "{layer}: two of {names:?} came out the same shade"
+            );
         }
     }
 
-    /// The viewer's save key calls this from inside a system of the app it is
-    /// already running, so the nesting has to hold: a second `App` with its own
-    /// `MinimalPlugins` and its own single `update()`, while the outer one is
-    /// mid-schedule.
+    /// Every reference has to resolve, and a referencing prim has to be a leaf
+    /// of the tree. Both are silent failures in USD: a dangling reference
+    /// composes to an empty prim, and an `instanceable` prim's authored
+    /// children are simply unreachable.
+    #[test]
+    fn every_reference_resolves_to_a_part_and_carries_no_children() {
+        let doc = scene();
+        let parts: BTreeSet<&str> = doc.parts.iter().map(|p| p.name.as_str()).collect();
+
+        let prims = prims(&doc);
+        let referencing = prims.iter().filter(|(_, n)| n.reference.is_some()).count();
+        assert!(referencing > 1000, "the scene draws geometry, got {referencing}");
+
+        for (path, node) in &prims {
+            let Some(reference) = &node.reference else {
+                continue;
+            };
+            assert!(parts.contains(reference.as_str()), "{path} draws a missing {reference}");
+            assert!(node.children.is_empty(), "{path} references and has children");
+            assert!(node.instanceable, "{path} references without being instanceable");
+        }
+    }
+
+    /// A downstream Isaac Lab config is keyed on prim paths, so two prims may
+    /// never share one — a name collision would silently repoint it.
+    #[test]
+    fn every_prim_path_is_unique() {
+        let doc = scene();
+        let prims = prims(&doc);
+        let paths: BTreeSet<&str> = prims.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths.len(), prims.len(), "some prim path repeats");
+    }
+
+    /// Python calls the generator from a host process that may already be
+    /// running Bevy, and may call it more than once. Both hazards are silent
+    /// and process-wide: re-initialized task pools, and the global `tracing`
+    /// subscriber `MinimalPlugins` is chosen to avoid.
     ///
-    /// Worth a test because the two hazards are silent and process-wide —
-    /// re-initialized task pools, and the global `tracing` subscriber
-    /// `MinimalPlugins` is chosen to avoid. And because what comes back has to
-    /// be the *export* shape even though the app it was called from is
-    /// previewing an instanced one.
+    /// Doubles as the reproducibility check — a downstream sim keys its cache
+    /// on these bytes.
     #[test]
-    fn generate_stage_runs_from_inside_a_running_app() {
-        // The exported text rather than the stage, because `Stage` is `!Send`
-        // and cannot be a resource — and because text is what the save key
-        // ultimately puts on disk.
-        #[derive(Resource)]
-        struct Saved(String);
-
-        fn save(world: &mut World) {
-            let params = VineyardParams::from_world(world);
-            let stage = generate_stage(&params).unwrap();
-            let usda = stage.root_layer().export_to_string().unwrap();
-            world.insert_resource(Saved(usda));
-        }
-
-        let previewed = crate::stage::new_stage("outer.usda").unwrap();
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(crate::elements::plugin)
-            .insert_resource(Style::Instanced)
-            .add_systems(Update, save);
-        app.world_mut()
-            .insert_non_send(LiveStage::new(previewed.clone()));
-        app.finish();
-        app.cleanup();
-        app.update();
-
-        let saved = &app.world().resource::<Saved>().0;
-        assert!(
-            saved.contains("\"Vine_000\"") && !saved.contains("PointInstancer"),
-            "what gets written is reference-placed"
-        );
-        assert!(
-            usd_bevy::authoring::prim_exists(&previewed, "/Vineyard/Planting/Row_000/Vines"),
-            "while the stage on screen stays instanced"
-        );
-    }
-
-    /// The default `generate_stage` gives the export shape, not the viewer's.
-    /// Every vine has to arrive with a prim path of its own, whatever the
-    /// viewer does to go faster.
-    #[test]
-    fn the_generated_scene_is_reference_placed() {
-        assert_eq!(Style::default(), Style::Referenced);
-
-        let stage = generate_stage(&VineyardParams::default()).unwrap();
-        assert!(usd_bevy::authoring::prim_exists(
-            &stage,
-            "/Vineyard/Planting/Row_000/Vine_000"
-        ));
-        assert!(
-            !stage
-                .root_layer()
-                .export_to_string()
-                .unwrap()
-                .contains("PointInstancer"),
-            "nothing an Isaac Lab config could key on is hidden in an array"
-        );
+    fn generating_twice_in_one_process_gives_the_same_scene() {
+        let once = serde_json::to_string(&scene()).unwrap();
+        let twice = serde_json::to_string(&scene()).unwrap();
+        assert_eq!(once.len(), twice.len(), "the same scene both times");
+        assert!(once == twice, "and byte for byte the same");
     }
 }

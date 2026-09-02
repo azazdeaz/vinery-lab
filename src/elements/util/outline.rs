@@ -52,7 +52,7 @@ use spade::{
 };
 use usvg::tiny_skia_path::PathSegment;
 
-use super::usd::MeshData;
+use super::mesh::MeshData;
 
 /// How far a flattened curve may stray from the curve it replaces, in the
 /// drawing's own units.

@@ -1,51 +1,138 @@
 //! Test-only helpers shared across the element and util test modules.
 //!
-//! Two kinds of thing live here. The first is plain deduplication: fixtures
-//! that were copied into three or four test modules because there was nowhere
-//! to put them.
-//!
-//! The second is [`instances`], which is why this module exists at all. A
-//! batch of plants is a prim each or a `PointInstancer`'s parallel arrays
-//! depending on the [`Style`] in force, but *where the plants ended up* is the
-//! same either way — so a test that reads them back through here asserts once
-//! and covers both paths, instead of being written twice.
+//! Fixtures and readers that were copied into three or four test modules
+//! because there was nowhere to put them: an app with the whole pipeline in it
+//! ([`grown`]), ways to find a prim on the scene graph ([`prim`],
+//! [`prim_path`], [`organs`]), and the geometry helpers the kernel tests share.
 
-use bevy::ecs::schedule::IntoScheduleConfigs;
-use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
-use openusd::schemas::geom::{PointInstancer, Xformable};
-use openusd::sdf::{self, Value};
-use openusd::usd::Stage;
-use usd_bevy::live::LiveStage;
 
-use super::place::{Placed, Style};
-use super::usd::MeshData;
+use super::mesh::MeshData;
 use crate::elements::VineyardParams;
 
-/// Both placement styles, for the tests that have to hold either way.
+/// A headless app with the scene root, the mesh library and asset storage in
+/// place — everything an element's build system needs and nothing else.
 ///
-/// A plain loop rather than a parameterized-test crate: the suite has no
-/// dev-dependencies, and `{style:?}` in the assert messages reads the same in
-/// a failure as a generated case name would.
-pub const STYLES: [Style; 2] = [Style::Referenced, Style::Instanced];
-
-/// Runs one authoring cycle at `style`, handing back the stage together with
-/// the app it was authored from — tests need the solved `VineyardLayout` and
-/// `Ground` to check the placed prims against what they were placed from.
-pub fn grown(params: VineyardParams, style: Style) -> (Stage, App) {
-    let stage = crate::stage::new_stage("testing.usda").unwrap();
+/// `MinimalPlugins` rather than `DefaultPlugins` for the same reason
+/// [`generate`](crate::generate) uses it: `DefaultPlugins` installs a *global*
+/// `tracing` subscriber, so a second app in one process would panic. `Mesh` and
+/// `StandardMaterial` are registered by hand because the plugins that normally
+/// do it are the render ones, which nothing here needs.
+pub fn scene_app() -> App {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins)
-        .add_plugins(crate::elements::plugin);
+    app.add_plugins((MinimalPlugins, bevy::asset::AssetPlugin::default()))
+        .init_asset::<Mesh>()
+        .init_asset::<StandardMaterial>()
+        .add_plugins(crate::scene::plugin);
+    app
+}
+
+/// One organ, read back off the scene graph.
+#[derive(Clone, Debug)]
+pub struct Organ<C> {
+    /// The prim name — `Vine_007`. Repeats across rows; use [`path`](Self::path)
+    /// when identity matters.
+    pub name: String,
+    /// Slash-joined names from the scene root down, `Planting/Row_000/Vine_007`.
+    pub path: String,
+    pub transform: Transform,
+    pub config: C,
+}
+
+impl<C> Organ<C> {
+    pub fn position(&self) -> Vec3 {
+        self.transform.translation
+    }
+
+    /// Where the organ's own `+Z` — the axis it was authored standing up on —
+    /// ended up.
+    pub fn up(&self) -> Vec3 {
+        self.transform.rotation * Vec3::Z
+    }
+}
+
+/// Every organ carrying `C`, in the order planting authored them.
+pub fn organs<C: Component + Clone>(world: &mut World) -> Vec<Organ<C>> {
+    let mut query = world.query_filtered::<Entity, (With<Name>, With<crate::scene::Order>, With<C>)>();
+    let entities: Vec<Entity> = query.iter(world).collect();
+
+    let mut found: Vec<(crate::scene::Order, Organ<C>)> = entities
+        .into_iter()
+        .map(|entity| {
+            let at = world.entity(entity);
+            let organ = Organ {
+                name: at.get::<Name>().unwrap().as_str().to_string(),
+                path: prim_path(world, entity),
+                transform: *at.get::<Transform>().unwrap(),
+                config: at.get::<C>().unwrap().clone(),
+            };
+            (*world.entity(entity).get::<crate::scene::Order>().unwrap(), organ)
+        })
+        .collect();
+    found.sort_by_key(|(order, _)| *order);
+    found.into_iter().map(|(_, organ)| organ).collect()
+}
+
+/// The names from the scene root down to `entity`, slash-joined.
+pub fn prim_path(world: &World, entity: Entity) -> String {
+    let root = world.resource::<crate::scene::PrimRoot>().0;
+    let mut names = Vec::new();
+    let mut at = entity;
+    loop {
+        if at == root {
+            break;
+        }
+        let Some(name) = world.entity(at).get::<Name>() else {
+            break;
+        };
+        names.push(name.as_str().to_string());
+        match world.entity(at).get::<ChildOf>() {
+            Some(parent) => at = parent.0,
+            None => break,
+        }
+    }
+    names.reverse();
+    names.join("/")
+}
+
+/// The entity at `path` below the scene root — `["Planting", "Row_000"]`.
+pub fn prim(world: &mut World, path: &[&str]) -> Option<Entity> {
+    let mut at = world.resource::<crate::scene::PrimRoot>().0;
+    for name in path {
+        at = named_children(world, at)
+            .into_iter()
+            .find(|(child, _)| child == name)?
+            .1;
+    }
+    Some(at)
+}
+
+/// Named children of `entity`, in `Children` order.
+pub fn named_children(world: &mut World, entity: Entity) -> Vec<(String, Entity)> {
+    let Some(children) = world.entity(entity).get::<Children>() else {
+        return Vec::new();
+    };
+    let children: Vec<Entity> = children.to_vec();
+    children
+        .into_iter()
+        .filter_map(|child| {
+            let name = world.entity(child).get::<Name>()?.as_str().to_string();
+            Some((name, child))
+        })
+        .collect()
+}
+
+/// Runs one build cycle and hands back the app, so a test can read the scene
+/// graph and the resources it was built from — the solved `VineyardLayout` and
+/// `Ground` are what a placement check is asserted against.
+pub fn grown(params: VineyardParams) -> App {
+    let mut app = scene_app();
+    app.add_plugins(crate::elements::plugin);
     params.insert(app.world_mut());
-    // After the element plugins, so it overrides `elements::plugin`'s default.
-    app.world_mut().insert_resource(style);
-    app.world_mut()
-        .insert_non_send(LiveStage::new(stage.clone()));
     app.finish();
     app.cleanup();
     app.update();
-    (stage, app)
+    app
 }
 
 /// Lowest and highest coordinate of a mesh's points along `axis`.
@@ -84,165 +171,4 @@ pub fn face_centroid(mesh: &MeshData, face: &[i32]) -> Vec3 {
 
 fn corner(mesh: &MeshData, index: i32) -> Vec3 {
     Vec3::from(mesh.points[index as usize])
-}
-
-/// One placed instance, read back off the stage.
-#[derive(Clone, Debug)]
-pub struct Instance {
-    /// The prim's name — `None` when it went into a `PointInstancer` and has
-    /// no path of its own, which is exactly what the two styles trade.
-    pub name: Option<String>,
-    /// Where it ended up, relative to the prim it was placed under.
-    pub transform: Mat4,
-    /// Path of the prototype it draws.
-    pub prototype: String,
-}
-
-impl Instance {
-    /// The prototype's `Var_<i>` index.
-    pub fn variation(&self) -> usize {
-        self.prototype
-            .rsplit_once("Var_")
-            .and_then(|(_, i)| i.parse().ok())
-            .unwrap_or_else(|| panic!("`{}` is not a Var_<i> path", self.prototype))
-    }
-
-    /// Its position, and the scale and direction baked into its transform.
-    pub fn position(&self) -> Vec3 {
-        self.transform.to_scale_rotation_translation().2
-    }
-
-    pub fn scale(&self) -> Vec3 {
-        self.transform.to_scale_rotation_translation().0
-    }
-
-    pub fn rotation(&self) -> Quat {
-        self.transform.to_scale_rotation_translation().1
-    }
-}
-
-/// Every instance placed under `parent`, whichever style placed it.
-///
-/// Child prims are read as reference-placed instances; a child that is a
-/// `PointInstancer` is expanded into one entry per row of its arrays. A parent
-/// may hold both — a vine prototype's `Wood` sits beside its shoots — so
-/// anything without a prototype behind it is skipped rather than reported as
-/// an instance of nothing.
-pub fn instances(stage: &Stage, parent: &str) -> Vec<Instance> {
-    let mut out = Vec::new();
-    for child in stage.prim(sdf::path(parent).unwrap()).children().unwrap() {
-        if let Some(instancer) = PointInstancer::get(stage, child.path().clone()).unwrap() {
-            out.extend(instancer_rows(&instancer));
-            continue;
-        }
-        // The prim stack names every site contributing an opinion; for a
-        // referencing prim that includes the target it pulled in. Its own spec
-        // is in there too, and is not what it references — which only shows up
-        // when the parent is itself inside the library, as a prototype nested
-        // in another one is.
-        let own = child.path().as_str().to_string();
-        let Some(prototype) = child
-            .prim_stack()
-            .unwrap()
-            .into_iter()
-            .map(|(_, path)| path.as_str().to_string())
-            .find(|path| *path != own && path.starts_with(crate::stage::PARTS))
-        else {
-            continue;
-        };
-        let m = Placed(child.clone())
-            .local_to_parent_transform(0.0)
-            .unwrap();
-        out.push(Instance {
-            name: child.path().name().map(str::to_string),
-            transform: Mat4::from_cols_array(&m.0.map(|v| v as f32)),
-            prototype,
-        });
-    }
-    out
-}
-
-/// One entry per row of an instancer's parallel arrays.
-fn instancer_rows(instancer: &PointInstancer) -> Vec<Instance> {
-    let prototypes: Vec<String> = instancer
-        .prototypes_rel()
-        .targets()
-        .unwrap()
-        .iter()
-        .map(|t| t.as_str().to_string())
-        .collect();
-    let Some(Value::Vec3fVec(positions)) = instancer.positions_attr().get::<Value>().unwrap()
-    else {
-        panic!("an instancer without positions");
-    };
-    let orientations = match instancer.orientations_attr().get::<Value>().unwrap() {
-        Some(Value::QuathVec(v)) => v,
-        other => panic!("orientations not authored as quath[]: {other:?}"),
-    };
-    let Some(Value::Vec3fVec(scales)) = instancer.scales_attr().get::<Value>().unwrap() else {
-        panic!("an instancer without scales");
-    };
-    let Some(Value::IntVec(indices)) = instancer.proto_indices_attr().get::<Value>().unwrap()
-    else {
-        panic!("an instancer without protoIndices");
-    };
-
-    (0..positions.len())
-        .map(|i| {
-            let q = orientations[i];
-            Instance {
-                name: None,
-                transform: Mat4::from_scale_rotation_translation(
-                    Vec3::new(scales[i].x, scales[i].y, scales[i].z),
-                    Quat::from_xyzw(q.x.to_f32(), q.y.to_f32(), q.z.to_f32(), q.w.to_f32())
-                        .normalize(),
-                    Vec3::new(positions[i].x, positions[i].y, positions[i].z),
-                ),
-                prototype: prototypes[indices[i] as usize].clone(),
-            }
-        })
-        .collect()
-}
-
-/// A world and a schedule running one author system directly, for the tests
-/// that drive an element's authoring rather than a whole app.
-///
-/// Running it twice is the point: every author fn owns its subtree and
-/// rewrites it from scratch, and what those tests check is what the *second*
-/// run leaves behind.
-pub struct Authoring {
-    pub stage: Stage,
-    world: World,
-    schedule: Schedule,
-}
-
-impl Authoring {
-    pub fn new<M>(identifier: &str, system: impl IntoScheduleConfigs<ScheduleSystem, M>) -> Self {
-        let stage = crate::stage::new_stage(identifier).unwrap();
-        let mut world = World::new();
-        world.insert_non_send(LiveStage::new(stage.clone()));
-        let mut schedule = Schedule::default();
-        schedule.add_systems(system);
-        Self {
-            stage,
-            world,
-            schedule,
-        }
-    }
-
-    /// Inserts a resource the system under test reads. Overwrites, so a second
-    /// call is how a test changes params between runs.
-    pub fn insert<R: Resource>(&mut self, resource: R) -> &mut Self {
-        self.world.insert_resource(resource);
-        self
-    }
-
-    pub fn run(&mut self) -> &mut Self {
-        self.schedule.run(&mut self.world);
-        self
-    }
-
-    pub fn has(&self, path: &str) -> bool {
-        usd_bevy::authoring::prim_exists(&self.stage, path)
-    }
 }

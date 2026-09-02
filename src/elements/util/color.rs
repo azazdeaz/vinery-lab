@@ -1,21 +1,18 @@
 //! The palette, and the per-variation jitter that keeps a parcel of clones
 //! from reading as one.
 //!
-//! Colour reaches USD as `primvars:displayColor` on the geometry rather than
-//! as a value baked into a material, and that split is deliberate: an
-//! attribute composes through every arc unconditionally, where a material
-//! binding is a relationship and can be dropped — see
-//! [`material`](super::material). It is also the only thing the viewer draws:
-//! `usd_bevy` reads `displayColor` into a vertex-colour attribute, but bakes
-//! every instanced prototype with a default material. So the hue lives here
-//! and on the mesh, and a material only says how the surface responds to
-//! light.
+//! Colour travels with the geometry rather than in a material, and the split is
+//! deliberate: the hue lives here and on the mesh, while
+//! [`material`](super::material) says only how the surface responds to light.
+//! Both consumers read the colour that way — Bevy draws it, and USD carries it
+//! as a `displayColor` primvar — so the viewer and the export agree by
+//! construction.
 //!
 //! # Linear, not sRGB
 //!
-//! `displayColor` is **linear** RGB, and every colour worth choosing is chosen
-//! in sRGB — a hex triple off a picker. So the palette is written as hex and
-//! run through [`srgb`] on the way to the stage. Authoring the sRGB values
+//! Both consumers want **linear** RGB, and every colour worth choosing is
+//! chosen in sRGB — a hex triple off a picker. So the palette is written as hex
+//! and run through [`srgb`] on the way out. Using the sRGB values
 //! directly would wash the scene out: mid-grey `#808080` is 0.5 in sRGB and
 //! 0.216 linear, and the error runs the same direction on every dark colour,
 //! which is all of them here.
@@ -54,7 +51,7 @@ pub const GROUND: u32 = 0x6B5744;
 
 // ─── Conversion ─────────────────────────────────────────────────────
 
-/// An `0xRRGGBB` sRGB triple as the linear RGB `displayColor` wants.
+/// An `0xRRGGBB` sRGB triple as the linear RGB both consumers want.
 pub fn srgb(hex: u32) -> [f32; 3] {
     [16, 8, 0].map(|shift| linear(((hex >> shift) & 0xFF) as f32 / 255.0))
 }

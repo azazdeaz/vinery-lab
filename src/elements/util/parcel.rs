@@ -318,7 +318,7 @@ fn draw_gizmos(
 }
 
 /// Maps a point from the stage's Z-up space onto Bevy's Y-up world: `-90°`
-/// about X, the same rotation `usd_bevy` applies on the stage-root entity
+/// about X, the same rotation [`scene::z_up_to_y_up`](crate::scene) applies
 /// so gizmos line up with the projected mesh.
 fn to_bevy(p: Vec3) -> Vec3 {
     Vec3::new(p.x, p.z, -p.y)

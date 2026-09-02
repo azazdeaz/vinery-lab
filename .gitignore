@@ -2,3 +2,12 @@
 /.venv
 /python/vinerylab/*.so
 __pycache__/
+
+*.local.md
+*.local.json
+
+# What the viewer's save key and `dump_scene` write.
+/scene.json
+/scene.usd
+/scene.usda
+/scene.usdc

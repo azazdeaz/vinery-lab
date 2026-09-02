@@ -16,6 +16,7 @@
 //! the real struct — and fail the moment the two disagree.
 
 use crate::elements::VineyardParams;
+use crate::elements::SceneParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -65,6 +66,11 @@ fn python_float(value: f32) -> String {
     }
 }
 
+fn scene(p: &SceneParams, out: &mut Fields) {
+    let d = SceneParams::default();
+    out.int("seed", p.seed, d.seed);
+}
+
 fn terrain(p: &TerrainParams, out: &mut Fields) {
     let d = TerrainParams::default();
     out.float("width", p.width, d.width);
@@ -86,7 +92,6 @@ fn parcel(p: &ParcelParams, out: &mut Fields) {
 
 fn planting(p: &PlantingParams, out: &mut Fields) {
     let d = PlantingParams::default();
-    out.int("seed", p.seed, d.seed);
     out.float("miss_rate", p.miss_rate, d.miss_rate);
     out.float("young_rate", p.young_rate, d.young_rate);
     out.float("young_scale", p.young_scale, d.young_scale);
@@ -101,7 +106,6 @@ fn pole(p: &PoleParams, out: &mut Fields) {
 fn vine(p: &VineParams, out: &mut Fields) {
     let d = VineParams::default();
     out.int("variations", p.variations as u64, d.variations as u64);
-    out.int("seed", p.seed, d.seed);
     out.float("trunk_height", p.trunk_height, d.trunk_height);
     out.float("trunk_radius", p.trunk_radius, d.trunk_radius);
     out.float("trunk_wobble", p.trunk_wobble, d.trunk_wobble);
@@ -119,7 +123,6 @@ fn vine(p: &VineParams, out: &mut Fields) {
 fn shoot(p: &ShootParams, out: &mut Fields) {
     let d = ShootParams::default();
     out.int("variations", p.variations as u64, d.variations as u64);
-    out.int("seed", p.seed, d.seed);
     out.float("length", p.length, d.length);
     out.float("radius", p.radius, d.radius);
     out.float("lean", p.lean, d.lean);
@@ -131,14 +134,16 @@ fn shoot(p: &ShootParams, out: &mut Fields) {
 
 fn leaf(p: &LeafParams, out: &mut Fields) {
     let d = LeafParams::default();
+    out.int("variations", p.variations as u64, d.variations as u64);
     out.int("detail", p.detail as u64, d.detail as u64);
 }
 
-/// The seven fragments, as the attribute name and cfg class the snippet uses.
+/// The eight fragments, as the attribute name and cfg class the snippet uses.
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
-const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 7] = [
+const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 8] = [
+    ("scene", "SceneCfg", |p, out| scene(&p.scene, out)),
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),
     ("parcel", "ParcelCfg", |p, out| parcel(&p.parcel, out)),
     ("planting", "PlantingCfg", |p, out| planting(&p.planting, out)),
@@ -155,7 +160,7 @@ pub fn vineyard_cfg(params: &VineyardParams) -> String {
         .filter_map(|(attr, class, collect)| {
             let mut fields = Fields::default();
             collect(params, &mut fields);
-            (!fields.changed.is_empty()).then(|| (*attr, *class, fields.changed))
+            (!fields.changed.is_empty()).then_some((*attr, *class, fields.changed))
         })
         .collect();
 
@@ -219,6 +224,7 @@ mod tests {
     fn every_params_field_is_emitted() {
         let params = VineyardParams::default();
         let debugs = [
+            format!("{:?}", params.scene),
             format!("{:?}", params.terrain),
             format!("{:?}", params.parcel),
             format!("{:?}", params.planting),
