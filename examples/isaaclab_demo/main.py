@@ -1,13 +1,3 @@
-"""
-This script demonstrates different legged robots.
-
-.. code-block:: bash
-
-    # Usage
-    ./isaaclab.sh -p scripts/demos/quadrupeds.py
-
-"""
-
 """Launch Isaac Sim Simulator first."""
 
 import argparse
@@ -54,7 +44,7 @@ from isaaclab_assets.robots.unitree import UNITREE_A1_CFG, UNITREE_GO1_CFG, UNIT
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
 VINEYARD_CFG = VineyardCfg(
-    terrain=TerrainCfg(height=82.0, max_elevation=8.9),
+    terrain=TerrainCfg(height=82.0, width=82.0, max_elevation=8.9),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
 )
 

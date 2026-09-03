@@ -31,7 +31,7 @@ use curvo::prelude::*;
 use nalgebra::Point3;
 
 use crate::elements::Rng;
-use super::usd::MeshData;
+use super::mesh::MeshData;
 
 /// Degree of the fitted centerline, clamped down when a strand has too few
 /// control points to support it (a 2-point strand is a straight line).

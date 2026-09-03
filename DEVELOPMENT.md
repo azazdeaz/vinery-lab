@@ -1,27 +1,7 @@
 ## Python bindings
 
-By default `usd_bevy` and `openusd` (the latter via `[patch]`) resolve from
-the `azazdeaz/bevy_openusd` and `azazdeaz/openusd` forks over git — nothing
-needs to be checked out locally to build. No need to install `maturin`
-yourself either — uv fetches it automatically as a PEP 517 build backend.
-
-`openusd` is patched rather than used as a plain git dependency: its
-crate-file writer types `TfTokenVector` fields (`primChildren`,
-`xformOpOrder`) as `VtArray<TfToken>`, which Pixar USD refuses to open, so
-every generated `.usd`/`.usdc` was unreadable by Isaac Sim. The fix lives on
-the fork; see the `[patch]` stanza in `Cargo.toml`.
-
-### Working on `usd_bevy` / `openusd` locally
-
-Check both out as sibling directories, then uncomment the `path = "../..."`
-line above each git dependency in `Cargo.toml` (and comment out the git
-line):
-
-    git clone git@github.com:azazdeaz/bevy_openusd.git ../bevy_openusd
-    git clone git@github.com:azazdeaz/openusd.git ../openusd
-
-A `[patch]` is only honoured in the workspace root, so building `usdview` in
-`bevy_openusd` standalone needs the same stanza there (see its `Cargo.toml`).
+No need to install `maturin` yourself — uv fetches it automatically as a
+PEP 517 build backend.
 
 The project uses maturin's *mixed* layout: hand-written Python lives in
 `python/vinerylab/`, and the compiled Rust extension is built into it as the
@@ -52,14 +32,40 @@ If you only changed Rust source (not pyproject.toml), force a rebuild:
 
     cargo run --release
 
-### Implementation
+Sliders write into the params resources, which re-run the layers below them.
+Press `S` to write the scene out as `scene.json`, and build it with:
 
-Design notes for development.
+    python -m vinerylab.usd scene.json scene.usd
+
+`VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
+rebuilt something — see `src/perf.rs`.
+
+## Architecture
+
+The scene is built in Bevy as ordinary meshes and transforms, exported as a
+plain JSON **scene document**, and turned into USD by Python:
+
+```
+params → Bevy entities (Transform, Mesh3d, Name, UsdReference)
+              ↓                              ↓
+     the viewer renders them      src/scene/export.rs → SceneDoc (JSON)
+                                             ↓
+                            python/vinerylab/usd/build.py → .usd
+```
+
+Rust owns the *scene* — what geometry exists, where it goes, what references
+what. Python owns *USD* — prim types, schemas, composition arcs, stage
+metadata. `src/scene/doc.rs` is the whole contract between them, and
+`build.py`'s module docstring is the only place USD knowledge lives.
+
+There is no intermediate representation on the Rust side and no second scene
+graph: the entities the viewer draws are the entities the export walks, so
+there is no preview shape and export shape to keep in step.
 
 ## Elements
 
-The scene is built from **elements** — self-contained producers of USD, one per
-thing that exists in a vineyard (terrain, pole, vine, shoot, leaf, grape, weed).
+The scene is built from **elements**, one per thing that exists in a vineyard
+(terrain, pole, vine, shoot, leaf, grape, weed).
 
 Parts are named the way viticulture names them: a vine's **trunk** rises from
 the ground to its **head**, where it turns into one or two **cordons** running
@@ -67,27 +73,34 @@ along the fruiting wire; the short pruning stubs on a cordon are **spurs**, and
 the annual growth off those is **canes** and **shoots**. A vine with one cordon
 is *unilateral*, with two *bilateral*.
 
-Each element is a single file directly under `src/elements/` holding four
-items:
+Each element is a single file directly under `src/elements/`:
 
 ```rust
 // src/elements/grape.rs
 
-/// The contract other elements rely on: this element guarantees a prototype here.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Grape";
+/// The mesh-library prefix this element registers its geometry under.
+pub const PART: &str = "Grape";
+
+/// One berry's shape, as the bunch that grew it specified.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct GrapeConfig { pub radius: f32, pub ripeness: f32, /* ... */ }
+
+/// Two berries share a mesh when they are close in every dimension that shows.
+pub struct GrapeMetric;
+impl Metric<GrapeConfig> for GrapeMetric { /* weighted L2 over the fields */ }
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all))]
-pub struct GrapeParams { pub variations: u32, pub berry_radius: f32, /* ... */ }
+pub struct GrapeParams { pub variations: u32, pub radius: f32, /* ... */ }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<GrapeParams>()
-        .add_systems(PreUpdate, author
-            .in_set(Grow::Prototypes)
-            .run_if(resource_changed::<GrapeParams>));
+        .add_systems(PreUpdate, build
+            .in_set(Grow::Scatter)
+            .run_if(configs_changed::<GrapeConfig>));
 }
 
-fn author(live: NonSend<LiveStage>, params: Res<GrapeParams>) -> Result<()> { /* ... */ }
+fn build(commands: Commands, library: Library, /* ... */) -> Result<()> { /* ... */ }
 
 pub fn ui() -> impl Scene { /* sliders writing into GrapeParams */ }
 ```
@@ -95,13 +108,14 @@ pub fn ui() -> impl Scene { /* sliders writing into GrapeParams */ }
 Adding an element is one new file plus one line in `elements::plugin`.
 
 Everything under `src/elements/` that *isn't* an element lives in
-`src/elements/util/`: the USD authoring plumbing (`usd`), the tube-skinning
-geometry kernel (`strand`), the one that fills a shape traced in SVG
-(`outline`), the row-layout solver (`parcel`), the two ways a prototype gets
-put on the ground (`place`), and the pass that walks the layout and plants them
-(`planting`). The dividing line is identity, not file size — nothing there
-corresponds to a thing that exists in a vineyard, so nothing there gets a
-`/parts/<Name>` prototype or a line in `elements::plugin`.
+`src/elements/util/`: the geometry kernels (`strand` skins a polyline of radii
+into a tube, `outline` fills a shape traced in SVG, `mesh` holds the type they
+both produce), the palette (`color` for hue, `material` for how a surface
+responds to light), the row-layout solver (`parcel`) and the pass that walks
+the layout and places a config on every plant and post (`planting`). The
+dividing line is identity, not file size — nothing there corresponds to a thing
+that exists in a vineyard, so nothing there gets a mesh library or a line in
+`elements::plugin`.
 
 ### Drawn shapes
 
@@ -115,137 +129,197 @@ with `include_str!` rather than read at run time, because the crate also ships
 as a Python extension module inside a wheel, where `assets/` is not there to
 read.
 
-### Rules
+### The pipeline
 
-**Each element owns exactly one prim subtree.** Its author fn removes that
-subtree and rewrites it from scratch; nothing else is allowed to touch it.
-Prototypes go under `/Vineyard/parts/<Name>`, placed instances under
-`/Vineyard/...`.
-`/Vineyard` and the prototype library both belong to no element —
-`stage::new_stage` defines the scene root, declares it the stage's default prim,
-and defines `/Vineyard/parts` as a `class`, which keeps prototypes out of the
-viewer's traversal so they don't render as a pile of stray geometry at the
-origin. Neither is ever removed, so sibling elements keep their own subtrees
-under the root. Placed instances are unaffected: a reference composes the target's
-own opinions, not the ancestors it happened to sit under, and a `PointInstancer`
-instance hangs off the instancer rather than off `/parts`.
+Every element is one layer of the same five-step pipeline:
 
-**Elements compose by prim path only.** An element that instances another just
-targets its `PROTOTYPE` path and trusts it to exist — no Rust data is passed
-between elements. Placement is computed by whoever does the placing, in its own
-local space: `vine` decides where shoots sit on its spurs, `shoot` where leaves
-sit on a shoot, `terrain` where vines, poles and weeds sit on the ground. This
-nests, so `/parts/Vine` contains its shoots and each of those contains its
-leaves — which is why a prototype is an `Xform` over its own mesh rather than a
-bare `Mesh` as soon as anything grows on it.
+1. **Collect** every config of its own kind, sorted by `scene::Order`.
+2. **Cluster** them to `params.variations` representatives.
+3. **Build** each representative's mesh once, into the shared `Prototypes`
+   library.
+4. **Assign** each instance the geometry of the representative it drew.
+5. **Expand** — author a *unique* config for the layer below at every frame the
+   representative offers.
 
-Nesting is also what keeps the canopy affordable. A leaf is placed inside a
-*shoot prototype*, so a vineyard's worth of leaves costs a few dozen placements
-on the stage rather than one per leaf. The trade is that every instance of a
-given shoot variation carries an identical canopy, which is the usual variation
-arithmetic below.
+`planting` starts it by placing a `VineConfig` and a `PoleConfig` on every slot
+the layout solved; `leaf` ends it, having nothing below to expand into.
 
-An element may own a *second* subtree when it also places prototypes — `terrain`
-authors `/Vineyard/Terrain` and, through `util::planting`, everything standing on
-it at `/Vineyard/Planting`. Or when one thing comes in two shapes: `vine` also
-authors `/parts/YoungVine`, a replant in its first season, which is a `shoot`
-buried deep enough to hide the bend at its base and no wood at all. The rule is
-unchanged: nobody else touches any of them, and `vine` still authors shapes only
-— where a vine stands, and whether a slot got the young one, is `planting`'s
-call.
+**Frames come from the representative; child configs are per instance.** Step 5
+is where the two halves meet. The structural skeleton — how many spurs, where
+the buds are — has to come from the mesh that actually got built, or a shoot
+would hang in mid-air beside the wood. The *parameters* at each frame are drawn
+fresh per instance, so two plants sharing a mesh still carry different canopies.
+That split is what makes a hundred vines off four meshes not read as four
+meshes.
 
-**Ordering is a `SystemSet` enum**, chained once in `elements::plugin`, with
-prototype authoring first so the path contract always holds:
+**Geometry prims are childless and instanceable; structural prims are unique
+`Xform`s.**
 
-```rust
-enum Grow { Prototypes, Terrain, Layout, Plants, Scatter, Randomize }
+```text
+/Vineyard/Planting/Row_00/Vine_047     Xform, unique
+  /Wood                                 -> parts/Vine_3, instanceable
+  /Shoot_00_0                           Xform, unique
+    /Stem                               -> parts/Shoot_1, instanceable
+    /Leaf_00                            -> parts/Leaf_2, instanceable
 ```
 
-**Re-author only on change.** `run_if(resource_changed::<XParams>)` is the
-dirty-tracking mechanism — curvo tessellation is expensive enough that this
-matters. Use `Local` only for private scratch (RNG state, reusable buffers).
+An instanceable prim's descendants are not addressable, and a geometry prim has
+none — so the rule is safe and mechanical. An organ with nothing hanging off it
+(a post, a leaf) *is* the geometry prim rather than an `Xform` over one, which
+at six figures of leaves is half the prims in the scene.
 
-### Placement
+### Quantization
 
-Two ways, both in `util::place`, taking the same `Placement` list:
+`src/quantize.rs` is the whole of it, and knows nothing about Bevy or botany:
 
-`place_referenced` gives every instance **its own prim**, an internal reference
-to the prototype carrying a `translate`/`rotateZ`/`scale` stack. That prim has a
-path, which is what Isaac Lab needs to attach a semantic label, bind a rigid
-body, or randomize one plant — so this is what anything addressable uses (vines,
-posts). The referencing prim is defined with the *prototype's own* type name,
-read off the stage: a reference is a weaker opinion than a local `typeName`, so
-an `Xform` over a `Mesh` prototype composes to an `Xform` carrying stray
-`points` that no renderer draws.
+```rust
+pub trait Metric<T> { fn distance(&self, a: &T, b: &T) -> f32; }
 
-`place_instanced` authors **one** `PointInstancer` holding parallel arrays for
-all of them. No instance has a path, but the stage cost is flat — the only
-workable option for scatter that is never addressed individually (weeds, leaves,
-grapes), where per-instance prims would run to five figures.
+pub fn farthest_first<T: Clone, M: Metric<T>>(
+    items: &[T], k: usize, max_radius: f32, metric: &M,
+) -> Codebook<T>;
+```
 
-Anything that could go either way asks `place::Style` and calls `place`, which
-dispatches. It is a resource, defaulting to `Referenced` — the export shape,
-since that is the one Isaac Lab can address. The **viewer forces `Instanced`**:
-nothing there addresses an individual plant, and re-authoring a parcel as four
-arrays per row instead of a prim and three attributes per vine is what a slider
-drag pays for on every frame it moves. Pressing `S` in the viewer still writes
-the export shape — it re-generates the scene headlessly rather than saving the
-stage on screen.
+Gonzalez farthest-first traversal — a 2-approximation for metric **k-center**.
+k-center rather than k-means on purpose: it minimizes the *worst* distance
+rather than a sum, which makes it density-blind, which is what lets a rare
+variant survive. One replant among four hundred mature vines still earns a mesh.
 
-The style has to be **the same for a whole authoring pass**, which is why it is
-a resource and not an argument each caller picks. The combination that breaks is
-a `PointInstancer` nested inside a reference-placed prototype: its `prototypes`
-relationship targets the library it draws from, outside the referenced subtree,
-so the reference's namespace mapping drops it and the instancer keeps every
-instance while losing every prototype — the same silent failure that puts
-`/Vineyard/parts` inside the default prim, one level down.
+Three rules the metrics follow:
 
-Placed prims are named for their *slot*, not their rank: `Row_000/Vine_007` is
-the eighth planting position of the first row whether or not slots before it
-were skipped, so a config keyed on a path doesn't silently repoint when
-`miss_rate` moves. It keeps that name whichever library it was planted from, so
-`young_rate` can't repoint one either.
-
-A row is placed as one batch per library — its mature vines, its replants, its
-posts — since a batch draws from a single `/parts/<Name>`. Referenced, all of
-them land as prims directly under the row; instanced, each becomes its own
-`PointInstancer`.
+- **Configs are flat, and the metric decides what matters.** No shape/instance
+  split and no weight structs — one `VineConfig` with all its fields, and a
+  `VineMetric` whose `distance` picks fields and hard-codes weights. The weights
+  convert each field into roughly how far apart it *looks*.
+- **A field the builder ignores must not reach the metric.** `ShootConfig`'s
+  `leaf_droop` is pure placement — no part of a stem reads it — so two shoots
+  differing only in it share a mesh and still hang their leaves at their own
+  angle. Get this wrong and the budget gets spent telling apart things that
+  build identically.
+- **Categorical fields get a step.** A replant and a mature vine are different
+  plants, not different sizes, so `VineMetric` puts them further apart than any
+  two vines of one kind can be. A leaf's `outline` is the same: five drawings
+  are five shapes, not five nearby numbers, so any budget of five or more keeps
+  all five. And because a replant builds no wood at all, any two of them are
+  *zero* apart — collapsing them is what stops a budget being spent on plants
+  that cost no mesh.
 
 ### Variations
 
-Every element authors `params.variations` prototypes
-(`/Vineyard/parts/Leaf/Var_0`, `…`),
-and whoever places them picks one per instance from a seeded RNG. For a
-`PointInstancer` that means filling `protoIndices`, an attribute-only edit, so
-re-rolling patches the stage without resyncing or recomputing any geometry. For
-reference-placed prims it means rewriting `references` metadata, which is a
-composition change and forces a resync of the subtree — the price of every
-instance having a path.
+`params.variations` is a **budget**, not a count: how many representatives the
+clustering may keep. Raise it to spend memory on variety, lower it to trade
+variety for memory. The covering radius on the `Codebook` is the diagnostic —
+it says how far the worst-served instance is from the mesh it drew.
 
-Variety comes from the product of variation counts across nesting levels: all
-instances of `Vine/Var_0` share one cane arrangement, so upper-level counts
-matter more than they look.
+The catch is that a budget can only buy what the population actually contains.
+Configs that are all identical collapse to one representative however high the
+budget, so each layer needs at least one real per-instance axis: `VINE_VIGOUR`
+(girth, drawn per plant), `SHOOT_VIGOUR` and `SHOOT_SPACING` (length and node
+spacing, drawn per shoot). These are constants for now; range-valued params in
+the editor are what will replace them.
 
-### Stage handling
+They go in the *config* rather than into a placement scale. A scale would be
+free but invisible to the clustering, so the budget would land on one arbitrary
+size instead of covering the range that occurs. Two independent axes beat one:
+a budget spent covering a single line buys much less than one covering a plane.
 
-One long-lived `Stage`, held in a `NonSend` `LiveStage` in **both** the viewer
-and the headless/Python path (`LiveStage` has no Bevy dependency, and `Stage` is
-`!Send`). Author fns mutate it in place; in the viewer `LiveStagePlugin` picks
-up the diff and reprojects only what changed. The headless path never drains the
-change queue.
+### Randomness
 
-There is **no intermediate ECS scene** — params author straight to the stage.
-The only entities in the world are the ones `project_stage` creates for
-rendering, plus params resources and UI.
+One `SceneParams::seed` for the whole scene. Every layer salts it with a
+constant of its own before drawing:
 
-Use `openusd::schemas::*` typed schemas for geometry (they author
-`custom = false` correctly) and `usd_bevy::authoring` for namespace ops like
-`remove_prim`.
+```text
+a representative's mesh   seed ^ LAYER_STREAM ^ salt(representative index)
+an instance's placement   seed ^ CHILD_STREAM ^ salt(its Order)
+```
+
+so nudging one layer never re-rolls another — tuning `shoots_per_spur` must not
+reshape the trunk underneath the shoots being tuned. `Rng` is an inlined
+SplitMix64 rather than a crate's default generator, because the requirement is
+that the same seed gives the same scene on every machine and every version,
+which a fixed algorithm guarantees and a crate does not promise.
+
+The **draw order** of a stream is part of an element's output: inserting a draw
+in the middle re-rolls everything downstream of it, so elements document their
+order where a reader would otherwise be tempted to reorder it. Where a slot can
+go empty — a bud that pushed no shoot — the draws happen anyway, so that a
+lighter prune drops one shoot instead of reshuffling every one after it.
+
+### Rules
+
+**Each element owns its slice of the scene and rebuilds it from scratch.** A
+layer clears its prefix from the mesh library and despawns the children it
+spawned before repopulating, so a rebuild that produces fewer representatives
+leaves nothing stale behind.
+
+**Elements compose by typed value, not by path.** A layer reads the configs
+spawned by the layer above and writes configs for the layer below; nothing
+reaches across by prim path.
+
+**Ordering is a `SystemSet` enum**, chained once in `elements::plugin`:
+
+```rust
+enum Grow { Terrain, Layout, Planting, Poles, Vines, Shoots, Scatter }
+```
+
+The chain is what makes the pipeline a pipeline: each set must have finished
+spawning before the one after it queries.
+
+**Rebuild only on change.** `run_if(configs_changed::<XConfig>)` is the
+dirty-tracking mechanism — curvo tessellation is expensive enough that this
+matters. A layer that also reads a resource the layer above does not re-author
+on (`ShootParams` for the shoots a vine hangs) adds `resource_changed` for it.
+
+**Determinism.** Bevy's query iteration order is not stable across runs and a
+codebook has to be a function of its population alone, so every organ carries a
+`scene::Order` assigned in authoring order and every layer sorts by it before
+clustering. `Prototypes` is a `BTreeMap` for the same reason: a document has to
+come out byte-identical across runs, because a downstream simulator keys its
+cache on those bytes.
+
+### Coordinates
+
+The scene is authored **Z-up, meters** — REP-103, which is what both Isaac Lab
+and ROS use. `upAxis` is root-layer-only metadata that does not compose through
+references, so a consumer cannot correct for a stage that gets it wrong, and
+USD's unauthored default is Y-up: silence is not neutral here, it is wrong.
+
+Bevy's renderer is Y-up, so the viewer's correction is a single parent entity
+above the scene root carrying `scene::z_up_to_y_up()`. The export walk starts
+*below* it, so the emitted document is Z-up native and no geometry module has
+to know.
+
+### Export
+
+`src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
+`SceneDoc`. Unnamed entities and their subtrees are skipped, which is how the
+Y-up correction stays out of the file. A prim carrying `UsdReference` may not
+have children — the exporter errors rather than emitting something USD would
+silently drop.
+
+`build.py` turns the document into a stage. Its docstring is the single home of
+every USD rule the project depends on, each of which fails *silently* if
+dropped: stage metadata, the parts library as a `class` inside the default
+prim, `subdivisionScheme = "none"`, `extent`, `displayColor` at `constant`
+interpolation, and — the one that is easiest to get wrong — that a part is an
+`Xform` *wrapping* its `Mesh` rather than a bare `Mesh`. A USD instance shares
+its *descendants* through a prototype while the instance prim's own attributes
+stay on the instance, so referencing a bare mesh and marking it instanceable
+yields an empty prototype and a full copy of the points on every instance:
+valid, drawn correctly, and with none of the sharing that was the point.
 
 ### Python
 
 Each element's params fragment is a `#[pyclass]`; `VineyardParams` aggregates
 them as `Py<T>` fields. `Py<T>` is required — a plain field would make the
-getter clone, so `params.leaf.length = 0.2` would silently mutate a temporary.
+getter clone, so `params.leaf.detail = 200` would silently mutate a temporary.
 For the same reason fragments are declared `skip_from_py_object`: they are
 live shared objects, and extracting one by value would hand back a copy.
+
+`VineyardParams.write_usd(path)` generates the scene in Rust, serializes the
+document, and hands it to `vinerylab.usd.build_usd` — so `usd-core` is a
+dependency of the package rather than of the crate.
+`generate_scene_json()` returns the document instead, for a caller that wants
+to cache the bytes or build the stage elsewhere. Both release the GIL for the
+Rust work: the params are copied out first, so nothing inside touches Python
+objects and other threads in a host application like Isaac Sim keep running.

@@ -32,33 +32,41 @@
 //! curls and twists, and the fill leaves interior vertices to bend when that
 //! pass arrives.
 //!
-//! # One subtree
+//! # The layer
 //!
-//! The prototype library under [`PROTOTYPE`], one `Var_<i>` per outline file,
-//! every one of them a full-grown leaf of exactly [`AREA`]. Nothing here
-//! decides where a leaf hangs or how big it ends up; that belongs to whoever
-//! owns the shoot it hangs from, and the fixed area is what lets that owner
-//! express age as a scale without minding which variation it drew.
+//! The last one: a leaf has nothing hanging off it, so this element builds
+//! meshes and expands into nothing. [`shoot`](super::shoot) authors a
+//! [`LeafConfig`] on every node it offers and [`build`] turns the distinct
+//! configs into blades — each one a full-grown leaf of exactly [`AREA`].
+//!
+//! With no children, a leaf is a geometry prim in its own right rather than an
+//! `Xform` over one, so it carries its [`Geometry`] directly. At six figures of
+//! them that is half the prims in the scene.
+//!
+//! Nothing here decides where a leaf hangs or how big it ends up; that belongs
+//! to the shoot it hangs from, and the fixed area is what lets that shoot
+//! express age as a scale without minding which shape came up.
 
 use anyhow::Context;
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use openusd::schemas::geom::Gprim;
-use openusd::sdf::Value;
-use usd_bevy::authoring::{define_prim, remove_prim};
-use usd_bevy::live::LiveStage;
 
-use super::util::color;
 use super::util::outline::{Outline, outline_mesh};
-use super::util::usd::{MeshData, author_mesh, set_display_color};
+use super::util::mesh::MeshData;
+use super::util::{color, material};
 use super::{Grow, Rng};
+use crate::quantize::{Metric, farthest_first};
+use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
 
-/// The prototype library this element owns: one `Var_<i>` mesh per outline.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Leaf";
+/// The mesh-library prefix this element registers its blades under.
+pub const PART: &str = "Leaf";
 
 /// The drawn outlines, in variation order.
+///
+/// `pub` because the shoot that hangs a leaf is the one that picks its blade,
+/// and it needs to know how many there are to pick from.
 ///
 /// Embedded at compile time rather than read from `assets/` at run time, so
 /// that the same bytes reach every consumer: this crate ships as a Python
@@ -69,7 +77,7 @@ pub const PROTOTYPE: &str = "/Vineyard/parts/Leaf";
 ///
 /// Adding a shape is one line here. See
 /// [`outline`](super::util::outline) for the frame a file has to be drawn in.
-const OUTLINES: &[&str] = &[
+pub const OUTLINES: &[&str] = &[
     include_str!("../../assets/leaves/leaf_1.svg"),
     include_str!("../../assets/leaves/leaf_2.svg"),
     include_str!("../../assets/leaves/leaf_3.svg"),
@@ -77,13 +85,12 @@ const OUTLINES: &[&str] = &[
     include_str!("../../assets/leaves/leaf_5.svg"),
 ];
 
-/// How many prototypes this element authors.
+/// How many drawn shapes there are to choose from.
 ///
-/// A count rather than a parameter, unlike every other element's
-/// `variations`: the shapes are drawn, not seeded, so there are exactly as
-/// many as there are files. Whoever scatters leaves passes this to
-/// [`variation_indices`](super::variation_indices).
-pub const VARIATIONS: usize = OUTLINES.len();
+/// A count of files, not a budget: [`LeafParams::variations`] is what caps the
+/// meshes, and a budget at or above this keeps every drawing — see
+/// [`LeafMetric`].
+pub const SHAPES: usize = OUTLINES.len();
 
 /// The area every prototype is built at, in m² — one full-grown leaf.
 ///
@@ -100,6 +107,48 @@ pub const VARIATIONS: usize = OUTLINES.len();
 /// and this is a middling one.
 pub const AREA: f32 = 0.015;
 
+/// How far apart two blades cut from different drawings are.
+///
+/// The outline is categorical: two shapes are different, not nearby, so this
+/// has to dominate every smooth axis below it. That is what keeps all five
+/// drawings alive under any budget that can hold them.
+const OUTLINE_APART: f32 = 1.0;
+
+/// One blade's shape, as the shoot that hangs it specified.
+///
+/// No size: every drawing is built at exactly [`AREA`], so how big a leaf ends
+/// up is the scale it is placed at and never a fact about the mesh.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LeafConfig {
+    /// Which drawing this blade is cut from — an index into [`OUTLINES`].
+    pub outline: u32,
+    pub detail: u32,
+}
+
+impl LeafConfig {
+    /// The blade these params call for, cut from drawing `outline`.
+    pub fn new(params: &LeafParams, outline: usize) -> Self {
+        Self {
+            outline: (outline % SHAPES) as u32,
+            detail: params.detail.max(1),
+        }
+    }
+}
+
+/// Two blades share a mesh when they were cut from the same drawing at about
+/// the same resolution.
+pub struct LeafMetric;
+
+impl Metric<LeafConfig> for LeafMetric {
+    fn distance(&self, a: &LeafConfig, b: &LeafConfig) -> f32 {
+        let shape = if a.outline == b.outline { 0.0 } else { OUTLINE_APART };
+        // Weighted to stay well under the categorical step across the whole
+        // range `detail` can be set to, so resolution never outbids shape.
+        let detail = (a.detail as f32 - b.detail as f32) * 0.001;
+        (shape * shape + detail * detail).sqrt()
+    }
+}
+
 // ─── Params ─────────────────────────────────────────────────────────
 
 #[derive(Resource, Clone, Debug)]
@@ -108,6 +157,14 @@ pub const AREA: f32 = 0.015;
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct LeafParams {
+    /// How many distinct blade meshes the scene may hold.
+    ///
+    /// A budget, not a count. The shapes are drawn rather than seeded, so
+    /// unlike every other element's `variations` there is a natural ceiling on
+    /// what it can buy: at [`SHAPES`] every drawing gets a mesh, and above that
+    /// it buys nothing, because two blades cut from one drawing at one
+    /// resolution are the same blade.
+    pub variations: u32,
     /// How finely the inside of a blade is subdivided, as the number of
     /// triangles its *area* is cut into.
     ///
@@ -122,57 +179,79 @@ pub struct LeafParams {
 
 impl Default for LeafParams {
     fn default() -> Self {
-        Self { detail: 120 }
+        Self {
+            variations: SHAPES as u32,
+            detail: 120,
+        }
     }
 }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LeafParams>().add_systems(
         PreUpdate,
-        author_prototypes
-            .in_set(Grow::Prototypes)
-            .run_if(resource_changed::<LeafParams>),
+        build
+            .in_set(Grow::Scatter)
+            .run_if(configs_changed::<LeafConfig>.or_else(resource_changed::<LeafParams>)),
     );
 }
 
 // ─── Shape ──────────────────────────────────────────────────────────
 
-/// One blade, in the prototype's local frame, at [`AREA`].
-fn blade_mesh(svg: &str, params: &LeafParams) -> anyhow::Result<MeshData> {
+/// One blade, in its own local frame, at [`AREA`].
+fn blade_mesh(config: &LeafConfig) -> anyhow::Result<MeshData> {
     let area = AREA as f64;
-    let outline = Outline::from_svg(svg)?.with_area(area);
-    outline_mesh(&outline, area / params.detail.max(1) as f64)
+    let outline = Outline::from_svg(OUTLINES[config.outline as usize])?.with_area(area);
+    outline_mesh(&outline, area / config.detail as f64)
 }
 
-// ─── Authoring ──────────────────────────────────────────────────────
+// ─── Building ───────────────────────────────────────────────────────
 
-/// Authors one mesh per outline under [`PROTOTYPE`].
-pub fn author_prototypes(live: NonSend<LiveStage>, params: Res<LeafParams>) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, PROTOTYPE)?;
-    define_prim(stage, PROTOTYPE, "Scope")?;
+/// Builds one mesh per distinct blade and gives it to every leaf that drew it.
+///
+/// The end of the pipeline: a leaf has no children, so it carries its geometry
+/// directly and expands into nothing.
+pub(crate) fn build(
+    mut commands: Commands,
+    mut library: Library,
+    params: Res<LeafParams>,
+    leaves: Query<(Entity, &Order, &LeafConfig)>,
+) -> Result<()> {
+    library.clear(PART);
 
-    for (i, svg) in OUTLINES.iter().enumerate() {
-        let mesh = blade_mesh(svg, &params)
-            .with_context(|| format!("leaf variation {i} could not be built"))?;
-        let blade = author_mesh(stage, &format!("{PROTOTYPE}/Var_{i}"), &mesh)?;
-        // A blade is a surface with no inside, so it has to be lit and drawn
-        // from underneath as well — a canopy is looked up into as often as
-        // down onto. Single-sided, every leaf above the camera would vanish.
-        blade.create_double_sided_attr()?.set(Value::Bool(true))?;
-        // Seeded off the variation index alone, because the shapes are drawn
-        // rather than generated and this element has no `seed` param to salt
-        // with — see [`VARIATIONS`]. Deterministic either way, which is what
-        // the stage needs.
-        set_display_color(
-            &blade,
-            color::shade(
-                color::srgb(color::LEAF),
-                &mut Rng::new(color::COLOR_STREAM ^ i as u64),
-            ),
-        )?;
+    let mut hung: Vec<(Order, Entity, LeafConfig)> = leaves
+        .iter()
+        .map(|(entity, order, config)| (*order, entity, *config))
+        .collect();
+    hung.sort_by_key(|(order, ..)| *order);
+
+    let configs: Vec<LeafConfig> = hung.iter().map(|(_, _, config)| *config).collect();
+    let book = farthest_first(&configs, params.variations.max(1) as usize, 0.0, &LeafMetric);
+
+    let geometry = book
+        .representatives
+        .iter()
+        .enumerate()
+        .map(|(index, config)| {
+            let mesh = blade_mesh(config)
+                .with_context(|| format!("leaf shape {} could not be built", config.outline))?;
+            Ok(library.part(PART, index, mesh.to_mesh(), surface(config.outline)))
+        })
+        .collect::<anyhow::Result<Vec<Geometry>>>()?;
+
+    for ((_, entity, _), drew) in hung.iter().zip(&book.assignment) {
+        commands.entity(*entity).insert(geometry[*drew as usize].clone());
     }
     Ok(())
+}
+
+/// A blade, shaded off the drawing it was cut from rather than off which
+/// representative it happens to be, so one shape is one green however the
+/// budget is spent.
+fn surface(outline: u32) -> Surface {
+    material::FOLIAGE.double_sided(color::shade(
+        color::srgb(color::LEAF),
+        &mut Rng::new(color::COLOR_STREAM ^ outline as u64),
+    ))
 }
 
 // ─── UI ─────────────────────────────────────────────────────────────
@@ -181,6 +260,16 @@ pub fn ui() -> impl Scene {
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
         Children [
+            label_small("Leaf variations"),
+            (
+                @FeathersSlider { @min: 1.0, @max: 5.0, @value: 5.0 }
+                SliderStep(1.0)
+                SliderPrecision(0)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<LeafParams>| {
+                    params.variations = change.value.round().max(1.0) as u32;
+                })
+            ),
             label_small("Leaf detail"),
             (
                 @FeathersSlider { @min: 8.0, @max: 400.0, @value: 120.0 }
@@ -199,19 +288,19 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::place::prototype_count;
-    use crate::elements::util::testing::{Authoring, bounds, face_normal, faces};
+    use crate::elements::util::testing::{self, bounds, face_normal, faces, organs};
+    use crate::scene::Prototypes;
 
     fn params() -> LeafParams {
         LeafParams::default()
     }
 
+    /// Every drawn shape, at this resolution.
     fn blades(params: &LeafParams) -> Vec<MeshData> {
-        OUTLINES
-            .iter()
-            .enumerate()
-            .map(|(i, svg)| {
-                blade_mesh(svg, params).unwrap_or_else(|e| panic!("leaf_{}: {e:#}", i + 1))
+        (0..SHAPES)
+            .map(|i| {
+                blade_mesh(&LeafConfig::new(params, i))
+                    .unwrap_or_else(|e| panic!("leaf_{}: {e:#}", i + 1))
             })
             .collect()
     }
@@ -229,7 +318,7 @@ mod tests {
     /// same problem surfaces as an author system failing mid-frame.
     #[test]
     fn every_drawn_outline_builds() {
-        assert_eq!(VARIATIONS, 5, "five shapes are committed");
+        assert_eq!(SHAPES, 5, "five shapes are committed");
         for mesh in blades(&params()) {
             assert!(!mesh.face_vertex_counts.is_empty());
             assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
@@ -369,8 +458,8 @@ mod tests {
     /// knob is worth is measured past that floor.
     #[test]
     fn more_detail_spends_more_triangles() {
-        let coarse = blades(&LeafParams { detail: 8 });
-        let fine = blades(&LeafParams { detail: 400 });
+        let coarse = blades(&LeafParams { detail: 8, ..params() });
+        let fine = blades(&LeafParams { detail: 400, ..params() });
         for (i, (c, f)) in coarse.iter().zip(&fine).enumerate() {
             assert!(
                 f.face_vertex_counts.len() > c.face_vertex_counts.len(),
@@ -387,43 +476,107 @@ mod tests {
     /// than divide by zero.
     #[test]
     fn a_blade_with_no_subdivision_asked_for_still_builds() {
-        let mesh = blade_mesh(OUTLINES[0], &LeafParams { detail: 0 })
+        let mesh = blade_mesh(&LeafConfig::new(&LeafParams { detail: 0, ..params() }, 0))
             .expect("a leaf at the slider's bottom stop still builds");
         assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
         assert!(!mesh.face_vertex_counts.is_empty());
     }
 
+    /// Every drawing survives the budget: the outline is categorical in the
+    /// metric, so a budget that can hold five shapes holds all five however
+    /// unevenly the canopy drew them.
+    ///
+    /// The failure this catches is a metric that treats the outline as a
+    /// number — four blades of shape 0 and one of shape 4 would then look like
+    /// one tight cluster and a far outlier, and the rare shapes would vanish.
     #[test]
-    fn authors_one_prototype_per_outline() {
-        let stage = crate::generate::generate_stage(&VineyardParams::default()).unwrap();
-        assert_eq!(prototype_count(&stage, PROTOTYPE), VARIATIONS);
+    fn every_drawn_shape_survives_a_budget_that_can_hold_it() {
+        let params = params();
+        let mut canopy: Vec<LeafConfig> = vec![LeafConfig::new(&params, 0); 200];
+        canopy.extend((1..SHAPES).map(|i| LeafConfig::new(&params, i)));
+
+        let book = farthest_first(&canopy, SHAPES, 0.0, &LeafMetric);
+        let kept: std::collections::BTreeSet<u32> =
+            book.representatives.iter().map(|c| c.outline).collect();
+        assert_eq!(kept.len(), SHAPES, "all five drawings kept, got {kept:?}");
+
+        // And a budget too small to hold them spends what it has on distinct
+        // shapes rather than on near-duplicates of one.
+        let book = farthest_first(&canopy, 3, 0.0, &LeafMetric);
+        let kept: std::collections::BTreeSet<u32> =
+            book.representatives.iter().map(|c| c.outline).collect();
+        assert_eq!(kept.len(), 3, "three distinct shapes, got {kept:?}");
     }
 
-    /// A flat mesh drawn from one side only would disappear when the camera
-    /// goes under the canopy, which is most of the time.
+    /// End to end: every leaf the shoots hung comes out carrying a blade, and
+    /// the whole canopy is drawn from at most the budget's worth of meshes.
     #[test]
-    fn blades_are_authored_double_sided() {
-        let mut authoring = Authoring::new("leaf.usda", author_prototypes);
-        authoring.insert(params()).run();
+    fn every_hung_leaf_draws_a_blade_from_the_library() {
+        let app = testing::grown(VineyardParams::default());
+        let blades: Vec<(&String, &crate::scene::Part)> = app
+            .world()
+            .resource::<Prototypes>()
+            .iter()
+            .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+            .collect();
 
-        let usda = authoring.stage.root_layer().export_to_string().unwrap();
-        assert_eq!(
-            usda.matches("uniform bool doubleSided = true").count(),
-            VARIATIONS,
-            "every blade renders from both sides; got:\n{usda}"
+        assert_eq!(blades.len(), SHAPES, "the default budget keeps every shape");
+        for (i, (_, a)) in blades.iter().enumerate() {
+            assert!(a.double_sided, "a blade is lit from underneath too");
+            for (_, b) in blades.iter().skip(i + 1) {
+                assert_ne!(a.color, b.color, "two blades came out the same green");
+            }
+        }
+
+        let mut app = app;
+        let leaves = organs::<LeafConfig>(app.world_mut());
+        assert!(leaves.len() > 1000, "the fixture hung leaves, got {}", leaves.len());
+        assert!(
+            leaves.iter().map(|l| l.config.outline).collect::<std::collections::BTreeSet<_>>()
+                == (0..SHAPES as u32).collect(),
+            "and the shoots picked from every shape"
         );
     }
 
-    /// The element owns its subtree and rewrites it from scratch, so a second
-    /// pass must leave exactly what the first one did — no doubling up, no
-    /// leftovers.
+    /// A leaf has no children, so it is the geometry prim itself rather than
+    /// an `Xform` over one — which is what halves the prim count of a scene
+    /// that is mostly leaves.
     #[test]
-    fn re_authoring_rewrites_rather_than_accumulates() {
-        let mut authoring = Authoring::new("leaf.usda", author_prototypes);
-        authoring.insert(params()).run();
-        assert!(authoring.has(&format!("{PROTOTYPE}/Var_{}", VARIATIONS - 1)));
+    fn a_leaf_carries_its_geometry_rather_than_wrapping_it() {
+        let mut app = testing::grown(VineyardParams::default());
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(Entity, Option<&Children>), With<LeafConfig>>();
+        let (entity, children) = query.iter(app.world()).next().expect("some leaf was hung");
 
-        authoring.insert(params()).run();
-        assert_eq!(prototype_count(&authoring.stage, PROTOTYPE), VARIATIONS);
+        assert!(children.is_none_or(|c| c.is_empty()), "a blade is a leaf of the tree");
+        assert!(
+            app.world().entity(entity).contains::<crate::scene::UsdReference>(),
+            "and references its blade directly"
+        );
+    }
+    /// The layer owns its slice of the library and rebuilds it from scratch,
+    /// so a second pass must leave exactly what the first one did — and a
+    /// lowered budget must leave less.
+    #[test]
+    fn rebuilding_rewrites_the_library_rather_than_adding_to_it() {
+        let blades = |app: &App| {
+            app.world()
+                .resource::<Prototypes>()
+                .iter()
+                .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+                .count()
+        };
+
+        let mut app = testing::grown(VineyardParams::default());
+        assert_eq!(blades(&app), SHAPES);
+
+        app.world_mut().resource_mut::<LeafParams>().set_changed();
+        app.update();
+        assert_eq!(blades(&app), SHAPES, "a rebuild does not double up");
+
+        app.world_mut().resource_mut::<LeafParams>().variations = 2;
+        app.update();
+        assert_eq!(blades(&app), 2, "and the three it stopped using are gone");
     }
 }

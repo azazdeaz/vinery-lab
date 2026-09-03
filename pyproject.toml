@@ -9,6 +9,9 @@ requires-python = ">=3.12"
 license = "MIT OR Apache-2.0"
 authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
 dynamic = ["version"]
+# The generator builds the scene in Bevy and hands it over as JSON; the USD
+# stage itself is authored here, in `vinerylab.usd`.
+dependencies = ["usd-core>=24.11"]
 
 [tool.maturin]
 features = ["extension-module"]

@@ -8,7 +8,7 @@
 //!
 //! # Local frame
 //!
-//! A shoot is authored **with its base at the origin, growing along +X, and
+//! A shoot is built **with its base at the origin, growing along +X, and
 //! turning up to +Z** inside [`BEND_RADIUS`]:
 //!
 //! ```text
@@ -25,28 +25,33 @@
 //! stands up on its own. No frame has to be transported along the spur.
 //!
 //! The same frame is what lets a shoot stand in for a whole plant: a replant in
-//! its first season is one of these out of the bare ground, with the bend
-//! buried — [`PLANT_DEPTH`] deep, and [`vine::YOUNG_PROTOTYPE`] is what does
-//! the burying.
+//! its first season is one of these out of the bare ground with the bend
+//! buried [`PLANT_DEPTH`] deep, which is all a [`vine`](super::vine) below
+//! [`VineConfig::is_mature`] is made of.
 //!
-//! [`vine::YOUNG_PROTOTYPE`]: super::vine::YOUNG_PROTOTYPE
+//! [`VineConfig::is_mature`]: super::vine::VineConfig::is_mature
 //!
-//! # One subtree
+//! # The layer
 //!
-//! The prototype library under [`PROTOTYPE`]. Each `Var_<i>` is an `Xform`
-//! over a `Stem` mesh plus its leaves, placed by whichever path
-//! [`place::Style`] names: a prim each, referencing a [`leaf`](super::leaf)
-//! prototype, or one [`LEAVES`] instancer holding the lot.
+//! [`vine`](super::vine) authors a [`ShootConfig`] on every bud its wood
+//! offers; [`build`] turns the distinct configs into meshes. Every shoot gets:
 //!
-//! Leaves live *inside* the prototype, so a whole vineyard's canopy costs a
-//! handful of placements on the stage rather than one per leaf. The trade is
-//! that every instance of a given variation carries an identical canopy, and
-//! variety comes from the product of the variation counts across nesting
-//! levels — see the "Variations" section of `README.md`.
+//! ```text
+//! Shoot_00_0          the placed entity, carrying its ShootConfig
+//!   Stem              -> parts/Shoot_<rep>, shared with every shoot that drew it
+//!   Leaf_00           a LeafConfig of its own, hung on a node
+//!   Leaf_01           ...
+//! ```
 //!
-//! Where shoots *sit* is [`vine`](super::vine)'s business — a shoot grows from
-//! a spur, and only the vine knows where its spurs ended up. By the same rule,
-//! where a leaf sits is settled here: only a shoot knows where its nodes are.
+//! Same split as one level up: where the nodes are comes from the
+//! **representative**, because a leaf has to sit on the stem that actually got
+//! built, while each leaf's bearing, droop, twist, size and blade are drawn per
+//! shoot. Which is why a canopy off a handful of stem meshes does not read as a
+//! handful of stem meshes.
+//!
+//! A leaf has nothing hanging off it, so it is a geometry prim in its own right
+//! rather than an `Xform` over one — see [`scene`](crate::scene). At six
+//! figures of them, that halves the prim count of the whole scene.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
@@ -55,23 +60,22 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::Point3;
-use usd_bevy::authoring::{define_prim, remove_prim};
-use usd_bevy::live::LiveStage;
 
 use super::leaf;
 use super::util::color;
-use super::util::place::{self, Placement};
 use super::util::strand::{Bark, Strand, strand_mesh};
-use super::util::usd::{author_mesh, merge_meshes, set_display_color};
-use super::{Grow, Rng};
+use super::util::{material};
+use super::{Grow, Rng, SceneParams, salt};
+use crate::quantize::{Metric, farthest_first};
+use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
 
-/// The prototype library this element owns: one `Var_<i>` per variation, each
-/// an `Xform` over its stem and its leaves.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Shoot";
+/// The mesh-library prefix this element registers its stems under.
+pub const PART: &str = "Shoot";
 
-/// Name the `PointInstancer` holding a shoot's leaves takes, when they are
-/// instanced rather than reference-placed.
-pub const LEAVES: &str = "Leaves";
+/// The prim a shoot's stem takes, below the shoot itself. A child rather than
+/// the shoot prim itself, because a shoot has leaves hanging off it and
+/// geometry prims carry no children.
+pub const STEM: &str = "Stem";
 
 // ─── Shape constants ────────────────────────────────────────────────
 
@@ -103,11 +107,9 @@ const BEND_NODES: usize = 4;
 /// rise — the margin past [`BEND_RADIUS`] is what makes the tube cross the
 /// surface already vertical rather than just as it finishes turning.
 ///
-/// Public because a shoot is what a young vine is made of — see
-/// [`vine::YOUNG_PROTOTYPE`] — and whoever plants a bare shoot is the one who
-/// has to bury it. It is the only thing about this frame they need.
-///
-/// [`vine::YOUNG_PROTOTYPE`]: super::vine::YOUNG_PROTOTYPE
+/// Public because a shoot is what a replant is made of, and whoever plants a
+/// bare shoot is the one who has to bury it. It is the only thing about this
+/// frame they need.
 pub const PLANT_DEPTH: f64 = BEND_RADIUS + 0.03;
 
 /// Spacing of the control points up the straight run.
@@ -127,9 +129,13 @@ const BEND_ARC: f64 = BEND_RADIUS * FRAC_PI_2;
 
 // ─── Leaf constants ─────────────────────────────────────────────────
 
-/// Salt splitting the leaves' randomness off the stem's, so tuning the canopy
-/// never reshapes the shoot underneath it — the same split
-/// [`vine`](super::vine) keeps between its wood and its shoots.
+/// Salt splitting the stems' randomness off the scene seed, so that this layer
+/// and the ones either side of it never draw from the same stream.
+const STEM_STREAM: u64 = 0x589A_B41E_A1D2_F35B;
+
+/// The same, splitting the leaves off the stems, so tuning the canopy never
+/// reshapes the shoot underneath it — the same split [`vine`](super::vine)
+/// keeps between its wood and its shoots.
 const LEAF_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
 
 /// Below this the station loop would never terminate, so a shoot this closely
@@ -137,7 +143,7 @@ const LEAF_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
 const MIN_INTERNODE: f64 = 0.005;
 
 /// Bare tip left past the last node. The growing point itself is a curl of
-/// scale leaves too small to be worth a prototype.
+/// scale leaves too small to be worth a mesh.
 const TIP_CLEARANCE: f64 = 0.02;
 
 /// How far a node slides off its nominal station, as a fraction of the
@@ -158,7 +164,7 @@ const PHYLLOTAXY_DRIFT: f64 = 0.08;
 /// Twist about a leaf's own long axis, in radians.
 const LEAF_ROLL: f64 = 0.35;
 
-/// Spread of the droop about [`ShootParams::leaf_droop`], as a fraction.
+/// Spread of the droop about [`ShootConfig::leaf_droop`], as a fraction.
 const LEAF_DROOP_JITTER: f64 = 0.3;
 
 /// How much a leaf's size varies about what its age asks for, as a fraction.
@@ -173,9 +179,86 @@ const TIP_SCALE: f64 = 0.15;
 /// A *length* rather than a number of nodes, and that is the point: a shoot
 /// extends at a roughly steady rate and a leaf takes about a month to reach
 /// full size, so the growing tip is the same span of shoot whatever
-/// [`ShootParams::internode`] is set to. Counting nodes instead would make the
+/// [`ShootConfig::internode`] is set to. Counting nodes instead would make the
 /// canopy's age gradient change every time its density did.
 const EXPANDING_REACH: f64 = 0.25;
+
+// ─── Config ─────────────────────────────────────────────────────────
+
+/// The shortest shoot we will build: below this the bend has nowhere to
+/// finish, and the strand would double back on itself.
+const MIN_LENGTH: f32 = (BEND_RADIUS * 1.5) as f32;
+
+/// One shoot's shape, as the vine that grew it specified.
+///
+/// Everything a mesh is built from, and nothing about where the shoot sits —
+/// that is the entity's `Transform`. Clamped on the way in rather than in the
+/// shape functions, so the config a metric compares is the shoot that actually
+/// gets built.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct ShootConfig {
+    pub length: f32,
+    pub radius: f32,
+    pub lean: f32,
+    pub sides: u32,
+    pub detail: u32,
+    /// Distance between leaf nodes up the shoot, in meters. Below
+    /// [`MIN_INTERNODE`] a shoot carries no leaves at all, which is how the
+    /// canopy is turned off.
+    pub internode: f32,
+    /// How far a full-grown blade pitches below horizontal, in radians.
+    ///
+    /// Placement only — no part of the stem reads it — which is why
+    /// [`ShootMetric`] does not either. Two shoots differing in nothing else
+    /// must share a mesh and still hang their leaves at their own angle.
+    pub leaf_droop: f32,
+}
+
+impl ShootConfig {
+    /// The shoot these params call for, at this `vigour` and node `spacing`.
+    ///
+    /// Both are multipliers about `1.0`, drawn per shoot by whoever placed it —
+    /// see [`vine`](super::vine). Vigour lengthens and thickens the shoot
+    /// together, which is what more light does, and leaves the spacing alone,
+    /// so a vigorous shoot also carries more leaves.
+    pub fn new(params: &ShootParams, vigour: f32, spacing: f32) -> Self {
+        Self {
+            length: (params.length * vigour).max(MIN_LENGTH),
+            radius: (params.radius * vigour).max(0.0005),
+            lean: params.lean.max(0.0),
+            sides: params.sides.max(3),
+            detail: params.detail.max(1),
+            internode: (params.internode * spacing).max(0.0),
+            leaf_droop: params.leaf_droop,
+        }
+    }
+}
+
+/// Two shoots share a mesh when they are close in every dimension that shows.
+///
+/// The weights turn each field into roughly how far apart it *looks*. Radius
+/// is the extreme case: a shoot is six millimeters thick, so a millimeter of
+/// it is a sixth of the silhouette, where a millimeter of length is nothing.
+pub struct ShootMetric;
+
+impl Metric<ShootConfig> for ShootMetric {
+    fn distance(&self, a: &ShootConfig, b: &ShootConfig) -> f32 {
+        [
+            a.length - b.length,
+            (a.radius - b.radius) * 8.0,
+            (a.lean - b.lean) * 2.0,
+            // Reaches the mesh only through where the nodes land, but two
+            // shoots noded differently hang different canopies, and the nodes
+            // come from whichever of them built the mesh.
+            (a.internode - b.internode) * 2.0,
+            (a.sides as f32 - b.sides as f32) * 0.01,
+        ]
+        .iter()
+        .map(|d| d * d)
+        .sum::<f32>()
+        .sqrt()
+    }
+}
 
 // ─── Params ─────────────────────────────────────────────────────────
 
@@ -185,10 +268,11 @@ const EXPANDING_REACH: f64 = 0.25;
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct ShootParams {
-    /// How many differently-seeded shoots to author as prototypes.
+    /// How many distinct stem meshes the scene may hold.
+    ///
+    /// A budget, not a count: the shoots are clustered and this is how many
+    /// representatives the clustering may keep.
     pub variations: u32,
-    /// Drives the prototype shapes.
-    pub seed: u64,
     /// Bud to tip, in meters — how tall a shoot stands above the spur it grew
     /// from. Whoever places one varies this a little per shoot.
     pub length: f32,
@@ -201,7 +285,7 @@ pub struct ShootParams {
     /// Rings per meter along the tube.
     ///
     /// Higher here than anywhere else in the scene, and cheaper than it looks:
-    /// a shoot is a *shared prototype*, so this buys ring density for the whole
+    /// a stem is a *shared mesh*, so this buys ring density for the whole
     /// vineyard at the cost of a handful of meshes. It has to be high because
     /// stations are spaced by arc length and [`BEND_RADIUS`] packs a quarter
     /// turn into a few centimeters — at the density a trunk is happy with, the
@@ -211,9 +295,7 @@ pub struct ShootParams {
     ///
     /// The count-like knob, the way [`shoots_per_spur`] is one level up: how
     /// many leaves a shoot carries is a fact about the shoot rather than about
-    /// a leaf, and a spacing says it in the unit a viticulturist would. Below
-    /// [`MIN_INTERNODE`] a shoot carries no leaves at all, which is how the
-    /// canopy is turned off.
+    /// a leaf, and a spacing says it in the unit a viticulturist would.
     ///
     /// [`shoots_per_spur`]: super::vine::VineParams::shoots_per_spur
     pub internode: f32,
@@ -229,7 +311,6 @@ impl Default for ShootParams {
     fn default() -> Self {
         Self {
             variations: 4,
-            seed: 0,
             length: 0.75,
             radius: 0.006,
             lean: 0.06,
@@ -244,28 +325,16 @@ impl Default for ShootParams {
 pub fn plugin(app: &mut App) {
     app.init_resource::<ShootParams>().add_systems(
         PreUpdate,
-        author_prototypes
-            .in_set(Grow::Prototypes)
-            // Places the leaf prototypes and counts them off the stage, so
-            // they have to be there first — the same debt `vine` owes this
-            // system. `Grow` chains the *sets*; the systems inside one are
-            // unordered until something says otherwise.
-            .after(leaf::author_prototypes)
-            .run_if(
-                resource_changed::<ShootParams>
-                    .or_else(resource_changed::<leaf::LeafParams>)
-                    .or_else(resource_changed::<place::Style>),
-            ),
+        build.in_set(Grow::Shoots).run_if(
+            configs_changed::<ShootConfig>
+                // The leaves this layer hangs are authored from `LeafParams`,
+                // and nothing re-authors the shoot configs when those change.
+                .or_else(resource_changed::<leaf::LeafParams>),
+        ),
     );
 }
 
 // ─── Shape ──────────────────────────────────────────────────────────
-
-/// The tallest a shoot can be asked to stand: below this the bend has nowhere
-/// to finish, and the strand would double back on itself.
-fn height(params: &ShootParams) -> f64 {
-    (params.length as f64).max(BEND_RADIUS * 1.5)
-}
 
 /// Lateral offset of a shoot's axis at fraction `f` up its straight run.
 ///
@@ -314,12 +383,12 @@ impl ShootAxis {
     /// The *draw order* is part of this element's output: the lean's bearing,
     /// its wave's phase, then how much of the nominal lean this one actually
     /// takes.
-    fn new(params: &ShootParams, rng: &mut Rng) -> Self {
+    fn new(config: &ShootConfig, rng: &mut Rng) -> Self {
         Self {
-            height: height(params),
+            height: config.length as f64,
             azimuth: rng.unit() * TAU,
             phase: rng.unit() * TAU,
-            lean: params.lean as f64 * rng.range(0.5, 1.0),
+            lean: config.lean as f64 * rng.range(0.5, 1.0),
         }
     }
 
@@ -367,8 +436,8 @@ fn bend_point(angle: f64) -> Point3<f64> {
     )
 }
 
-/// One shoot's stem, in the prototype's local frame.
-fn shoot_strand(axis: &ShootAxis, params: &ShootParams) -> Strand {
+/// One shoot's stem, in its own local frame.
+fn shoot_strand(axis: &ShootAxis, config: &ShootConfig) -> Strand {
     let height = axis.height;
 
     // Starts behind the bud, arcs up over the bend, then rises. The bend's
@@ -389,7 +458,7 @@ fn shoot_strand(axis: &ShootAxis, params: &ShootParams) -> Strand {
         .iter()
         .map(|p| {
             let t = (p.z / height).clamp(0.0, 1.0);
-            params.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
+            config.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
         })
         .collect();
 
@@ -398,8 +467,8 @@ fn shoot_strand(axis: &ShootAxis, params: &ShootParams) -> Strand {
     Strand::new(
         points,
         radii,
-        (params.sides as usize).max(3),
-        params.detail as f64,
+        config.sides as usize,
+        config.detail as f64,
         Bark::none(),
     )
 }
@@ -423,157 +492,181 @@ fn leaf_scale(below_tip: f64) -> f64 {
     TIP_SCALE + (1.0 - TIP_SCALE) * (t * t * (3.0 - 2.0 * t))
 }
 
-/// Where this shoot's leaves sit, in the prototype's local frame.
+/// Where one leaf hangs, in the shoot's local frame.
+///
+/// A slot on the built stem rather than a finished placement: the bearing,
+/// droop, twist, size and blade of the leaf that fills it are drawn per
+/// *shoot*, in [`build`].
+#[derive(Clone, Debug)]
+struct LeafNode {
+    name: String,
+    position: Vec3,
+    /// The rank's angle about the stem, before the per-shoot bearing and
+    /// wander. Accumulates past a full turn; [`build`] wraps it.
+    yaw: f32,
+    /// How grown the blade here is, as a fraction of a full-grown one.
+    maturity: f32,
+}
+
+/// Where this shoot's leaves sit.
 ///
 /// Nodes climb the shoot from the top of the bend to a little short of the
 /// tip. The bend is left bare because that is where a shoot is still lying
-/// sideways, and a leaf's whole orientation here is a bearing about Z plus a
+/// sideways, and a leaf's whole orientation is a bearing about Z plus a
 /// droop — which only means "around the stem" once the stem is standing up.
 ///
-/// # Two rules about the randomness
+/// Draws from a **stream of its own**, salted with [`LEAF_STREAM`], so that
+/// tuning the canopy never reshapes the stem underneath it. One draw per node:
+/// how far it slid off its nominal station.
 ///
-/// It draws from a **stream of its own**, salted with [`LEAF_STREAM`], so that
-/// tuning the canopy never reshapes the stem underneath it — the same split
-/// [`vine`](super::vine) keeps between its wood and its shoots.
-///
-/// Unlike a spur's fixed three buds, though, there is no slot set to keep
-/// aligned: the station list *is* the count, so changing
-/// [`internode`](ShootParams::internode) re-rolls the whole canopy rather than
-/// adding to it. That is the honest behaviour for a spacing, and it is why
-/// this does not go through the draw-everything-anyway discipline
-/// [`shoot_placements`](super::vine) needs.
-fn leaf_placements(
-    params: &ShootParams,
-    axis: &ShootAxis,
-    variations: usize,
-    seed: u64,
-) -> Vec<(String, Placement)> {
-    let variations = variations.max(1);
-    let internode = params.internode as f64;
+/// Unlike a spur's fixed three buds there is no slot set to keep aligned — the
+/// station list *is* the count, so changing [`ShootConfig::internode`] re-rolls
+/// the whole canopy rather than adding to it. That is the honest behaviour for
+/// a spacing.
+fn leaf_nodes(config: &ShootConfig, axis: &ShootAxis, seed: u64) -> Vec<LeafNode> {
+    let internode = config.internode as f64;
     let length = axis.length();
     if internode < MIN_INTERNODE {
         return Vec::new();
     }
 
     let mut rng = Rng::new(seed ^ LEAF_STREAM);
-    // Drawn once, so the two ranks are not lined up with the shoot's lean.
-    let bearing = rng.unit() * TAU;
-
-    let mut placements = Vec::new();
+    let mut nodes = Vec::new();
     let mut station = BEND_ARC;
-    let mut node = 0usize;
-    while station <= length - TIP_CLEARANCE {
-        // Draw order: the node's slide up the shoot, its bearing's wander, its
-        // droop, its twist, its vigour, then which blade it drew.
-        let slide = rng.range(-STATION_JITTER, STATION_JITTER) * internode;
-        let turn = rng.range(-LEAF_SPREAD, LEAF_SPREAD);
-        let sag = rng.range(1.0 - LEAF_DROOP_JITTER, 1.0 + LEAF_DROOP_JITTER);
-        let roll = rng.range(-LEAF_ROLL, LEAF_ROLL);
-        let vigour = rng.range(1.0 - LEAF_VIGOUR, 1.0 + LEAF_VIGOUR);
-        let pick = rng.unit();
+    let mut index = 0usize;
 
+    while station <= length - TIP_CLEARANCE {
+        let slide = rng.range(-STATION_JITTER, STATION_JITTER) * internode;
         let at = (station + slide).clamp(BEND_ARC, length);
         // On the centerline rather than out at the stem's surface: that buries
         // the petiole's free end under a few millimeters of stem, which is the
         // trick `SHOOT_EMBED` already uses one level up and is what guarantees
         // no gap however the blade ends up turned.
         let position = axis.at(at);
-        let maturity = leaf_scale(length - at);
 
-        placements.push((
-            format!("Leaf_{node:02}"),
-            Placement {
-                position: Vec3::new(position.x as f32, position.y as f32, position.z as f32),
-                // Distichous: successive leaves sit half a turn apart, in two
-                // ranks up opposite sides of the shoot, drifting slowly so ten
-                // of them do not come out coplanar. Wrapped, because the sum
-                // runs past a full turn by the fourth node and an authored
-                // `rotateXYZ` of 1000° is a thing nobody wants to read.
-                yaw: (bearing + (PI + PHYLLOTAXY_DRIFT) * node as f64 + turn).rem_euclid(TAU)
-                    as f32,
-                // A leaf is drawn flat along +X with its face toward +Z, so
-                // the tilt is the whole of its posture: X twists the blade
-                // about its own long axis, Y pitches its tip down.
-                tilt: Vec2::new(
-                    roll as f32,
-                    (params.leaf_droop as f64 * maturity * sag) as f32,
-                ),
-                scale: (maturity * vigour) as f32,
-                variation: (pick * variations as f64) as usize % variations,
-            },
-        ));
+        nodes.push(LeafNode {
+            name: format!("Leaf_{index:02}"),
+            position: Vec3::new(position.x as f32, position.y as f32, position.z as f32),
+            // Distichous: successive leaves sit half a turn apart, in two ranks
+            // up opposite sides of the shoot, drifting slowly so ten of them do
+            // not come out coplanar.
+            yaw: ((PI + PHYLLOTAXY_DRIFT) * index as f64) as f32,
+            maturity: leaf_scale(length - at) as f32,
+        });
 
         station += internode;
-        node += 1;
+        index += 1;
     }
-    placements
+    nodes
 }
 
-// ─── Authoring ──────────────────────────────────────────────────────
+// ─── Building ───────────────────────────────────────────────────────
 
-/// Authors one mesh per variation under [`PROTOTYPE`].
+/// One representative shoot: its stem, and the nodes its leaves hang on.
+struct ShootBuild {
+    stem: Mesh,
+    nodes: Vec<LeafNode>,
+}
+
+fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
+    let axis = ShootAxis::new(config, &mut Rng::new(seed));
+    Ok(ShootBuild {
+        stem: strand_mesh(&shoot_strand(&axis, config))?.to_mesh(),
+        nodes: leaf_nodes(config, &axis, seed),
+    })
+}
+
+/// Builds one mesh per distinct shoot, and hangs a leaf on every node.
 ///
-/// `pub` so [`vine`](super::vine) can order its own authoring after this one:
-/// the vine references these prims and counts them off the stage, and
-/// [`Grow`] chains the *sets*, not the systems inside one.
-pub fn author_prototypes(
-    live: NonSend<LiveStage>,
+/// The stem is shared and the canopy is not: every shoot authors its own
+/// [`leaf::LeafConfig`] at each node, so two shoots off one mesh carry
+/// different blades at different angles.
+///
+/// Each shoot's leaves draw from a stream keyed on its [`Order`], so a shoot's
+/// canopy depends on which bud it grew from and on nothing else in the parcel.
+pub(crate) fn build(
+    mut commands: Commands,
+    mut library: Library,
+    scene: Res<SceneParams>,
     params: Res<ShootParams>,
-    style: Res<place::Style>,
+    leaf_params: Res<leaf::LeafParams>,
+    shoots: Query<(Entity, &Order, &ShootConfig)>,
 ) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, PROTOTYPE)?;
-    define_prim(stage, PROTOTYPE, "Scope")?;
+    library.clear(PART);
 
-    // Counted off the stage rather than read from `LeafParams`, because
-    // elements compose by prim path only.
-    let leaf_variations = place::prototype_count(stage, leaf::PROTOTYPE);
+    let mut grown: Vec<(Order, Entity, ShootConfig)> = shoots
+        .iter()
+        .map(|(entity, order, config)| (*order, entity, *config))
+        .collect();
+    grown.sort_by_key(|(order, ..)| *order);
 
-    for i in 0..params.variations.max(1) {
-        // Mixing rather than adding, so neighbouring seeds give unrelated
-        // shoots instead of the same shoot shifted by one variation.
-        let seed = params.seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        let axis = ShootAxis::new(&params, &mut Rng::new(seed));
-        let strand = shoot_strand(&axis, &params);
+    let configs: Vec<ShootConfig> = grown.iter().map(|(_, _, config)| *config).collect();
+    let book = farthest_first(&configs, params.variations.max(1) as usize, 0.0, &ShootMetric);
 
-        // An `Xform` over a `Stem` mesh rather than a bare `Mesh`: the leaves
-        // are references to another element's prototypes, so a shoot has to be
-        // a prim that can *have* children — the same reason a vine is an
-        // `Xform` over its wood.
-        let variation = format!("{PROTOTYPE}/Var_{i}");
-        define_prim(stage, &variation, "Xform")?;
-        let stem = author_mesh(
-            stage,
-            &format!("{variation}/Stem"),
-            &merge_meshes(&[strand_mesh(&strand)?]),
-        )?;
-        set_display_color(
-            &stem,
-            color::shade(
-                color::srgb(color::CANE),
-                &mut Rng::new(seed ^ color::COLOR_STREAM),
-            ),
-        )?;
+    let mut built: Vec<(Vec<LeafNode>, Geometry)> = Vec::with_capacity(book.len());
+    for (index, config) in book.representatives.iter().enumerate() {
+        let seed = scene.seed ^ STEM_STREAM ^ salt(index as u64);
+        let ShootBuild { stem, nodes } = build_shoot(config, seed)?;
+        built.push((nodes, library.part(PART, index, stem, surface(seed))));
+    }
 
-        if leaf_variations > 0 {
-            let leaves = leaf_placements(&params, &axis, leaf_variations, seed);
-            // No material: a leaf takes whatever the shoot it hangs from was
-            // bound to, which is `vine`'s `Foliage`. Binding here instead
-            // would put a relationship on every leaf in the parcel — six
-            // figures of them — to say the same thing.
-            place::place(
-                stage,
-                *style,
-                &variation,
-                LEAVES,
-                leaf::PROTOTYPE,
-                leaf_variations,
-                &leaves,
-                None,
-            )?;
+    let mut leaf_order = 0u64;
+    for ((order, entity, config), drew) in grown.iter().zip(&book.assignment) {
+        let (nodes, geometry) = &built[*drew as usize];
+        let mut shoot = commands.entity(*entity);
+        // The layer owns everything below a shoot, and a rebuild may hang a
+        // different number of leaves than the last one did.
+        shoot.despawn_children();
+        shoot.with_child((Name::new(STEM), geometry.clone()));
+
+        let mut rng = Rng::new(scene.seed ^ LEAF_STREAM ^ salt(order.0));
+        // Drawn once, so the two ranks are not lined up with the shoot's lean.
+        let bearing = rng.unit() * TAU;
+
+        for node in nodes {
+            // Five draws per node: the bearing's wander, the droop, the twist
+            // about the blade's own long axis, its vigour, then which blade it
+            // drew.
+            let turn = rng.range(-LEAF_SPREAD, LEAF_SPREAD);
+            let sag = rng.range(1.0 - LEAF_DROOP_JITTER, 1.0 + LEAF_DROOP_JITTER);
+            let roll = rng.range(-LEAF_ROLL, LEAF_ROLL);
+            let vigour = rng.range(1.0 - LEAF_VIGOUR, 1.0 + LEAF_VIGOUR);
+            let outline = (rng.unit() * leaf::OUTLINES.len() as f64) as usize;
+
+            leaf_order += 1;
+            shoot.with_child((
+                Name::new(node.name.clone()),
+                placed(
+                    node.position,
+                    // Wrapped, because the rank angle runs past a full turn by
+                    // the fourth node.
+                    (bearing + node.yaw as f64 + turn).rem_euclid(TAU) as f32,
+                    // A leaf is drawn flat along +X with its face toward +Z, so
+                    // the tilt is the whole of its posture: X twists the blade
+                    // about its own long axis, Y pitches its tip down.
+                    Vec2::new(
+                        roll as f32,
+                        (config.leaf_droop as f64 * node.maturity as f64 * sag) as f32,
+                    ),
+                    // `leaf::AREA` is the same for every blade, so a scale is a
+                    // size in meters whichever one this node drew.
+                    node.maturity * vigour as f32,
+                ),
+                Visibility::default(),
+                leaf::LeafConfig::new(&leaf_params, outline),
+                Order(leaf_order),
+            ));
         }
     }
     Ok(())
+}
+
+/// A green stem, shaded off this representative's own seed.
+fn surface(seed: u64) -> Surface {
+    material::FOLIAGE.surface(color::shade(
+        color::srgb(color::CANE),
+        &mut Rng::new(seed ^ color::COLOR_STREAM),
+    ))
 }
 
 // ─── UI ─────────────────────────────────────────────────────────────
@@ -662,16 +755,6 @@ pub fn ui() -> impl Scene {
                     params.variations = change.value.round().max(1.0) as u32;
                 })
             ),
-            label_small("Shoot seed"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
-                    params.seed = change.value.round().max(0.0) as u64;
-                })
-            ),
         ]
     }
 }
@@ -680,28 +763,42 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::place::prototype_count;
-    use crate::elements::util::testing::{Authoring, bounds};
+    use crate::elements::util::testing::{self, bounds, named_children, organs};
+    use crate::elements::util::mesh::MeshData;
+    use crate::elements::vine;
+    use crate::scene::{Prototypes, UsdReference};
 
     fn params() -> ShootParams {
         ShootParams::default()
     }
 
-    fn axis(params: &ShootParams, seed: u64) -> ShootAxis {
-        ShootAxis::new(params, &mut Rng::new(seed))
+    /// The default shoot, at nominal vigour and spacing.
+    fn config() -> ShootConfig {
+        ShootConfig::new(&params(), 1.0, 1.0)
     }
 
-    fn mesh(params: &ShootParams, seed: u64) -> crate::elements::util::usd::MeshData {
-        strand_mesh(&shoot_strand(&axis(params, seed), params)).expect("every shoot skins")
+    /// The same, with `edit` applied to the params first.
+    fn config_with(edit: impl FnOnce(&mut ShootParams)) -> ShootConfig {
+        let mut params = params();
+        edit(&mut params);
+        ShootConfig::new(&params, 1.0, 1.0)
+    }
+
+    fn axis(config: &ShootConfig, seed: u64) -> ShootAxis {
+        ShootAxis::new(config, &mut Rng::new(seed))
+    }
+
+    fn mesh(config: &ShootConfig, seed: u64) -> MeshData {
+        strand_mesh(&shoot_strand(&axis(config, seed), config)).expect("every shoot skins")
     }
 
     /// One shoot's canopy, with the axis it was hung on — every leaf test
-    /// needs both, because a placement only means anything against the curve
-    /// it was placed on.
-    fn leaves(params: &ShootParams, seed: u64) -> (ShootAxis, Vec<(String, Placement)>) {
-        let axis = axis(params, seed);
-        let placements = leaf_placements(params, &axis, leaf::VARIATIONS, seed);
-        (axis, placements)
+    /// needs both, because a node only means anything against the curve it was
+    /// placed on.
+    fn nodes(config: &ShootConfig, seed: u64) -> (ShootAxis, Vec<LeafNode>) {
+        let axis = axis(config, seed);
+        let nodes = leaf_nodes(config, &axis, seed);
+        (axis, nodes)
     }
 
     /// The whole placement contract: a shoot leaves its bud along +X and ends
@@ -709,7 +806,8 @@ mod tests {
     /// point somewhere the vine didn't ask for.
     #[test]
     fn a_shoot_leaves_along_x_and_ends_going_up() {
-        let strand = shoot_strand(&axis(&params(), 1), &params());
+        let config = config();
+        let strand = shoot_strand(&axis(&config, 1), &config);
 
         let base = strand.points[0];
         assert!(base.x < 0.0, "starts behind the bud, got {base:?}");
@@ -731,45 +829,63 @@ mod tests {
 
     #[test]
     fn a_shoot_stands_as_tall_as_its_length() {
-        let p = params();
-        let mesh = mesh(&p, 1);
+        let config = config();
+        let mesh = mesh(&config, 1);
 
         let (z0, z1) = bounds(&mesh, 2);
-        assert!(z0 > -p.radius * 2.0, "nothing below the bud, got {z0}");
+        assert!(z0 > -config.radius * 2.0, "nothing below the bud, got {z0}");
         assert!(
-            (z1 - p.length).abs() < p.radius * 2.0,
+            (z1 - config.length).abs() < config.radius * 2.0,
             "the tip lands at `length`, got {z1}"
         );
 
         // And it stays a narrow thing: the bend's reach plus the lean, no more.
-        let slack = (BEND_RADIUS + p.lean as f64 + p.radius as f64 * 2.0) as f32;
+        let slack = (BEND_RADIUS + config.lean as f64 + config.radius as f64 * 2.0) as f32;
         let (x0, x1) = bounds(&mesh, 0);
         assert!(x0 > -slack && x1 < slack, "{x0}..{x1}");
         let (y0, y1) = bounds(&mesh, 1);
         assert!(y0 > -slack && y1 < slack, "{y0}..{y1}");
     }
 
-    /// A shoot shorter than its own bend has nowhere to put the rise. It has
-    /// to clamp rather than fold back on itself, which would give curvo a rail
-    /// that doubles over and a mesh full of NaN.
+    /// A shoot shorter than its own bend has nowhere to put the rise. The
+    /// config clamps rather than letting the strand fold back on itself, which
+    /// would give curvo a rail that doubles over and a mesh full of NaN.
     #[test]
-    fn a_shoot_shorter_than_its_bend_still_builds() {
-        let p = ShootParams {
-            length: 0.001,
-            ..params()
-        };
-        let mesh = mesh(&p, 1);
-        assert!(!mesh.points.is_empty());
-        assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
+    fn a_shoot_asked_for_at_the_stops_still_builds() {
+        for config in [
+            ShootConfig::new(
+                &ShootParams {
+                    length: 0.0,
+                    radius: 0.0,
+                    lean: 0.0,
+                    sides: 0,
+                    detail: 0,
+                    internode: 0.0,
+                    ..params()
+                },
+                0.0,
+                0.0,
+            ),
+            ShootConfig::new(&params(), 4.0, 4.0),
+        ] {
+            let built = build_shoot(&config, 1).expect("builds at the stops");
+            let points = built
+                .stem
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .and_then(|a| a.as_float3())
+                .expect("with positions");
+            assert!(!points.is_empty(), "{config:?} came out empty");
+            assert!(
+                points.iter().flatten().all(|c| c.is_finite()),
+                "{config:?} came out with a NaN in it"
+            );
+        }
     }
 
     #[test]
     fn a_shoot_with_no_lean_is_straight_above_the_bend() {
-        let p = ShootParams {
-            lean: 0.0,
-            ..params()
-        };
-        let strand = shoot_strand(&axis(&p, 3), &p);
+        let config = config_with(|p| p.lean = 0.0);
+        let strand = shoot_strand(&axis(&config, 3), &config);
         for point in strand.points.iter().filter(|p| p.z > BEND_RADIUS) {
             assert!(
                 (point.x - BEND_RADIUS).abs() < 1e-12 && point.y.abs() < 1e-12,
@@ -779,50 +895,21 @@ mod tests {
     }
 
     #[test]
-    fn shoot_strands_are_reproducible() {
-        assert_eq!(mesh(&params(), 9).points, mesh(&params(), 9).points);
-        assert_eq!(leaves(&params(), 9).1, leaves(&params(), 9).1);
-        assert_ne!(leaves(&params(), 9).1, leaves(&params(), 10).1);
-    }
-
-    #[test]
-    fn variations_differ_from_one_another() {
-        assert_ne!(mesh(&params(), 1).points, mesh(&params(), 2).points);
-    }
-
-    #[test]
-    fn authors_one_prototype_per_variation() {
-        let stage = crate::generate::generate_stage(&VineyardParams {
-            shoot: ShootParams {
-                variations: 3,
-                ..params()
-            },
-            ..default()
-        })
-        .unwrap();
-
-        assert_eq!(
-            prototype_count(&stage, PROTOTYPE),
-            3,
-            "three variations authored, and nothing past them"
-        );
+    fn shoot_stems_are_reproducible() {
+        assert_eq!(mesh(&config(), 9).points, mesh(&config(), 9).points);
+        assert_ne!(mesh(&config(), 9).points, mesh(&config(), 10).points);
     }
 
     /// Nodes climb the shoot in order, start where it has finished standing
     /// up, and stop short of the growing point. The bend is left bare on
-    /// purpose: a leaf's posture here is a bearing about Z, which only means
+    /// purpose: a leaf's posture is a bearing about Z, which only means
     /// "around the stem" once the stem is vertical.
     #[test]
     fn leaves_climb_the_shoot_from_its_base_to_its_tip() {
-        let p = params();
-        let (axis, leaves) = leaves(&p, 1);
-        assert!(
-            leaves.len() > 4,
-            "a default shoot is leafy, got {}",
-            leaves.len()
-        );
+        let (axis, nodes) = nodes(&config(), 1);
+        assert!(nodes.len() > 4, "a default shoot is leafy, got {}", nodes.len());
 
-        let heights: Vec<f32> = leaves.iter().map(|(_, l)| l.position.z).collect();
+        let heights: Vec<f32> = nodes.iter().map(|n| n.position.z).collect();
         assert!(
             heights.windows(2).all(|w| w[0] < w[1]),
             "they climb rather than double back: {heights:?}"
@@ -845,13 +932,11 @@ mod tests {
     /// [`ShootAxis::at_height`].
     #[test]
     fn a_leaf_sits_on_the_shoots_axis() {
-        let p = params();
-        let (axis, leaves) = leaves(&p, 1);
-        for (name, leaf) in &leaves {
-            let on_axis = axis.at_height(leaf.position.z as f64);
-            let off =
-                (leaf.position.x as f64 - on_axis.x).hypot(leaf.position.y as f64 - on_axis.y);
-            assert!(off < 1e-6, "{name} sits on the axis, off by {off}");
+        let (axis, nodes) = nodes(&config(), 1);
+        for node in &nodes {
+            let on_axis = axis.at_height(node.position.z as f64);
+            let off = (node.position.x as f64 - on_axis.x).hypot(node.position.y as f64 - on_axis.y);
+            assert!(off < 1e-6, "{} sits on the axis, off by {off}", node.name);
         }
     }
 
@@ -861,18 +946,18 @@ mod tests {
     /// wrong and would survive every other test here.
     #[test]
     fn leaves_alternate_around_the_shoot() {
-        let p = params();
-        let (_, leaves) = leaves(&p, 1);
-        let slack = PHYLLOTAXY_DRIFT + LEAF_SPREAD * 2.0;
-        for pair in leaves.windows(2) {
-            let turn = (pair[1].1.yaw - pair[0].1.yaw) as f64;
+        let (_, nodes) = nodes(&config(), 1);
+        for pair in nodes.windows(2) {
+            let turn = (pair[1].yaw - pair[0].yaw) as f64;
             // Wrapped into [0, 2π), so a half turn either way reads as zero.
             let apart = (turn.rem_euclid(TAU) - PI).abs();
+            // The slack is f32: the rank angle accumulates past 60 rad up a
+            // leafy shoot, where a single-precision step is a few 1e-6.
             assert!(
-                apart <= slack,
+                apart <= PHYLLOTAXY_DRIFT + 1e-4,
                 "{} follows {} half a turn round, off by {apart} rad",
-                pair[1].0,
-                pair[0].0
+                pair[1].name,
+                pair[0].name
             );
         }
     }
@@ -885,41 +970,33 @@ mod tests {
         assert_eq!(leaf_scale(EXPANDING_REACH), 1.0, "past the growing tip");
         assert_eq!(leaf_scale(0.0), TIP_SCALE, "and at the very tip");
 
-        let p = params();
-        let (axis, leaves) = leaves(&p, 1);
-        let mature: Vec<f32> = leaves
+        let (axis, nodes) = nodes(&config(), 1);
+        let mature: Vec<f32> = nodes
             .iter()
-            .filter(|(_, l)| (axis.length() - l.position.z as f64) > EXPANDING_REACH * 1.5)
-            .map(|(_, l)| l.scale)
+            .filter(|n| (axis.length() - n.position.z as f64) > EXPANDING_REACH * 1.5)
+            .map(|n| n.maturity)
             .collect();
 
+        assert!(mature.len() > 3, "most of a shoot is mature, got {mature:?}");
         assert!(
-            mature.len() > 3,
-            "most of a shoot is mature, got {mature:?}"
+            mature.iter().all(|m| (m - 1.0).abs() < 1e-6),
+            "a grown leaf is exactly full size before its vigour, got {mature:?}"
         );
-        for scale in &mature {
-            assert!(
-                (scale - 1.0).abs() <= LEAF_VIGOUR as f32 + 1e-6,
-                "a grown leaf is full size give or take its vigour, got {scale} in {mature:?}"
-            );
-        }
     }
 
     /// Age reads off position: a shoot lays its leaves down in order and keeps
     /// extending past them, so the ones near the growing point are the newest
-    /// and the smallest. Asserted as a trend rather than pair by pair, because
-    /// vigour jitters each leaf either way.
+    /// and the smallest.
     #[test]
     fn leaves_shrink_toward_the_growing_tip() {
-        let p = params();
-        let (_, leaves) = leaves(&p, 1);
-        let scales: Vec<f32> = leaves.iter().map(|(_, l)| l.scale).collect();
+        let (_, nodes) = nodes(&config(), 1);
+        let sizes: Vec<f32> = nodes.iter().map(|n| n.maturity).collect();
         let mean = |s: &[f32]| s.iter().sum::<f32>() / s.len() as f32;
 
-        let (base, tip) = (mean(&scales[..3]), mean(&scales[scales.len() - 3..]));
+        let (base, tip) = (mean(&sizes[..3]), mean(&sizes[sizes.len() - 3..]));
         assert!(
             tip < base * 0.8,
-            "the tip carries the young ones: base {base}, tip {tip}, all {scales:?}"
+            "the tip carries the young ones: base {base}, tip {tip}, all {sizes:?}"
         );
     }
 
@@ -927,13 +1004,7 @@ mod tests {
     /// shoot is never re-rolls the stem holding them up.
     #[test]
     fn changing_the_internode_leaves_the_stem_alone() {
-        let stem = |internode: f32| {
-            let p = ShootParams {
-                internode,
-                ..params()
-            };
-            mesh(&p, 7).points
-        };
+        let stem = |internode| mesh(&config_with(|p| p.internode = internode), 7).points;
         assert_eq!(stem(0.07), stem(0.0), "same stem, however many leaves");
     }
 
@@ -941,98 +1012,183 @@ mod tests {
     /// the guard the station loop would never terminate.
     #[test]
     fn a_shoot_with_no_leaves_asked_for_still_builds() {
-        for internode in [0.0, -1.0, MIN_INTERNODE as f32 * 0.5] {
-            let p = ShootParams {
-                internode,
-                ..params()
-            };
-            assert!(leaves(&p, 1).1.is_empty(), "no leaves at {internode}");
-            assert!(!mesh(&p, 1).points.is_empty(), "but still a stem");
+        for internode in [0.0, MIN_INTERNODE as f32 * 0.5] {
+            let config = config_with(|p| p.internode = internode);
+            assert!(nodes(&config, 1).1.is_empty(), "no leaves at {internode}");
+            assert!(!mesh(&config, 1).points.is_empty(), "but still a stem");
         }
     }
 
-    /// A shoot prototype has to be a prim that can *have* children, or the
-    /// leaves referenced under it would hang off a `Mesh` no renderer walks
-    /// into — the same trap `vine` avoids by wrapping its wood in an `Xform`.
-    ///
-    /// The wrapper holds whichever way the leaves were placed; the style only
-    /// changes what hangs below it, never that there is something to hang.
+    // ─── The layer ──────────────────────────────────────────────────
+
+    /// `leaf_droop` reaches no part of a stem, so two shoots that differ only
+    /// in it have to share a mesh and still hang their leaves at their own
+    /// angle — the rule that a field a builder ignores must not reach the
+    /// metric.
     #[test]
-    fn a_shoot_prototype_is_an_xform_over_its_stem_and_its_leaves() {
-        for style in crate::elements::util::testing::STYLES {
-            let (stage, _) =
-                crate::elements::util::testing::grown(VineyardParams::default(), style);
-            let path =
-                |suffix: &str| openusd::sdf::path(format!("{PROTOTYPE}/Var_0{suffix}")).unwrap();
+    fn the_droop_is_placement_and_never_costs_a_mesh() {
+        let flat = config_with(|p| p.leaf_droop = 0.0);
+        let steep = config_with(|p| p.leaf_droop = 1.2);
+        assert_ne!(flat, steep);
+        assert_eq!(ShootMetric.distance(&flat, &steep), 0.0);
+        assert_eq!(mesh(&flat, 1).points, mesh(&steep, 1).points);
+    }
 
+    /// The two axes a vine rolls per shoot both have to reach the mesh, or the
+    /// budget buys a single stem for the whole vineyard.
+    #[test]
+    fn vigour_and_spacing_both_move_a_shoot_apart() {
+        let nominal = config();
+        for varied in [
+            ShootConfig::new(&params(), 1.15, 1.0),
+            ShootConfig::new(&params(), 1.0, 1.12),
+        ] {
             assert!(
-                openusd::schemas::geom::Xform::get(&stage, path(""))
-                    .unwrap()
-                    .is_some(),
-                "{style:?}: the variation is an Xform, so it can have children"
+                ShootMetric.distance(&nominal, &varied) > 0.0,
+                "{varied:?} has to be tellable from the nominal shoot"
             );
-            assert!(
-                openusd::schemas::geom::Mesh::get(&stage, path(""))
-                    .unwrap()
-                    .is_none(),
-                "{style:?}: and not a Mesh, which would swallow them"
-            );
-            assert!(usd_bevy::authoring::prim_exists(
-                &stage,
-                &format!("{PROTOTYPE}/Var_0/Stem")
-            ));
+        }
+    }
 
-            match style {
-                place::Style::Referenced => assert!(
-                    usd_bevy::authoring::prim_exists(&stage, &format!("{PROTOTYPE}/Var_0/Leaf_00")),
-                    "the first node carries a leaf"
-                ),
-                place::Style::Instanced => {
-                    let leaves = openusd::schemas::geom::PointInstancer::get(
-                        &stage,
-                        path(&format!("/{LEAVES}")),
-                    )
-                    .unwrap()
-                    .expect("the leaves are one instancer, nested inside the prototype");
-                    // Nested instancing is where a `prototypes` relationship is
-                    // most easily lost — see `place::Style`. Empty here and
-                    // every previewed shoot comes out bare.
-                    let targets = leaves.prototypes_rel().targets().unwrap();
-                    assert!(!targets.is_empty());
-                    assert!(
-                        targets
-                            .iter()
-                            .all(|t| usd_bevy::authoring::prim_exists(&stage, t.as_str())),
-                        "the nested instancer names leaf prototypes that exist, got {targets:?}"
-                    );
-                }
+    /// End to end: every shoot the vines hung comes out carrying a stem from
+    /// the library and a canopy of its own.
+    #[test]
+    fn every_shoot_draws_a_stem_and_hangs_its_own_leaves() {
+        let mut app = testing::grown(VineyardParams::default());
+
+        let shoots = organs::<ShootConfig>(app.world_mut());
+        assert!(shoots.len() > 100, "the fixture grew shoots, got {}", shoots.len());
+
+        // Two shoots that drew the same stem still have to differ in canopy.
+        let mut by_part: std::collections::BTreeMap<String, Vec<String>> = default();
+        for shoot in &shoots {
+            let entity = testing::prim(
+                app.world_mut(),
+                &shoot.path.split('/').collect::<Vec<_>>(),
+            )
+            .expect("the shoot is on the scene graph");
+            let children = named_children(app.world_mut(), entity);
+            let stem = children
+                .iter()
+                .find(|(name, _)| name == STEM)
+                .expect("every shoot carries a stem");
+            assert!(
+                children.len() > 1,
+                "{}: and leaves on it, got {children:?}",
+                shoot.path
+            );
+            let part = app.world().entity(stem.1).get::<UsdReference>().unwrap().0.clone();
+            by_part.entry(part).or_default().push(shoot.path.clone());
+        }
+
+        let library = app.world().resource::<Prototypes>();
+        for part in by_part.keys() {
+            assert!(library.get(part).is_some(), "{part} is not in the library");
+        }
+
+        let shared = by_part
+            .values()
+            .find(|paths| paths.len() > 1)
+            .expect("some stem is shared by more than one shoot");
+        let leaves = |app: &mut App, path: &str| -> Vec<Transform> {
+            let entity =
+                testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>()).unwrap();
+            named_children(app.world_mut(), entity)
+                .into_iter()
+                .filter(|(name, _)| name != STEM)
+                .map(|(_, child)| *app.world().entity(child).get::<Transform>().unwrap())
+                .collect()
+        };
+        let (a, b) = (
+            leaves(&mut app, &shared[0]),
+            leaves(&mut app, &shared[shared.len() - 1]),
+        );
+        assert_eq!(a.len(), b.len(), "the same nodes, from the same stem");
+        assert_ne!(a, b, "but different leaves hung on them");
+        for (a, b) in a.iter().zip(&b) {
+            assert!(
+                (a.translation - b.translation).length() < 1e-6,
+                "a node is where the stem put it, on both shoots"
+            );
+        }
+    }
+
+    /// A replant is a single buried shoot, so it has to come out of this layer
+    /// carrying a stem like any other — the branch that would otherwise be
+    /// silently canopy-less.
+    #[test]
+    fn a_replants_shoot_is_built_like_any_other() {
+        let mut app = testing::grown(VineyardParams::default());
+        let replant = organs::<vine::VineConfig>(app.world_mut())
+            .into_iter()
+            .find(|v| !v.config.is_mature())
+            .expect("the default planting holds replants");
+
+        let path: Vec<String> = replant
+            .path
+            .split('/')
+            .map(str::to_string)
+            .chain([vine::REPLANT_SHOOT.to_string()])
+            .collect();
+        let entity = testing::prim(
+            app.world_mut(),
+            &path.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+        .expect("a replant's shoot is on the scene graph");
+
+        let children = named_children(app.world_mut(), entity);
+        assert!(
+            children.iter().any(|(name, _)| name == STEM),
+            "{}: it carries a stem, got {children:?}",
+            replant.path
+        );
+        assert!(children.len() > 1, "and leaves on it");
+    }
+
+    /// A rebuild that spends less of the budget must not leave the meshes it
+    /// no longer uses in the library, exported and referenced by nothing.
+    #[test]
+    fn shrinking_the_budget_drops_the_stale_meshes() {
+        let meshes = |app: &App| {
+            app.world()
+                .resource::<Prototypes>()
+                .iter()
+                .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+                .count()
+        };
+
+        let mut app = testing::grown(VineyardParams {
+                shoot: ShootParams {
+                    variations: 5,
+                    ..params()
+                },
+                ..default()
+            });
+        assert_eq!(meshes(&app), 5, "the budget is spent");
+
+        app.world_mut().resource_mut::<ShootParams>().variations = 2;
+        app.update();
+        assert_eq!(meshes(&app), 2, "the three it stopped using are gone");
+    }
+
+    /// Two stems the same green would make a shared canopy read as one shoot
+    /// repeated, which is the whole thing the budget is spent avoiding.
+    #[test]
+    fn every_stem_mesh_gets_its_own_shade() {
+        let app = testing::grown(VineyardParams::default());
+        let shades: Vec<[f32; 3]> = app
+            .world()
+            .resource::<Prototypes>()
+            .iter()
+            .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+            .map(|(_, part)| part.color)
+            .collect();
+
+        assert!(shades.len() > 1, "there is more than one to tell apart");
+        for (i, a) in shades.iter().enumerate() {
+            for b in shades.iter().skip(i + 1) {
+                assert_ne!(a, b, "two stem meshes came out the same shade");
             }
         }
-    }
-
-    /// Re-authoring must not leave prototypes from a larger previous count
-    /// behind — the element owns its subtree and clears it first.
-    #[test]
-    fn shrinking_the_count_drops_stale_prototypes() {
-        let mut authoring = Authoring::new("shoot.usda", author_prototypes);
-        authoring.insert(place::Style::default());
-        authoring
-            .insert(ShootParams {
-                variations: 4,
-                ..params()
-            })
-            .run();
-        assert!(authoring.has(&format!("{PROTOTYPE}/Var_3")));
-
-        authoring
-            .insert(ShootParams {
-                variations: 2,
-                ..params()
-            })
-            .run();
-        assert!(
-            !authoring.has(&format!("{PROTOTYPE}/Var_3")),
-            "stale prototype removed on re-author"
-        );
     }
 }

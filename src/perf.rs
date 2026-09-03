@@ -1,21 +1,24 @@
-//! TEMPORARY — instrumentation for the slider-drag latency investigation.
+//! Where a rebuild's time goes, layer by layer.
+//!
+//! What it is for: a param change re-runs one layer and everything downstream
+//! of it, and which layer that is decides whether a slider drags smoothly or
+//! stalls. A leaf knob re-clusters six figures of blades; a planting knob only
+//! moves things about. The breakdown is how you tell those apart.
 //!
 //! Two ways in:
 //!
-//! - [`plugin`], which [`viewer::run`](crate::viewer::run) adds when
-//!   [`ENV`] is set, brackets every author system and the `Update` /
-//!   `PostUpdate` schedules with marker systems and logs a breakdown on any
-//!   frame that actually re-authored something:
+//! - [`plugin`], which [`viewer::run`](crate::viewer::run) adds when [`ENV`] is
+//!   set, brackets every build system and the `Update` / `PostUpdate` schedules
+//!   with marker systems and logs a breakdown on any frame that actually
+//!   rebuilt something:
 //!
 //!   ```text
 //!   VINERYLAB_PERF=1 cargo run
 //!   ```
 //!
 //! - `bench` (test-only, below) runs the same schedule headlessly with the
-//!   render `Assets` present, so the reprojection cost is real, and reports
-//!   the same breakdown without needing a window — which is what makes it
-//!   usable as a before/after when changing either this crate's authoring or
-//!   `usd_bevy`'s projection:
+//!   asset storage present, so the geometry really gets built, and reports the
+//!   same breakdown without needing a window:
 //!
 //!   ```text
 //!   cargo test perf::bench -- --ignored --nocapture
@@ -23,11 +26,8 @@
 //!
 //! The marks are wall-clock deltas between systems, so each one is "whatever
 //! ran since the previous mark" rather than a true per-system total. That is
-//! precise enough here because every author system holds the non-send
-//! `LiveStage` and so runs on the main thread in a fixed order.
-//!
-//! Delete this module, its `mod perf;` line and the `perf::plugin` block in
-//! `viewer::run` when it has outlived its use.
+//! precise enough because [`plugin`] pins `PreUpdate` to a single-threaded
+//! executor, which fixes the order the marks sit in.
 
 use std::time::Instant;
 
@@ -112,40 +112,35 @@ pub fn plugin(app: &mut App) {
         s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
     });
     app.init_resource::<Perf>()
-        // `Grow::Prototypes` holds four author systems that are unordered
-        // relative to each other, so pin an order here — otherwise a mark
-        // cannot sit between two of them.
         .add_systems(
             PreUpdate,
             (
-                reset.before(Grow::Prototypes),
-                mark("author:leaf")
-                    .after(leaf::author_prototypes)
-                    .before(shoot::author_prototypes),
-                mark("author:shoot")
-                    .after(shoot::author_prototypes)
-                    .before(vine::author_prototypes),
-                mark("author:vine")
-                    .after(vine::author_prototypes)
-                    .before(pole::author_prototypes),
-                mark("author:pole")
-                    .after(pole::author_prototypes)
-                    .before(terrain::author),
+                reset.before(Grow::Terrain),
                 mark("author:terrain")
-                    .after(terrain::author)
+                    .after(terrain::build)
                     .before(parcel::author),
                 mark("author:parcel")
                     .after(parcel::author)
-                    .before(planting::author),
-                mark("author:planting").after(planting::author),
+                    .before(planting::plant),
+                mark("author:planting")
+                    .after(planting::plant)
+                    .before(pole::build),
+                mark("author:pole")
+                    .after(pole::build)
+                    .before(vine::build),
+                mark("author:vine")
+                    .after(vine::build)
+                    .before(shoot::build),
+                mark("author:shoot")
+                    .after(shoot::build)
+                    .before(leaf::build),
+                mark("author:leaf").after(leaf::build),
             ),
         )
-        // Schedule-level brackets, so no ordering against `usd_bevy`'s
-        // private systems is needed: `RunFixedMainLoop` runs between
-        // `PreUpdate` and `Update`, so the next mark covers all of `Update`
-        // — which is where `LiveStagePlugin` reprojects.
+        // Schedule-level brackets: `RunFixedMainLoop` runs between `PreUpdate`
+        // and `Update`, so the next mark covers all of `Update`.
         .add_systems(bevy::app::RunFixedMainLoop, mark("author:tail"))
-        .add_systems(PostUpdate, mark("update(reproject)"))
+        .add_systems(PostUpdate, mark("update"))
         .add_systems(Last, (mark("postupdate"), report).chain())
         .add_systems(Last, note_changed_params.before(report));
 }
@@ -205,19 +200,14 @@ fn report(perf: Res<Perf>) {
 #[cfg(test)]
 mod bench {
     use super::*;
-    use crate::elements::util::place;
-    use usd_bevy::live::{LiveStage, LiveStagePlugin, PrimEntities};
 
-    /// The viewer's app, headless: same plugins, same `Style::Instanced`, and
-    /// the render `Assets` present so the mesh/instancer routes actually
-    /// build geometry instead of bailing out.
+    /// The viewer's app, headless: the same plugins, with the asset storage
+    /// present so the build systems actually produce geometry.
     fn viewer_like() -> App {
-        let stage = crate::stage::new_stage("perf.usda").unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             // Errors only: the breakdown goes to stdout, and Bevy's startup
-            // chatter would bury it. Widen the filter (e.g. `usd_bevy=debug`)
-            // when the projection side needs a closer look.
+            // chatter would bury it.
             .add_plugins(bevy::log::LogPlugin {
                 filter: "error".to_string(),
                 level: bevy::log::Level::ERROR,
@@ -226,40 +216,25 @@ mod bench {
             .add_plugins(AssetPlugin::default())
             .init_asset::<Mesh>()
             .init_asset::<StandardMaterial>()
-            // As the viewer has it: `UsdPlugin` is what installs the mesh
-            // intern cache, so leaving it out would measure a slower app than
-            // the one being debugged.
-            .add_plugins(usd_bevy::UsdPlugin)
-            .add_plugins(LiveStagePlugin)
+            .add_plugins(crate::scene::plugin)
             .add_plugins(crate::elements::plugin)
-            .add_plugins(super::plugin)
-            .insert_resource(place::Style::Instanced);
-        app.world_mut().insert_non_send(LiveStage::new(stage));
+            .add_plugins(super::plugin);
         app.finish();
         app.cleanup();
         app
     }
 
-    /// What the projection produced. The entity count is the number that
-    /// matters most: an instancer despawns and respawns all of them on every
-    /// re-projection, so it is the floor under a param change that only moved
-    /// where things stand.
+    /// What the build produced. The entity count matters most: a layer
+    /// despawns and respawns everything below it on every rebuild, so it is
+    /// the floor under a param change that only moved where things stand.
     fn scene_size(app: &mut App) -> String {
-        let prims = app.world().resource::<PrimEntities>().iter().count();
-        let live = app.world_mut().query::<Entity>().iter(app.world()).count();
+        let entities = app.world_mut().query::<Entity>().iter(app.world()).count();
+        let parts = app.world().resource::<crate::scene::Prototypes>().len();
         let meshes = app.world().resource::<Assets<Mesh>>().len();
         let materials = app.world().resource::<Assets<StandardMaterial>>().len();
-        let interned = app
-            .world()
-            .resource::<usd_bevy::route::cache::ProjectionCache>()
-            .len();
-        let mut q = app
-            .world_mut()
-            .query::<&usd_bevy::route::instancer::UsdInstance>();
-        let instances = q.iter(app.world()).count();
         format!(
-            "{prims} prims, {live} entities ({instances} instancer instances), \
-             {meshes} mesh assets ({interned} interned), {materials} material assets"
+            "{entities} entities, {parts} parts, \
+             {meshes} mesh assets, {materials} material assets"
         )
     }
 
@@ -307,8 +282,8 @@ mod bench {
             ("vine.trunk_radius", |w| {
                 w.resource_mut::<vine::VineParams>().trunk_radius += 0.001;
             }),
-            ("planting.seed", |w| {
-                w.resource_mut::<planting::PlantingParams>().seed += 1;
+            ("scene.seed", |w| {
+                w.resource_mut::<crate::elements::SceneParams>().seed += 1;
             }),
             ("parcel.row_spacing", |w| {
                 w.resource_mut::<parcel::ParcelParams>().row_spacing += 0.01;

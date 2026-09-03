@@ -1,14 +1,27 @@
-//! Elements — the self-contained USD producers the scene is built from.
+//! Elements — the things a vineyard is made of, one module each.
 //!
-//! One module per element, each holding its params resource, its `plugin`
-//! wiring, its author system and its UI fragment. See the "Elements" section
-//! of `README.md` for the rules they follow; the short version is that an
-//! element owns exactly one prim subtree, rewrites it from scratch whenever
-//! its params change, and composes with other elements by prim path alone.
+//! An element holds its params resource, its `plugin` wiring, its build system
+//! and its UI fragment. See the "Elements" section of `README.md` for the rules
+//! they follow; the short version is that every element is one layer of the
+//! same pipeline:
 //!
-//! What they are built *from* — authoring plumbing, the geometry kernel, the
-//! layout solver, the placement helpers — lives in [`util`], which holds
-//! everything under this directory that isn't an element.
+//! 1. **Collect** every config of its own kind, sorted by [`Order`].
+//! 2. **Cluster** them to `params.variations` representatives.
+//! 3. **Build** each representative's mesh once, into the shared library.
+//! 4. **Assign** each instance the geometry of the representative it drew.
+//! 5. **Expand** — author a *unique* config for the layer below at every frame
+//!    the representative offers.
+//!
+//! Step 5 is where the layers meet: the frames come from the representative,
+//! because a shoot has to sit on a spur that actually got built, while the
+//! configs authored at them are per instance, so two plants off one mesh do not
+//! carry the same canopy.
+//!
+//! What elements are built *from* — the geometry kernels, the palette, the
+//! layout solver, the planting walk — lives in [`util`], which holds everything
+//! under this directory that isn't an element.
+//!
+//! [`Order`]: crate::scene::Order
 
 pub mod leaf;
 pub mod pole;
@@ -19,43 +32,45 @@ pub mod vine;
 
 use bevy::prelude::*;
 
-/// Authoring order. Every element's author system goes in exactly one of
-/// these; they run chained in `PreUpdate`, ahead of `LiveStagePlugin`'s
-/// projection systems in `Update`.
+/// Build order. Every layer's build system goes in exactly one of these, and
+/// they run chained in `PreUpdate`.
 ///
-/// `Prototypes` runs first so an element that instances another always finds
-/// the prototype prims already on the stage — the path contract holds because
-/// of this ordering, not by luck.
+/// The chain is what makes the pipeline a pipeline: a layer places the configs
+/// the next one down clusters, so each set must have finished spawning before
+/// the one after it queries.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Grow {
-    /// Reusable geometry under `/parts`, instanced by everything downstream.
-    Prototypes,
     /// The ground surface, and the field other elements sample to sit on it.
     Terrain,
     /// Where things go: rows, planting positions.
     Layout,
-    /// Poles, trunks, vines placed along the layout.
-    Plants,
+    /// One config per plant and post, placed on the ground.
+    Planting,
+    /// Quantizes the posts and builds their meshes.
+    Poles,
+    /// Quantizes the plants, builds their wood, and hangs a shoot config on
+    /// every bud.
+    Vines,
+    /// Quantizes the shoots, builds their stems, and hangs a leaf config on
+    /// every node.
+    Shoots,
     /// High-count scatter: leaves, grapes, weeds.
     Scatter,
-    /// Re-rolls per-instance prototype choices without touching geometry.
-    Randomize,
 }
 
 pub fn plugin(app: &mut App) {
-    // Defaults to the reference-placed export shape, which is the one a
-    // consumer can address. The viewer overrides it — see `viewer::run`.
-    app.init_resource::<util::place::Style>();
+    app.init_resource::<SceneParams>();
 
     app.configure_sets(
         PreUpdate,
         (
-            Grow::Prototypes,
             Grow::Terrain,
             Grow::Layout,
-            Grow::Plants,
+            Grow::Planting,
+            Grow::Poles,
+            Grow::Vines,
+            Grow::Shoots,
             Grow::Scatter,
-            Grow::Randomize,
         )
             .chain(),
     )
@@ -68,6 +83,44 @@ pub fn plugin(app: &mut App) {
     ));
 }
 
+/// Scene-wide parameters, owned by no element.
+#[derive(Resource, Clone, Debug, Default)]
+#[cfg_attr(
+    feature = "python",
+    pyo3::pyclass(get_all, set_all, skip_from_py_object)
+)]
+pub struct SceneParams {
+    /// The one seed the whole scene is generated from.
+    ///
+    /// Every layer salts it with a constant of its own before drawing, so that
+    /// nudging one never re-rolls another — see [`salt`] and the `*_STREAM`
+    /// constants each element keeps. One seed rather than one per element
+    /// because a scene is reproduced as a whole: a downstream simulator keys
+    /// its cache on the params, and "which of three seeds moved" is not a
+    /// question anyone was asking.
+    pub seed: u64,
+}
+
+/// The scene-wide fragment's slice of the params panel.
+pub fn ui() -> impl Scene {
+    bsn! {
+        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
+        Children [
+            bevy::feathers::display::label_small("Scene seed"),
+            (
+                @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
+                bevy::ui_widgets::SliderStep(1.0)
+                bevy::ui_widgets::SliderPrecision(0)
+                on(bevy::ui_widgets::slider_self_update)
+                on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
+                    mut params: ResMut<SceneParams>| {
+                    params.seed = change.value.round().max(0.0) as u64;
+                })
+            ),
+        ]
+    }
+}
+
 /// A plain snapshot of every element's params.
 ///
 /// The world stores each fragment as its own resource so change detection is
@@ -76,6 +129,7 @@ pub fn plugin(app: &mut App) {
 /// and headless generation.
 #[derive(Clone, Debug, Default)]
 pub struct VineyardParams {
+    pub scene: SceneParams,
     pub terrain: terrain::TerrainParams,
     pub parcel: util::parcel::ParcelParams,
     pub planting: util::planting::PlantingParams,
@@ -89,6 +143,7 @@ impl VineyardParams {
     /// Splits the aggregate back into the per-element resources the author
     /// systems actually read.
     pub fn insert(self, world: &mut World) {
+        world.insert_resource(self.scene);
         world.insert_resource(self.terrain);
         world.insert_resource(self.parcel);
         world.insert_resource(self.planting);
@@ -106,6 +161,7 @@ impl VineyardParams {
     /// previewing.
     pub fn from_world(world: &World) -> Self {
         Self {
+            scene: world.resource::<SceneParams>().clone(),
             terrain: world.resource::<terrain::TerrainParams>().clone(),
             parcel: world.resource::<util::parcel::ParcelParams>().clone(),
             planting: world.resource::<util::planting::PlantingParams>().clone(),
@@ -115,24 +171,6 @@ impl VineyardParams {
             leaf: world.resource::<leaf::LeafParams>().clone(),
         }
     }
-}
-
-// ─── Variation picking ──────────────────────────────────────────────
-
-/// Picks a prototype variation for each instance, deterministically from
-/// `seed`.
-///
-/// The result is a `protoIndices` array: rewriting it is an attribute-only
-/// edit, so re-rolling variations reprojects without resyncing the stage or
-/// rebuilding any geometry.
-pub fn variation_indices(seed: u64, instances: usize, variations: usize) -> Vec<i32> {
-    if variations <= 1 {
-        return vec![0; instances];
-    }
-    let mut state = seed;
-    (0..instances)
-        .map(|_| (split_mix_64(&mut state) % variations as u64) as i32)
-        .collect()
 }
 
 /// SplitMix64. Inlined rather than pulled from `rand` because the only
@@ -145,6 +183,16 @@ fn split_mix_64(state: &mut u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
+}
+
+/// Spreads a counter across the whole 64-bit range, so neighbouring indices
+/// seed unrelated streams instead of the same one shifted by a step.
+///
+/// What a layer salts its streams with: a representative's mesh is built from
+/// `seed ^ salt(index)`, and an instance's placement draws from
+/// `seed ^ LAYER_STREAM ^ salt(order)`.
+pub fn salt(index: u64) -> u64 {
+    index.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 }
 
 /// A deterministic stream of floats, for the shape and scatter randomness
@@ -182,27 +230,6 @@ impl Rng {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn variation_indices_are_deterministic_and_in_range() {
-        let a = variation_indices(42, 64, 3);
-        let b = variation_indices(42, 64, 3);
-        assert_eq!(a, b, "same seed gives the same picks");
-        assert_eq!(a.len(), 64);
-        assert!(a.iter().all(|i| (0..3).contains(i)), "indices stay in range");
-        assert!(a.iter().any(|i| *i != a[0]), "picks actually vary");
-    }
-
-    #[test]
-    fn a_single_variation_needs_no_randomness() {
-        assert_eq!(variation_indices(7, 4, 1), vec![0; 4]);
-        assert_eq!(variation_indices(7, 4, 0), vec![0; 4]);
-    }
-
-    #[test]
-    fn reseeding_changes_the_picks() {
-        assert_ne!(variation_indices(1, 64, 4), variation_indices(2, 64, 4));
-    }
 
     fn draws(seed: u64, n: usize) -> Vec<f64> {
         let mut rng = Rng::new(seed);

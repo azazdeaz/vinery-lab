@@ -7,17 +7,17 @@
 //! trunk about 15 cm up, as it does on essentially every commercial vine.
 //!
 //! Only the permanent wood is *shaped* here. The annual growth that hangs off
-//! the spurs belongs to its own elements, nested into this one's prototypes
-//! rather than placed alongside them — [`shoot`](super::shoot) is the first of
-//! them, and this module decides where on its spurs they sit. Leaves and fruit
-//! will hang off the shoots the same way.
+//! the spurs belongs to its own elements — [`shoot`](super::shoot) is the first
+//! of them, and this module decides where on its spurs they sit. Leaves and
+//! fruit hang off the shoots the same way.
 //!
 //! # Structure
 //!
 //! Every part is a [`Strand`]: a polyline of control points with a radius at
 //! each, skinned into a closed tube. So this module places control points and
-//! nothing else — [`strand`](super::strand) owns everything about turning them
-//! into triangles. Trunk, cordon and spur differ only in where their points go.
+//! nothing else — [`strand`](super::util::strand) owns everything about turning
+//! them into triangles. Trunk, cordon and spur differ only in where their
+//! points go.
 //!
 //! Cordons and spurs *start inside* the part they grow from — a cordon eight
 //! centimeters below the head, on the trunk's axis. Interpenetrating tubes
@@ -26,32 +26,35 @@
 //!
 //! # Local frame
 //!
-//! Prototypes are authored with the **origin at the trunk base, on the
-//! ground**: +Z up, **+X along the row** so cordons run along ±X, +Y across
-//! it. The placer therefore only ever needs a yaw about Z, and never has to
-//! know which way a strand was authored.
+//! A vine is built with the **origin at the trunk base, on the ground**: +Z up,
+//! **+X along the row** so cordons run along ±X, +Y across it. Planting
+//! therefore only ever needs a yaw about Z, and never has to know which way a
+//! strand was built.
 //!
-//! # Two libraries, one plant
+//! # The layer
 //!
-//! The prototype library under [`PROTOTYPE`]. Each `Var_<i>` is an `Xform`
-//! over a single `Wood` mesh — the trunk, cordons and spurs merged — plus its
-//! shoots, placed by whichever path [`place::Style`] names: a prim each,
-//! referencing a [`shoot`](super::shoot) prototype, or one [`SHOOTS`]
-//! instancer holding the lot. This element authors shapes and nothing else — where vines *stand* is
-//! [`planting`](super::util::planting)'s business, and it finds these
-//! prototypes by path alone. That split is what lets a vine be planted as an
-//! addressable prim, as a `PointInstancer` instance, or nested inside another
-//! prototype, without this module knowing which.
+//! [`planting`](super::util::planting) authors a [`VineConfig`] per plant;
+//! [`build`] turns the distinct configs into meshes. Every plant gets:
 //!
-//! And a second library under [`YOUNG_PROTOTYPE`], for the same plant a couple
-//! of years earlier: a replant is a rooted cutting that has pushed one green
-//! shoot and no wood at all, so a young vine has no geometry of its own — it
-//! is a [`shoot`](super::shoot) buried to [`shoot::PLANT_DEPTH`], which is
-//! what keeps the bend at its base underground. Both libraries are planted the
-//! same way, and [`planting`](super::util::planting) picks between them per
-//! slot. The two are one element because they are one plant at two ages, and
-//! because a plant's materials have to live in whatever gets planted — see the
-//! `Looks` scope each variation carries.
+//! ```text
+//! Vine_007            the planted entity, carrying its VineConfig
+//!   Wood              -> parts/Vine_<rep>, shared with every vine that drew it
+//!   Shoot_00_0        a ShootConfig of its own, placed on a bud
+//!   Shoot_00_1        ...
+//! ```
+//!
+//! The wood is shared and the shoots are not. Which buds pushed comes from the
+//! **representative** — a shoot has to sit on a stub that actually got built —
+//! while each shoot's own bearing, lean and vigour are drawn per plant, which
+//! is what stops a hundred vines off four meshes reading as four meshes.
+//!
+//! # A replant has no wood
+//!
+//! Below [`VineConfig::is_mature`] a plant is a rooted cutting in its first
+//! seasons: one green shoot out of bare ground and no permanent wood at all. So
+//! it builds no mesh — it is a single [`shoot`](super::shoot) buried to
+//! [`shoot::PLANT_DEPTH`], which is what keeps the bend at its base
+//! underground. Same element, same config, one branch in [`build_vine`].
 
 use std::f64::consts::{PI, TAU};
 
@@ -60,50 +63,30 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::{Point3, Vector3};
-use openusd::usd::Stage;
-use usd_bevy::authoring::{define_prim, remove_prim};
-use usd_bevy::live::LiveStage;
 
 use super::shoot;
+use crate::quantize::{Metric, farthest_first};
+use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
+
 use super::util::parcel::ParcelParams;
-use super::util::place::{self, Placement};
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
-use super::util::usd::{author_mesh, merge_meshes, set_display_color};
+use super::util::mesh::merge_meshes;
 use super::util::{color, material};
-use super::{Grow, Rng};
+use super::{Grow, Rng, SceneParams, salt};
 
-/// The prototype library this element owns: one `Var_<i>` mesh per variation.
-pub const PROTOTYPE: &str = "/Vineyard/parts/Vine";
+/// The mesh-library prefix this element registers its wood under.
+pub const PART: &str = "Vine";
 
-/// The second library this element owns: a vine young enough to be nothing but
-/// this season's shoot, one `Var_<i>` per [`shoot`] variation.
+/// The prim a vine's wood takes, below the plant itself.
 ///
-/// Deliberately not a prefix of [`PROTOTYPE`], so telling the two apart is a
-/// `starts_with` and nothing subtler.
-pub const YOUNG_PROTOTYPE: &str = "/Vineyard/parts/YoungVine";
+/// A child rather than the plant prim itself, because a vine has shoots
+/// hanging off it and geometry prims carry no children — see
+/// [`scene`](crate::scene).
+pub const WOOD: &str = "Wood";
 
-/// Name the shoot standing in for a young vine takes under its variation —
-/// the prim, when the shoot is reference-placed, and the `PointInstancer`
-/// holding the one of it when it isn't.
-const YOUNG_SHOOT: &str = "Shoot";
-
-/// Name the `PointInstancer` holding a variation's shoots takes, when they are
-/// instanced rather than reference-placed. A variation is an `Xform` over its
-/// `Wood` either way.
-pub const SHOOTS: &str = "Shoots";
-
-/// Where a variation of either library keeps the plant's materials, relative
-/// to its own prototype root.
-///
-/// Here rather than in a scene-wide `/Vineyard/Looks` because these prototypes
-/// are the outermost thing the export places by reference, and a
-/// `material:binding` target outside the referenced subtree is silently
-/// dropped — [`material`](super::util::material) has the full account. So the
-/// whole plant's shading has to be reachable from inside whatever gets
-/// planted, which is also why `Foliage` lives here rather than with the shoots
-/// and leaves it shades, and why a young vine carries its own copy of it
-/// rather than reaching for the mature library's.
-const LOOKS: &str = "Looks";
+/// The prim a replant's single shoot takes. Not `Shoot_00_0`: there is no spur
+/// and no bud, so a name naming either would be a lie.
+pub const REPLANT_SHOOT: &str = "Shoot";
 
 // ─── Shape constants ────────────────────────────────────────────────
 //
@@ -163,8 +146,8 @@ const MIN_SPUR_LENGTH: f64 = 1e-3;
 
 /// The most shoots one spur is ever asked for. A spur is pruned to two buds,
 /// so two is the honest number; the third is headroom for a deliberately lush
-/// vine, and it is what fixes how many draws a spur takes — see
-/// [`shoot_placements`].
+/// vine, and it is what fixes how many bud slots a spur offers — see
+/// [`shoot_buds`].
 const MAX_SHOOTS_PER_SPUR: usize = 3;
 
 /// Where the buds sit along a spur, as fractions of its length. They fill from
@@ -176,34 +159,176 @@ const BUD_STEP: f64 = 0.35;
 /// How far a shoot's bearing wanders off the bud it grew from, in radians.
 const BUD_SPREAD: f64 = 0.4;
 
-/// How far a shoot leans off the upright it was authored as, in radians —
-/// drawn per shoot about both of its own horizontal axes.
-///
-/// This is the cheapest variety in the scene: a dozen shoots on a vine come
-/// from a handful of prototypes, and without a per-instance lean the repeat is
-/// obvious at a glance.
+/// How far a shoot leans off the upright it was built as, in radians — drawn
+/// per shoot about both of its own horizontal axes.
 const SHOOT_TILT: f64 = 0.14;
 
-/// How much a shoot's length varies about [`ShootParams::length`], as a
-/// fraction. Applied as a uniform scale, so a longer shoot is also slightly
-/// thicker — which is what [`Placement::scale`] already means.
+/// How much a shoot's vigour varies about the nominal, as a fraction.
 ///
-/// [`ShootParams::length`]: super::shoot::ShootParams::length
-const SHOOT_LENGTH_JITTER: f64 = 0.15;
+/// Vigour lengthens and thickens a shoot together, the way more light does — so
+/// a vigorous shoot also carries more leaves, since it is longer at the same
+/// node spacing.
+const SHOOT_VIGOUR: f64 = 0.15;
 
-/// Salt that splits the shoot placements off the wood's random stream. An
+/// How much a shoot's node spacing varies about the nominal, as a fraction.
+///
+/// Separate from [`SHOOT_VIGOUR`] because it is the other thing that visibly
+/// differs between two shoots of the same length: how densely they set their
+/// leaves. Together the two give the shoot layer a codebook worth more than one
+/// axis — a budget spent covering a single line buys much less variety.
+///
+/// Both go into the [`shoot::ShootConfig`] rather than into a placement scale.
+/// A scale would be free but invisible to the clustering, so the budget would
+/// be spent on one arbitrary size instead of on the range that occurs.
+const SHOOT_SPACING: f64 = 0.12;
+
+/// Salt that splits the wood's random stream off the scene seed, so that this
+/// layer and the ones either side of it never draw from the same stream. An
 /// arbitrary odd constant; only its fixedness matters.
+const WOOD_STREAM: u64 = 0x8EBC_6AF0_9C88_C6E3;
+
+/// The same, splitting the shoot placements off the wood — so that every nudge
+/// of `shoots_per_spur` does not re-shape the trunk underneath them.
 const SHOOT_STREAM: u64 = 0xA076_1D64_78BD_642F;
 
-/// The same, for the young library: which way each young vine's shoot leaves
-/// the ground is drawn here, so it never moves when a mature vine is tuned.
-const YOUNG_STREAM: u64 = 0x1D8E_4E27_C47D_124F;
+/// How far a replant sits from any mature vine.
+///
+/// Further than two mature vines can ever be from each other, so a replant
+/// earns a representative however few of them there are.
+const REPLANT_APART: f32 = 10.0;
+
+/// How much a plant's girth varies about the nominal, as a fraction.
+///
+/// A vine thickens with age and vigour while its head stays where the wire is,
+/// so this reaches the radii and the spurs and leaves `trunk_height` alone.
+///
+/// It is also the axis the mesh budget gets spent covering. Without it every
+/// mature plant in a parcel would be the same config and the whole vineyard
+/// would share one mesh, however high `variations` was set — under the old
+/// model the variety came from authoring N differently-seeded prototypes, and
+/// under this one it has to be a real difference between the plants.
+pub const VINE_VIGOUR: f64 = 0.25;
 
 /// Shortest cordon we will build. Load-bearing rather than cosmetic: a
 /// `cordon_gap` wider than the vine spacing would otherwise ask for a
 /// zero-length rail, whose total chord length is zero and whose interpolation
 /// is entirely NaN.
 const MIN_CORDON_REACH: f32 = 0.05;
+
+/// Shortest trunk we will build. A trunk of zero height would put the head at
+/// the graft union and divide by the distance between them.
+const MIN_TRUNK_HEIGHT: f32 = 0.1;
+
+/// Closest two spurs may be asked to sit. Zero spacing is an infinite number
+/// of spurs, and [`spur_positions`] would never terminate.
+const MIN_SPUR_SPACING: f32 = 0.01;
+
+// ─── Config ─────────────────────────────────────────────────────────
+
+/// One vine's shape, as planting specified it.
+///
+/// Everything a mesh is built from, and nothing about where the plant stands —
+/// that is the entity's `Transform`. Two vines with equal configs get one mesh
+/// between them; two that differ get separate meshes only if the budget
+/// stretches to it, which is what [`VineMetric`] decides.
+///
+/// Clamped on the way in rather than in the shape functions, so the config a
+/// metric compares is the plant that actually gets built.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct VineConfig {
+    /// How grown the plant is. `1.0` is a mature vine — trunk, cordons and
+    /// spurs. Anything less is a replant in its first seasons: one shoot out of
+    /// bare ground, at this fraction of a full-grown one.
+    ///
+    /// The two are different *shapes* rather than different sizes, which is why
+    /// [`VineMetric`] steps here rather than reading it as a continuum.
+    pub established: f32,
+    pub trunk_height: f32,
+    pub trunk_radius: f32,
+    pub trunk_wobble: f32,
+    pub arms: u32,
+    /// How far a cordon reaches from the trunk, solved from the row's vine
+    /// spacing so neighbouring plants meet without overlapping.
+    pub cordon_reach: f32,
+    pub cordon_radius: f32,
+    pub spur_spacing: f32,
+    pub spur_length: f32,
+    pub shoots_per_spur: f32,
+    pub roughness: f32,
+    pub sides: u32,
+    pub detail: u32,
+}
+
+impl VineConfig {
+    /// The plant these params call for, at this stage of establishment and
+    /// this `vigour` — a multiplier about `1.0`, drawn per plant. See
+    /// [`VINE_VIGOUR`].
+    pub fn new(
+        params: &VineParams,
+        parcel: &ParcelParams,
+        established: f32,
+        vigour: f32,
+    ) -> Self {
+        Self {
+            established: established.clamp(0.0, 1.0),
+            trunk_height: params.trunk_height.max(MIN_TRUNK_HEIGHT),
+            trunk_radius: (params.trunk_radius * vigour).max(0.001),
+            trunk_wobble: params.trunk_wobble.max(0.0),
+            arms: params.arms.clamp(1, 2),
+            cordon_reach: cordon_reach(parcel.vine_spacing, params.cordon_gap, params.arms),
+            cordon_radius: (params.cordon_radius * vigour).max(0.001),
+            spur_spacing: params.spur_spacing.max(MIN_SPUR_SPACING),
+            spur_length: (params.spur_length * vigour).max(0.0),
+            shoots_per_spur: params
+                .shoots_per_spur
+                .clamp(0.0, MAX_SHOOTS_PER_SPUR as f32),
+            roughness: params.roughness.max(0.0),
+            sides: params.sides.max(3),
+            detail: params.detail.max(1),
+        }
+    }
+
+    /// Whether this plant has wood on it, as opposed to being a replant.
+    pub fn is_mature(&self) -> bool {
+        self.established >= 1.0
+    }
+}
+
+/// Two vines share a mesh when they are close in every dimension that shows.
+pub struct VineMetric;
+
+impl Metric<VineConfig> for VineMetric {
+    fn distance(&self, a: &VineConfig, b: &VineConfig) -> f32 {
+        // A replant and a mature vine are different plants, not different
+        // sizes — hence the step. And a replant builds no wood at all, so any
+        // two of them are the same thing to build however differently they were
+        // configured: collapsing them to one point is what stops a budget from
+        // being spent on plants that cost no mesh. `farthest_first` reads a
+        // zero distance as already covered, which is exactly right here.
+        match (a.is_mature(), b.is_mature()) {
+            (false, false) => return 0.0,
+            (true, false) | (false, true) => return REPLANT_APART,
+            (true, true) => {}
+        }
+        [
+            a.trunk_height - b.trunk_height,
+            (a.trunk_radius - b.trunk_radius) * 4.0,
+            (a.trunk_wobble - b.trunk_wobble) * 4.0,
+            (a.arms as f32 - b.arms as f32) * 2.0,
+            a.cordon_reach - b.cordon_reach,
+            (a.cordon_radius - b.cordon_radius) * 4.0,
+            a.spur_spacing - b.spur_spacing,
+            a.spur_length - b.spur_length,
+            (a.shoots_per_spur - b.shoots_per_spur) * 0.2,
+            (a.roughness - b.roughness) * 0.5,
+            (a.sides as f32 - b.sides as f32) * 0.01,
+        ]
+        .iter()
+        .map(|d| d * d)
+        .sum::<f32>()
+        .sqrt()
+    }
+}
 
 // ─── Params ─────────────────────────────────────────────────────────
 
@@ -213,10 +338,12 @@ const MIN_CORDON_REACH: f32 = 0.05;
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct VineParams {
-    /// How many differently-seeded vines to author as prototypes.
+    /// How many distinct vine meshes the scene may hold.
+    ///
+    /// A budget, not a count: the plants are clustered and this is how many
+    /// representatives the clustering may keep. Lower it to trade variety for
+    /// memory, raise it to spend memory on variety.
     pub variations: u32,
-    /// Drives both the prototype shapes and which vines are missing or young.
-    pub seed: u64,
     /// Ground to head, in meters — the height of the fruiting wire. Not the
     /// same thing as [`ParcelParams::trellis_height`], which is where the tops
     /// of the posts are.
@@ -255,7 +382,6 @@ impl Default for VineParams {
     fn default() -> Self {
         Self {
             variations: 4,
-            seed: 0,
             trunk_height: 0.9,
             trunk_radius: 0.035,
             trunk_wobble: 0.02,
@@ -274,25 +400,16 @@ impl Default for VineParams {
 
 pub fn plugin(app: &mut App) {
     // `ParcelParams` is deliberately not initialized here — `terrain::plugin`
-    // owns it, and `elements::plugin` adds terrain first. If that order ever
-    // changes, this element's author systems are what will notice.
+    // owns it, and `elements::plugin` adds terrain first.
     app.init_resource::<VineParams>().add_systems(
         PreUpdate,
-        author_prototypes
-            .in_set(Grow::Prototypes)
-            // References the shoot prototypes and counts them off the stage,
-            // so they have to be there first. `Grow` chains the *sets*; the
-            // systems inside one are unordered until something says otherwise.
-            .after(shoot::author_prototypes)
-            .run_if(
-                resource_changed::<VineParams>
-                    .or_else(resource_changed::<ParcelParams>)
-                    .or_else(resource_changed::<shoot::ShootParams>)
-                    // Fixed for the life of the app today, so this only ever
-                    // fires on the first frame. It is here so the system stays
-                    // honest if the style ever becomes something you can flip.
-                    .or_else(resource_changed::<place::Style>),
-            ),
+        build.in_set(Grow::Vines).run_if(
+            configs_changed::<VineConfig>
+                // The shoots this layer spawns are authored from `ShootParams`,
+                // and nothing re-authors the vine configs when those change.
+                .or_else(resource_changed::<shoot::ShootParams>)
+                .or_else(resource_changed::<VineParams>),
+        ),
     );
 }
 
@@ -317,9 +434,9 @@ pub fn plugin(app: &mut App) {
 ///
 /// `vine_spacing` is a *target*, though: the parcel solver rounds to a whole
 /// number of vines per panel, so the planted step is 1.236 m against the
-/// default 1.2 m target. One prototype is shared across rows whose steps
-/// differ, so the nominal figure is the only input available — and it errs
-/// short, which is the safe direction. `cordon_gap` absorbs the difference.
+/// default 1.2 m target. One mesh is shared across rows whose steps differ, so
+/// the nominal figure is the only input available — and it errs short, which is
+/// the safe direction. `cordon_gap` absorbs the difference.
 fn cordon_reach(vine_spacing: f32, cordon_gap: f32, arms: u32) -> f32 {
     let run = (vine_spacing - cordon_gap).max(0.0);
     let reach = if arms >= 2 { run / 2.0 } else { run };
@@ -330,9 +447,9 @@ fn cordon_reach(vine_spacing: f32, cordon_gap: f32, arms: u32) -> f32 {
 ///
 /// Clamped to mid-trunk so a deliberately stunted vine doesn't end up with its
 /// graft scar at the head.
-fn graft_bulge(params: &VineParams) -> Bulge {
+fn graft_bulge(config: &VineConfig) -> Bulge {
     Bulge {
-        at: GRAFT_HEIGHT.min(params.trunk_height as f64 * 0.5),
+        at: GRAFT_HEIGHT.min(config.trunk_height as f64 * 0.5),
         width: GRAFT_WIDTH,
         height: GRAFT_BULGE,
     }
@@ -343,7 +460,7 @@ fn graft_bulge(params: &VineParams) -> Bulge {
 /// Two low-frequency waves with seeded phases, tapered to nothing at both ends
 /// by a `sin(pi f)` bell. Pinning both ends is deliberate: the base is the
 /// planting position the vine was placed at, and the head has to stay
-/// on the axis because the cordons attach there and the placer only rotates
+/// on the axis because the cordons attach there and planting only rotates
 /// about Z.
 ///
 /// Being a continuous function of height rather than a draw per control point
@@ -358,11 +475,11 @@ fn trunk_axis(f: f64, wobble: f64, phase: [f64; 2]) -> (f64, f64) {
 }
 
 /// Trunk radius at height `z`: a linear taper with the graft union on top.
-fn trunk_radius_at(params: &VineParams, z: f64) -> f64 {
-    let height = (params.trunk_height as f64).max(0.1);
+fn trunk_radius_at(config: &VineConfig, z: f64) -> f64 {
+    let height = config.trunk_height as f64;
     let f = ((z - TRUNK_BASE_Z) / (height - TRUNK_BASE_Z)).clamp(0.0, 1.0);
     let taper = 1.0 + (TRUNK_TIP_TAPER - 1.0) * f;
-    params.trunk_radius as f64 * (taper + graft_bulge(params).value(z))
+    config.trunk_radius as f64 * (taper + graft_bulge(config).value(z))
 }
 
 /// Heights to place trunk control points at: an even spread, plus the three
@@ -372,10 +489,7 @@ fn trunk_radius_at(params: &VineParams, z: f64) -> f64 {
 /// a swelling 5 cm wide is simply stepped over — see [`Bulge::detail_positions`].
 fn trunk_nodes(height: f64, graft: &Bulge) -> Vec<f64> {
     let mut nodes: Vec<f64> = (0..TRUNK_NODES)
-        .map(|i| {
-            TRUNK_BASE_Z
-                + (height - TRUNK_BASE_Z) * i as f64 / (TRUNK_NODES - 1) as f64
-        })
+        .map(|i| TRUNK_BASE_Z + (height - TRUNK_BASE_Z) * i as f64 / (TRUNK_NODES - 1) as f64)
         .collect();
     nodes.extend(
         graft
@@ -388,7 +502,7 @@ fn trunk_nodes(height: f64, graft: &Bulge) -> Vec<f64> {
 
 /// Distances from the head at which spurs sit along a cordon.
 fn spur_positions(reach: f64, spacing: f64) -> Vec<f64> {
-    let spacing = spacing.max(0.01);
+    let spacing = spacing.max(MIN_SPUR_SPACING as f64);
     let limit = reach - SPUR_MARGIN;
     (0..)
         .map(|k| HEAD_RUN + spacing * (k as f64 + 0.5))
@@ -440,34 +554,34 @@ struct VineShape {
     spurs: Vec<Spur>,
 }
 
-/// The wood of one vine, in the prototype's local frame.
+/// The wood of one vine, in its own local frame.
 ///
 /// The *draw order* of `rng` is part of this element's output: inserting a
 /// draw in the middle re-rolls every vine downstream of it. The order is the
 /// trunk's axis phases, the trunk's bark, then per arm the cordon's phase, the
 /// cordon's bark, and each spur's direction, length and bark in turn. The
-/// shoots draw from a stream of their own — see [`shoot_placements`].
-fn vine_shape(params: &VineParams, reach: f64, seed: u64) -> VineShape {
+/// shoots draw from a stream of their own — see [`shoot_buds`].
+fn vine_shape(config: &VineConfig, seed: u64) -> VineShape {
     let mut rng = Rng::new(seed);
     let mut shape = VineShape {
-        strands: vec![trunk_strand(params, &mut rng)],
+        strands: vec![trunk_strand(config, &mut rng)],
         spurs: Vec::new(),
     };
-    for arm in 0..params.arms.clamp(1, 2) {
+    for arm in 0..config.arms {
         let sign = if arm == 0 { 1.0 } else { -1.0 };
-        let (strands, spurs) = cordon_shape(params, reach, sign, &mut rng);
+        let (strands, spurs) = cordon_shape(config, sign, &mut rng);
         shape.strands.extend(strands);
         shape.spurs.extend(spurs);
     }
     shape
 }
 
-fn trunk_strand(params: &VineParams, rng: &mut Rng) -> Strand {
-    let height = (params.trunk_height as f64).max(0.1);
+fn trunk_strand(config: &VineConfig, rng: &mut Rng) -> Strand {
+    let height = config.trunk_height as f64;
     let phase = [rng.unit() * TAU, rng.unit() * TAU];
-    let wobble = params.trunk_wobble as f64;
+    let wobble = config.trunk_wobble as f64;
 
-    let nodes = trunk_nodes(height, &graft_bulge(params));
+    let nodes = trunk_nodes(height, &graft_bulge(config));
     let points = nodes
         .iter()
         .map(|z| {
@@ -476,23 +590,25 @@ fn trunk_strand(params: &VineParams, rng: &mut Rng) -> Strand {
             Point3::new(x, y, *z)
         })
         .collect();
-    let radii = nodes.iter().map(|z| trunk_radius_at(params, *z)).collect();
+    let radii = nodes.iter().map(|z| trunk_radius_at(config, *z)).collect();
 
-    Strand::new(points, radii, sides(params), params.detail as f64, bark(params, rng))
+    Strand::new(
+        points,
+        radii,
+        config.sides as usize,
+        config.detail as f64,
+        bark(config, rng),
+    )
 }
 
 /// One cordon and the spurs growing off it. `sign` is which way along the row
 /// it runs.
-fn cordon_shape(
-    params: &VineParams,
-    reach: f64,
-    sign: f64,
-    rng: &mut Rng,
-) -> (Vec<Strand>, Vec<Spur>) {
-    let head_z = (params.trunk_height as f64).max(0.1);
+fn cordon_shape(config: &VineConfig, sign: f64, rng: &mut Rng) -> (Vec<Strand>, Vec<Spur>) {
+    let head_z = config.trunk_height as f64;
+    let reach = config.cordon_reach as f64;
     let phase = rng.unit() * TAU;
-    let sway = params.trunk_wobble as f64 * 0.5;
-    let spurs = spur_positions(reach, params.spur_spacing as f64);
+    let sway = config.trunk_wobble as f64 * 0.5;
+    let spurs = spur_positions(reach, config.spur_spacing as f64);
 
     // The cordon's centerline at distance `x` out from the head, and its
     // radius there. Shared by the cordon's own control points and by the spur
@@ -509,7 +625,7 @@ fn cordon_shape(
         let g = ((x - HEAD_RUN) / (reach - HEAD_RUN)).clamp(0.0, 1.0);
         let taper = 1.0 + (CORDON_TIP_TAPER - 1.0) * g;
         let knuckles: f64 = spurs.iter().map(|s| knuckle(*s).value(x)).sum();
-        params.cordon_radius as f64 * (taper + knuckles)
+        config.cordon_radius as f64 * (taper + knuckles)
     };
 
     // Starts buried in the trunk, on its axis, and arcs over the head. The
@@ -530,16 +646,16 @@ fn cordon_shape(
     let mut strands = vec![Strand::new(
         points,
         radii,
-        sides(params),
-        params.detail as f64,
-        bark(params, rng),
+        config.sides as usize,
+        config.detail as f64,
+        bark(config, rng),
     )];
 
     let mut stubs = Vec::new();
-    if (params.spur_length as f64) >= MIN_SPUR_LENGTH {
+    if (config.spur_length as f64) >= MIN_SPUR_LENGTH {
         for (index, x) in spurs.iter().enumerate() {
-            let stub = spur(params, centerline(*x), sign, index, rng);
-            strands.push(spur_strand(params, &stub, rng));
+            let stub = spur(config, centerline(*x), sign, index, rng);
+            strands.push(spur_strand(config, &stub, rng));
             stubs.push(stub);
         }
     }
@@ -549,8 +665,8 @@ fn cordon_shape(
 /// One spur: where a pruning stub meets its cordon, and the axis it stands on.
 ///
 /// A shoot grows out of a bud partway along that axis, so this is the frame
-/// [`shoot_placements`] needs — and the reason the stub's random draws are
-/// made here rather than buried inside the geometry that consumes them.
+/// [`shoot_buds`] needs — and the reason the stub's random draws are made here
+/// rather than buried inside the geometry that consumes them.
 #[derive(Clone, Copy, Debug)]
 struct Spur {
     /// Where it meets the cordon, on the cordon's own centerline.
@@ -577,7 +693,7 @@ impl Spur {
 /// out from the cordon and alternating sides the way a pruned vine's spurs
 /// alternate along the wire.
 fn spur(
-    params: &VineParams,
+    config: &VineConfig,
     base: Point3<f64>,
     sign: f64,
     index: usize,
@@ -585,7 +701,7 @@ fn spur(
 ) -> Spur {
     let side = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
     let jitter = rng.range(-0.15, 0.15);
-    let length = params.spur_length as f64 * rng.range(0.8, 1.2);
+    let length = config.spur_length as f64 * rng.range(0.8, 1.2);
     Spur {
         base,
         direction: Vector3::new(sign * 0.20, side * 0.55 + jitter, 0.80).normalize(),
@@ -595,8 +711,8 @@ fn spur(
 
 /// The short tapered stub of a spur, reaching back into the cordon so the two
 /// tubes meet without a seam.
-fn spur_strand(params: &VineParams, spur: &Spur, rng: &mut Rng) -> Strand {
-    let radius = params.cordon_radius as f64;
+fn spur_strand(config: &VineConfig, spur: &Spur, rng: &mut Rng) -> Strand {
+    let radius = config.cordon_radius as f64;
     // Four points so the fit is always cubic, and the last three so the stub
     // tapers rather than ending in a cylinder.
     let points = vec![
@@ -605,22 +721,21 @@ fn spur_strand(params: &VineParams, spur: &Spur, rng: &mut Rng) -> Strand {
         spur.at(0.70),
         spur.at(1.0),
     ];
-    let radii = vec![
-        radius * 0.75,
-        radius * 0.62,
-        radius * 0.50,
-        radius * 0.38,
-    ];
+    let radii = vec![radius * 0.75, radius * 0.62, radius * 0.50, radius * 0.38];
 
     // A spur is five centimeters long — halving its ring resolution is
     // invisible at any distance a vineyard is looked at from.
     Strand::new(
         points,
         radii,
-        (sides(params) / 2).max(4),
-        params.detail as f64,
-        bark(params, rng),
+        (config.sides as usize / 2).max(4),
+        config.detail as f64,
+        bark(config, rng),
     )
+}
+
+fn bark(config: &VineConfig, rng: &mut Rng) -> Bark {
+    Bark::new(rng, config.sides as usize, config.roughness as f64)
 }
 
 // ─── Shoots ─────────────────────────────────────────────────────────
@@ -637,233 +752,206 @@ fn shoot_count(rate: f64, draw: f64) -> usize {
     (whole as usize + usize::from(draw < rate - whole)).min(MAX_SHOOTS_PER_SPUR)
 }
 
-/// Where this vine's shoots sit, in the prototype's local frame.
+/// Where one shoot grows from, in the plant's local frame.
 ///
-/// Each placement names a [`shoot`] prototype variation and the transform that
-/// puts it on a bud: the shoot is authored leaving its bud along +X and
-/// turning up, so a bearing is all the rotation the job needs — plus a small
-/// lean, which is what stops a dozen copies of four meshes reading as a dozen
-/// copies of four meshes.
+/// A slot on the built wood rather than a finished placement: the bearing, lean
+/// and vigour of the shoot that fills it are drawn per *plant*, in [`build`].
+#[derive(Clone, Debug)]
+struct Bud {
+    /// The prim the shoot takes. Named for the *bud*, not for the shoot's rank,
+    /// so dropping a spur from two shoots to one drops `_1` and leaves `_0`
+    /// exactly where it was.
+    name: String,
+    position: Vec3,
+    /// Bearing the shoot leaves on, before the per-plant wander.
+    yaw: f32,
+    /// How far that bearing may wander, in radians. A bud on a spur faces where
+    /// its stub does; a replant's one shoot may face anywhere.
+    spread: f32,
+    /// Uniform scale the shoot is placed at.
+    scale: f32,
+}
+
+/// Which buds this vine's shoots grow from.
 ///
-/// # Two rules about the randomness
-///
-/// It draws from a **stream of its own**, salted off the vine's seed with
-/// [`SHOOT_STREAM`]. Sharing the wood's stream would mean every nudge of
+/// Draws from a **stream of its own**, salted off the wood's with
+/// [`SHOOT_STREAM`]: sharing the wood's stream would mean every nudge of
 /// `shoots_per_spur` re-shaped the trunk underneath the shoots being tuned.
+/// One draw per spur — how many shoots it pushed.
 ///
-/// And every spur draws the **same number of values** whether it uses them or
-/// not: the count, then five per *potential* shoot. Drawing only for the
-/// shoots that exist would make the stream's length depend on the rate, so
-/// raising it would re-roll every spur downstream instead of just adding
-/// shoots — the same reason [`planting::row_vines`] draws before its miss
-/// test.
-///
-/// [`planting::row_vines`]: super::util::planting
-fn shoot_placements(
-    params: &VineParams,
-    spurs: &[Spur],
-    variations: usize,
-    seed: u64,
-) -> Vec<(String, Placement)> {
-    let variations = variations.max(1);
+/// A `None` is a bud slot the spur left empty. The empty slots are kept in the
+/// list because [`build`] draws for every slot, used or not: that is what makes
+/// a vine pruned to fewer shoots keep the ones it had, rather than reshuffling
+/// every shoot past the first one that went away.
+fn shoot_buds(config: &VineConfig, spurs: &[Spur], seed: u64) -> Vec<Option<Bud>> {
     let mut rng = Rng::new(seed ^ SHOOT_STREAM);
-    let mut placements = Vec::new();
+    let mut buds = Vec::new();
 
     for (index, spur) in spurs.iter().enumerate() {
-        let count = shoot_count(params.shoots_per_spur as f64, rng.unit());
+        let count = shoot_count(config.shoots_per_spur as f64, rng.unit());
         for bud in 0..MAX_SHOOTS_PER_SPUR {
-            // Drawn for every bud a spur *could* push, used or not.
-            let turn = rng.range(-BUD_SPREAD, BUD_SPREAD);
+            if bud >= count {
+                buds.push(None);
+                continue;
+            }
+            let at = spur.at((BUD_TIP - BUD_STEP * bud as f64).max(0.0));
+            buds.push(Some(Bud {
+                name: format!("Shoot_{index:02}_{bud}"),
+                position: Vec3::new(at.x as f32, at.y as f32, at.z as f32),
+                // Buds alternate around the stub, so two shoots off one spur
+                // grow apart rather than through each other.
+                yaw: (spur.azimuth() + PI * bud as f64) as f32,
+                spread: BUD_SPREAD as f32,
+                scale: 1.0,
+            }));
+        }
+    }
+    buds
+}
+
+// ─── Building ───────────────────────────────────────────────────────
+
+/// One representative plant: its wood, and the buds its shoots grow from.
+struct VineBuild {
+    /// Trunk, cordons and spurs as a single mesh — a dozen tubes merge for
+    /// free, and prim count is what the export pays for. `None` for a replant,
+    /// which has no permanent wood at all.
+    wood: Option<Mesh>,
+    buds: Vec<Option<Bud>>,
+}
+
+/// Builds one representative: its wood, and where its shoots go.
+///
+/// A replant builds no mesh. It is a shoot out of bare ground, sunk
+/// [`shoot::PLANT_DEPTH`] so the bend at its base stays underground — and sunk
+/// *proportionally*, so a half-grown replant is buried half as deep and hides
+/// exactly as much.
+fn build_vine(config: &VineConfig, seed: u64) -> anyhow::Result<VineBuild> {
+    if !config.is_mature() {
+        let scale = config.established;
+        return Ok(VineBuild {
+            wood: None,
+            buds: vec![Some(Bud {
+                name: REPLANT_SHOOT.to_string(),
+                position: Vec3::new(0.0, 0.0, -shoot::PLANT_DEPTH as f32 * scale),
+                // A shoot leaves its bud sideways and a plant is only ever
+                // turned to face along the row, so without a bearing of its own
+                // every replant would break the surface a bend's radius
+                // down-row of where it was planted.
+                yaw: 0.0,
+                spread: PI as f32,
+                scale,
+            })],
+        });
+    }
+
+    let shape = vine_shape(config, seed);
+    let parts = shape
+        .strands
+        .iter()
+        .map(strand_mesh)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(VineBuild {
+        wood: Some(merge_meshes(&parts).to_mesh()),
+        buds: shoot_buds(config, &shape.spurs, seed),
+    })
+}
+
+/// Builds one mesh per distinct vine, and hangs a shoot on every bud.
+///
+/// The wood is shared: each plant gets a `Wood` child referencing the mesh its
+/// representative built. The shoots are not — every plant authors its own
+/// [`shoot::ShootConfig`] at each bud, so two vines off one mesh still carry
+/// different canopies.
+///
+/// Each plant's shoots draw from a stream keyed on its [`Order`], so a plant's
+/// canopy depends on which planting slot it stands in and on nothing else that
+/// happens elsewhere in the parcel.
+pub(crate) fn build(
+    mut commands: Commands,
+    mut library: Library,
+    scene: Res<SceneParams>,
+    params: Res<VineParams>,
+    shoot_params: Res<shoot::ShootParams>,
+    vines: Query<(Entity, &Order, &VineConfig)>,
+) -> Result<()> {
+    library.clear(PART);
+
+    let mut plants: Vec<(Order, Entity, VineConfig)> = vines
+        .iter()
+        .map(|(entity, order, config)| (*order, entity, *config))
+        .collect();
+    plants.sort_by_key(|(order, ..)| *order);
+
+    let configs: Vec<VineConfig> = plants.iter().map(|(_, _, config)| *config).collect();
+    let book = farthest_first(
+        &configs,
+        params.variations.max(1) as usize,
+        0.0,
+        &VineMetric,
+    );
+
+    // Every representative is built once. A replant registers no part, so the
+    // library can have gaps in its numbering — the index is a key, not a rank.
+    let mut built: Vec<(Vec<Option<Bud>>, Option<Geometry>)> = Vec::with_capacity(book.len());
+    for (index, config) in book.representatives.iter().enumerate() {
+        // Mixing rather than adding, so neighbouring representatives give
+        // unrelated vines instead of the same vine shifted by one.
+        let seed = scene.seed ^ WOOD_STREAM ^ salt(index as u64);
+        let VineBuild { wood, buds } = build_vine(config, seed)?;
+        let geometry = wood.map(|mesh| library.part(PART, index, mesh, surface(seed)));
+        built.push((buds, geometry));
+    }
+
+    let mut shoot_order = 0u64;
+    for ((order, entity, _), drew) in plants.iter().zip(&book.assignment) {
+        let (buds, geometry) = &built[*drew as usize];
+        let mut plant = commands.entity(*entity);
+        // The layer owns everything below a plant, and a rebuild may hang a
+        // different number of shoots than the last one did.
+        plant.despawn_children();
+
+        if let Some(geometry) = geometry {
+            plant.with_child((Name::new(WOOD), geometry.clone()));
+        }
+
+        let mut rng = Rng::new(scene.seed ^ SHOOT_STREAM ^ salt(order.0));
+        for bud in buds {
+            // Five draws per bud slot, filled or not: the wander off the bud's
+            // bearing, the lean about each of the shoot's own horizontal axes,
+            // then its vigour and its node spacing. Drawing only for the buds
+            // that pushed would make the stream's length depend on the pruning,
+            // so a lighter prune would reshuffle every shoot after the first gap
+            // instead of just leaving one out.
+            let turn = rng.range(-1.0, 1.0) as f32;
             let tilt = Vec2::new(
                 rng.range(-SHOOT_TILT, SHOOT_TILT) as f32,
                 rng.range(-SHOOT_TILT, SHOOT_TILT) as f32,
             );
-            let scale = rng.range(1.0 - SHOOT_LENGTH_JITTER, 1.0 + SHOOT_LENGTH_JITTER);
-            let pick = rng.unit();
-            if bud >= count {
-                continue;
-            }
+            let vigour = rng.range(1.0 - SHOOT_VIGOUR, 1.0 + SHOOT_VIGOUR) as f32;
+            let spacing = rng.range(1.0 - SHOOT_SPACING, 1.0 + SHOOT_SPACING) as f32;
 
-            let bud_at = (BUD_TIP - BUD_STEP * bud as f64).max(0.0);
-            let at = spur.at(bud_at);
-            placements.push((
-                // Named for the *bud*, not the shoot's rank: dropping a spur
-                // from two shoots to one drops `_1` and leaves `_0` exactly
-                // where it was.
-                format!("Shoot_{index:02}_{bud}"),
-                Placement {
-                    position: Vec3::new(at.x as f32, at.y as f32, at.z as f32),
-                    // Buds alternate around the stub, so two shoots off one
-                    // spur grow apart rather than through each other.
-                    yaw: (spur.azimuth() + PI * bud as f64 + turn) as f32,
-                    tilt,
-                    scale: scale as f32,
-                    variation: (pick * variations as f64) as usize % variations,
-                },
+            let Some(bud) = bud else { continue };
+            shoot_order += 1;
+            plant.with_child((
+                Name::new(bud.name.clone()),
+                placed(bud.position, bud.yaw + turn * bud.spread, tilt, bud.scale),
+                Visibility::default(),
+                shoot::ShootConfig::new(&shoot_params, vigour, spacing),
+                Order(shoot_order),
             ));
         }
     }
-    placements
-}
-
-fn sides(params: &VineParams) -> usize {
-    (params.sides as usize).max(3)
-}
-
-fn bark(params: &VineParams, rng: &mut Rng) -> Bark {
-    Bark::new(rng, sides(params), params.roughness as f64)
-}
-
-// ─── Authoring ──────────────────────────────────────────────────────
-
-/// Authors one merged mesh per variation under [`PROTOTYPE`], and the young
-/// library beside it.
-///
-/// Reads [`ParcelParams`] directly rather than the solved
-/// [`VineyardLayout`] — only `vine_spacing` is needed, and taking it from the
-/// params is what lets this run in [`Grow::Prototypes`], which is ahead of
-/// where the layout is solved.
-pub(crate) fn author_prototypes(
-    live: NonSend<LiveStage>,
-    params: Res<VineParams>,
-    parcel: Res<ParcelParams>,
-    style: Res<place::Style>,
-) -> Result<()> {
-    let stage = &live.stage;
-    remove_prim(stage, PROTOTYPE)?;
-    define_prim(stage, PROTOTYPE, "Scope")?;
-
-    let reach = cordon_reach(parcel.vine_spacing, params.cordon_gap, params.arms) as f64;
-    // Counted off the stage rather than read from `ShootParams`, because
-    // elements compose by prim path only.
-    let shoot_variations = place::prototype_count(stage, shoot::PROTOTYPE);
-
-    for i in 0..params.variations.max(1) {
-        // Mixing rather than adding, so neighbouring seeds give unrelated
-        // vines instead of the same vine shifted by one variation.
-        let seed = params.seed ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-        let shape = vine_shape(&params, reach, seed);
-        let parts = shape
-            .strands
-            .iter()
-            .map(strand_mesh)
-            .collect::<anyhow::Result<Vec<_>>>()?;
-
-        // An `Xform` over a `Wood` mesh rather than one merged `Mesh`: the
-        // shoots are references to another element's prototypes, so a vine has
-        // to be a prim that can *have* children. Its own wood stays a single
-        // mesh — a dozen tubes merge for free, and prim count is what drives
-        // the cost of projecting the stage.
-        let variation = format!("{PROTOTYPE}/Var_{i}");
-        define_prim(stage, &variation, "Xform")?;
-
-        define_prim(stage, &format!("{variation}/{LOOKS}"), "Scope")?;
-        let wood_material = format!("{variation}/{LOOKS}/Wood");
-        let foliage_material = format!("{variation}/{LOOKS}/Foliage");
-        material::author_preview_material(stage, &wood_material, material::WOOD)?;
-        material::author_preview_material(stage, &foliage_material, material::FOLIAGE)?;
-
-        let wood_path = format!("{variation}/Wood");
-        let wood = author_mesh(stage, &wood_path, &merge_meshes(&parts))?;
-        set_display_color(
-            &wood,
-            color::shade(
-                color::srgb(color::WOOD),
-                &mut Rng::new(seed ^ color::COLOR_STREAM),
-            ),
-        )?;
-        material::bind_material(stage, &wood_path, &wood_material)?;
-
-        if shoot_variations > 0 {
-            let shoots = shoot_placements(&params, &shape.spurs, shoot_variations, seed);
-            // One binding per shoot covers its stem and every leaf under it,
-            // since a binding inherits down namespace.
-            place::place(
-                stage,
-                *style,
-                &variation,
-                SHOOTS,
-                shoot::PROTOTYPE,
-                shoot_variations,
-                &shoots,
-                Some(&foliage_material),
-            )?;
-        }
-    }
-
-    author_young_prototypes(stage, *style, &params, shoot_variations)
-}
-
-/// Authors one young vine per shoot variation under [`YOUNG_PROTOTYPE`].
-///
-/// A young vine is a shoot and a material, and the only shaping done here is
-/// the burial: the shoot is sunk [`shoot::PLANT_DEPTH`] below the variation's
-/// origin, so that a young vine placed on the ground like any other plant
-/// comes out of the soil already standing up, with the bend at its base out of
-/// sight. Sinking it inside the prototype rather than at planting time is what
-/// makes that survive the age scale — the burial shrinks along with the plant,
-/// so a half-size replant is buried half as deep and hides exactly as much.
-///
-/// One draw per variation: the bearing its shoot leaves the ground on. Without
-/// it every young vine in the parcel would break the surface a bend's radius
-/// down-row of the position it was planted at, since a shoot leaves its bud
-/// along +X and the placer only ever turns one to face along the row.
-///
-/// Authors nothing when there are no shoots to plant — the same "count the
-/// prototypes off the stage" contract the mature library follows, and what
-/// leaves [`planting`](super::util::planting) with nothing to place rather
-/// than with references to prims that were never authored.
-fn author_young_prototypes(
-    stage: &Stage,
-    style: place::Style,
-    params: &VineParams,
-    shoot_variations: usize,
-) -> Result<()> {
-    remove_prim(stage, YOUNG_PROTOTYPE)?;
-    define_prim(stage, YOUNG_PROTOTYPE, "Scope")?;
-
-    let mut rng = Rng::new(params.seed ^ YOUNG_STREAM);
-    for i in 0..shoot_variations {
-        // An `Xform` over its shoot and its materials, the way a mature vine
-        // is one over its wood: a reference is the only thing under here, and
-        // a reference needs a parent that can have children.
-        let variation = format!("{YOUNG_PROTOTYPE}/Var_{i}");
-        define_prim(stage, &variation, "Xform")?;
-
-        define_prim(stage, &format!("{variation}/{LOOKS}"), "Scope")?;
-        let foliage_material = format!("{variation}/{LOOKS}/Foliage");
-        material::author_preview_material(stage, &foliage_material, material::FOLIAGE)?;
-
-        // Variation `i` of the young library is variation `i` of the shoot
-        // library, buried. Picking one at random here instead would spend the
-        // library's whole variety on a second roll of the same dice the placer
-        // already throws.
-        let planted = vec![(
-            YOUNG_SHOOT.to_string(),
-            Placement {
-                position: Vec3::new(0.0, 0.0, -shoot::PLANT_DEPTH as f32),
-                yaw: (rng.unit() * TAU) as f32,
-                // Upright: a first-year vine is trained up a stake, and the
-                // wander in one is the shoot's own lean.
-                tilt: Vec2::ZERO,
-                scale: 1.0,
-                variation: i,
-            },
-        )];
-        // One binding covers the stem and every leaf on it, since a binding
-        // inherits down namespace.
-        place::place(
-            stage,
-            style,
-            &variation,
-            YOUNG_SHOOT,
-            shoot::PROTOTYPE,
-            shoot_variations,
-            &planted,
-            Some(&foliage_material),
-        )?;
-    }
     Ok(())
+}
+
+/// Wood, shaded off this representative's own seed so that two vines standing
+/// side by side are not the same brown.
+fn surface(seed: u64) -> Surface {
+    material::WOOD.surface(color::shade(
+        color::srgb(color::WOOD),
+        &mut Rng::new(seed ^ color::COLOR_STREAM),
+    ))
 }
 
 // ─── UI ─────────────────────────────────────────────────────────────
@@ -1002,16 +1090,6 @@ pub fn ui() -> impl Scene {
                     params.variations = change.value.round().max(1.0) as u32;
                 })
             ),
-            label_small("Vine seed"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
-                    params.seed = change.value.round().max(0.0) as u64;
-                })
-            ),
         ]
     }
 }
@@ -1020,25 +1098,43 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::testing::{self, Authoring, STYLES, bounds};
-    use openusd::schemas::geom::PointBased;
-    use place::prototype_count;
+    use crate::elements::util::testing::{self, bounds, named_children, organs};
+    use crate::elements::util::mesh::MeshData;
+    use crate::scene::{Prototypes, UsdReference};
 
     fn params() -> VineParams {
         VineParams::default()
     }
 
-    /// The prototype's merged mesh, at the default cordon reach.
-    fn prototype(params: &VineParams) -> crate::elements::util::usd::MeshData {
-        let reach =
-            cordon_reach(ParcelParams::default().vine_spacing, params.cordon_gap, params.arms)
-                as f64;
-        let parts: Vec<_> = vine_shape(params, reach, 1)
+    /// The default mature vine, at the default parcel's cordon reach.
+    fn config() -> VineConfig {
+        VineConfig::new(&params(), &ParcelParams::default(), 1.0, 1.0)
+    }
+
+    /// The same, with `edit` applied to the params first.
+    fn config_with(edit: impl FnOnce(&mut VineParams)) -> VineConfig {
+        let mut params = params();
+        edit(&mut params);
+        VineConfig::new(&params, &ParcelParams::default(), 1.0, 1.0)
+    }
+
+    /// A vine's merged wood, as a mesh the geometry helpers can read.
+    fn wood(config: &VineConfig, seed: u64) -> MeshData {
+        let parts: Vec<_> = vine_shape(config, seed)
             .strands
             .iter()
             .map(|s| strand_mesh(s).expect("every strand skins"))
             .collect();
         merge_meshes(&parts)
+    }
+
+    /// The buds a vine of this config offers, empty slots dropped.
+    fn buds(config: &VineConfig) -> Vec<Bud> {
+        let shape = vine_shape(config, 4);
+        shoot_buds(config, &shape.spurs, 4)
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     #[test]
@@ -1064,15 +1160,11 @@ mod tests {
     /// that a bilateral vine actually has wood on both sides of its trunk.
     #[test]
     fn a_bilateral_vine_grows_an_arm_in_each_direction() {
-        let bilateral = prototype(&params());
-        let (x0, x1) = bounds(&bilateral, 0);
+        let (x0, x1) = bounds(&wood(&config(), 1), 0);
         assert!(x1 > 0.4 && x0 < -0.4, "arms both ways, got {x0}..{x1}");
 
-        let unilateral = prototype(&VineParams {
-            arms: 1,
-            ..params()
-        });
-        let (x0, x1) = bounds(&unilateral, 0);
+        let unilateral = config_with(|p| p.arms = 1);
+        let (x0, x1) = bounds(&wood(&unilateral, 1), 0);
         assert!(x1 > 0.9, "one long arm out to the neighbour, got {x1}");
         assert!(
             x0 > -0.1,
@@ -1082,7 +1174,7 @@ mod tests {
 
     #[test]
     fn the_trunk_starts_below_the_ground() {
-        let (z0, _) = bounds(&prototype(&params()), 2);
+        let (z0, _) = bounds(&wood(&config(), 1), 2);
         assert!(
             z0 <= TRUNK_BASE_Z as f32 + 0.01,
             "buried, so a slope leaves no gap, got {z0}"
@@ -1091,10 +1183,10 @@ mod tests {
 
     #[test]
     fn the_graft_union_is_thicker_than_the_trunk_just_above_it() {
-        let p = params();
-        assert!(trunk_radius_at(&p, GRAFT_HEIGHT) > trunk_radius_at(&p, 0.30) * 1.4);
+        let c = config();
+        assert!(trunk_radius_at(&c, GRAFT_HEIGHT) > trunk_radius_at(&c, 0.30) * 1.4);
         // And it is a local swelling, not just the base taper showing through.
-        assert!(trunk_radius_at(&p, GRAFT_HEIGHT) > trunk_radius_at(&p, 0.05));
+        assert!(trunk_radius_at(&c, GRAFT_HEIGHT) > trunk_radius_at(&c, 0.05));
     }
 
     #[test]
@@ -1114,7 +1206,7 @@ mod tests {
     }
 
     /// The trunk's axis has to return to center at the head, because the
-    /// cordons attach there and the placer only ever rotates about Z.
+    /// cordons attach there and planting only ever rotates about Z.
     #[test]
     fn the_trunk_axis_is_pinned_at_both_ends() {
         for phase in [[0.0, 0.0], [1.0, 2.0], [3.0, 4.5]] {
@@ -1129,54 +1221,78 @@ mod tests {
     }
 
     #[test]
-    fn a_vine_prototype_stays_within_a_plausible_bounding_box() {
-        let p = params();
-        let mesh = prototype(&p);
-        let reach = cordon_reach(1.2, p.cordon_gap, p.arms);
-        let slack = p.spur_length + p.trunk_radius + 0.05;
+    fn a_vine_stays_within_a_plausible_bounding_box() {
+        let c = config();
+        let mesh = wood(&c, 1);
+        let slack = c.spur_length + c.trunk_radius + 0.05;
 
         let (x0, x1) = bounds(&mesh, 0);
-        assert!(x0 > -(reach + slack) && x1 < reach + slack, "{x0}..{x1}");
+        assert!(
+            x0 > -(c.cordon_reach + slack) && x1 < c.cordon_reach + slack,
+            "{x0}..{x1}"
+        );
         let (y0, y1) = bounds(&mesh, 1);
         assert!(y0 > -0.2 && y1 < 0.2, "narrow across the row, got {y0}..{y1}");
         let (z0, z1) = bounds(&mesh, 2);
-        assert!(z0 > -0.1 && z1 < p.trunk_height + slack, "{z0}..{z1}");
+        assert!(z0 > -0.1 && z1 < c.trunk_height + slack, "{z0}..{z1}");
     }
 
     #[test]
     fn a_vines_wood_is_reproducible() {
-        let build = || {
-            vine_shape(&params(), 0.5, 9)
-                .strands
-                .iter()
-                .map(|s| strand_mesh(s).unwrap().points)
-                .collect::<Vec<_>>()
-        };
+        let build = || wood(&config(), 9).points;
         assert_eq!(build(), build());
     }
 
     #[test]
-    fn variations_differ_from_one_another() {
-        let mesh = |seed| {
-            let shape = vine_shape(&params(), 0.5, seed);
-            merge_meshes(
-                &shape
-                    .strands
-                    .iter()
-                    .map(|s| strand_mesh(s).unwrap())
-                    .collect::<Vec<_>>(),
-            )
-            .points
-        };
-        assert_ne!(mesh(1), mesh(2));
+    fn differently_seeded_vines_differ_from_one_another() {
+        assert_ne!(wood(&config(), 1).points, wood(&config(), 2).points);
+    }
+
+    /// Python can set either end of every knob, including the ones the
+    /// viewer's sliders can't reach. Nothing may come back degenerate.
+    #[test]
+    fn a_vine_asked_for_at_the_stops_still_builds() {
+        for edit in [
+            |p: &mut VineParams| {
+                *p = VineParams {
+                    variations: 0,
+                    trunk_height: 0.0,
+                    trunk_radius: 0.0,
+                    trunk_wobble: 0.0,
+                    arms: 0,
+                    cordon_gap: 99.0,
+                    cordon_radius: 0.0,
+                    spur_spacing: 0.0,
+                    spur_length: 0.0,
+                    shoots_per_spur: -1.0,
+                    roughness: 0.0,
+                    sides: 0,
+                    detail: 0,
+                }
+            },
+            |p: &mut VineParams| {
+                p.trunk_height = 12.0;
+                p.shoots_per_spur = 9.0;
+                p.sides = 64;
+                p.detail = 200;
+            },
+        ] {
+            let config = config_with(edit);
+            let built = build_vine(&config, 3).expect("builds at the stops");
+            let mesh = built.wood.expect("a mature vine has wood");
+            let points = mesh
+                .attribute(Mesh::ATTRIBUTE_POSITION)
+                .and_then(|a| a.as_float3())
+                .expect("with positions");
+            assert!(!points.is_empty(), "{config:?} came out empty");
+            assert!(
+                points.iter().flatten().all(|c| c.is_finite()),
+                "{config:?} came out with a NaN in it"
+            );
+        }
     }
 
     // ─── Shoots ─────────────────────────────────────────────────────
-
-    fn shoots(params: &VineParams) -> Vec<(String, Placement)> {
-        let shape = vine_shape(params, 0.5, 4);
-        shoot_placements(params, &shape.spurs, 4, 4)
-    }
 
     /// The whole point of a fractional rate: `1.8` is not "two", it is "two
     /// most of the time". A vineyard of spurs all pushing exactly two shoots
@@ -1198,292 +1314,309 @@ mod tests {
         assert_eq!(shoot_count(-1.0, 0.5), 0);
     }
 
-    /// A shoot grows from a bud, and a bud is on a spur. If a placement drifted
-    /// off its stub, the shoot would hang in mid-air beside the wood.
+    /// A shoot grows from a bud, and a bud is on a spur. If a bud drifted off
+    /// its stub, the shoot would hang in mid-air beside the wood.
     #[test]
-    fn shoots_sit_on_the_buds_of_their_spurs() {
-        let p = params();
-        let shape = vine_shape(&p, 0.5, 4);
-        let placed = shoot_placements(&p, &shape.spurs, 4, 4);
+    fn buds_sit_on_the_spurs_they_belong_to() {
+        let config = config();
+        let shape = vine_shape(&config, 4);
+        let placed = buds(&config);
         assert!(!placed.is_empty(), "the default vine grows some");
 
-        for (name, placement) in &placed {
-            let index: usize = name["Shoot_".len().."Shoot_00".len()]
+        for bud in &placed {
+            let index: usize = bud.name["Shoot_".len().."Shoot_00".len()]
                 .parse()
                 .expect("the name carries its spur's index");
             let spur = shape.spurs[index];
             let offset = Vector3::new(
-                placement.position.x as f64 - spur.base.x,
-                placement.position.y as f64 - spur.base.y,
-                placement.position.z as f64 - spur.base.z,
+                bud.position.x as f64 - spur.base.x,
+                bud.position.y as f64 - spur.base.y,
+                bud.position.z as f64 - spur.base.z,
             );
 
             let along = offset.dot(&spur.direction);
             assert!(
                 (0.0..=spur.length).contains(&along),
-                "{name} sits between the cordon and the spur's tip, got {along}"
+                "{} sits between the cordon and the spur's tip, got {along}",
+                bud.name
             );
             assert!(
                 offset.cross(&spur.direction).norm() < 1e-6,
-                "{name} sits on the spur's axis, not beside it"
+                "{} sits on the spur's axis, not beside it",
+                bud.name
             );
         }
     }
 
-    /// Every spur draws the same values whether it uses them or not, so a
-    /// spur that drops from two shoots to one keeps the one it had — rather
-    /// than every shoot in the vine shuffling because the stream got shorter.
+    /// A spur that drops from two shoots to one keeps the one it had, rather
+    /// than every shoot in the vine shuffling because a slot went away.
     #[test]
     fn a_bud_keeps_its_shoot_when_the_rate_drops() {
-        let lush = shoots(&VineParams {
-            shoots_per_spur: 2.0,
-            ..params()
-        });
-        let sparse = shoots(&VineParams {
-            shoots_per_spur: 1.0,
-            ..params()
-        });
+        let lush = buds(&config_with(|p| p.shoots_per_spur = 2.0));
+        let sparse = buds(&config_with(|p| p.shoots_per_spur = 1.0));
 
         assert!(sparse.len() < lush.len(), "fewer shoots overall");
-        for (name, placement) in &sparse {
-            assert!(name.ends_with("_0"), "only the top bud pushes, got {name}");
+        for bud in &sparse {
+            assert!(
+                bud.name.ends_with("_0"),
+                "only the top bud pushes, got {}",
+                bud.name
+            );
             let same = lush
                 .iter()
-                .find(|(other, _)| other == name)
+                .find(|other| other.name == bud.name)
                 .expect("the bud is still there");
-            assert_eq!(&same.1, placement, "and its shoot has not moved");
+            assert_eq!(same.position, bud.position, "and it has not moved");
         }
     }
 
     #[test]
-    fn a_vine_pruned_to_no_shoots_places_none() {
-        assert!(
-            shoots(&VineParams {
-                shoots_per_spur: 0.0,
-                ..params()
-            })
-            .is_empty()
-        );
+    fn a_vine_pruned_to_no_shoots_grows_none() {
+        assert!(buds(&config_with(|p| p.shoots_per_spur = 0.0)).is_empty());
     }
 
     /// Shoots draw from their own stream, so dialling `shoots_per_spur` in the
     /// viewer must not re-shape the trunk under them.
     #[test]
     fn changing_the_shoot_rate_leaves_the_wood_alone() {
-        let wood = |rate: f32| {
-            let p = VineParams {
-                shoots_per_spur: rate,
-                ..params()
-            };
-            vine_shape(&p, 0.5, 4)
-                .strands
-                .iter()
-                .map(|s| strand_mesh(s).unwrap().points)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(wood(1.8), wood(0.0), "same wood, however many shoots");
+        let at = |rate| wood(&config_with(|p| p.shoots_per_spur = rate), 4).points;
+        assert_eq!(at(1.8), at(0.0), "same wood, however many shoots");
     }
 
-    /// Pins the prototype's shape: an `Xform` over one merged wood mesh, with
-    /// its shoots below it. `place_referenced` reads that type off the stage,
-    /// so if `Var_0` were still a `Mesh` every planted vine would be a `Mesh`
-    /// carrying children no renderer would reach.
+    // ─── Replants ───────────────────────────────────────────────────
+
+    /// A replant is a shoot in the ground and nothing else, and the burial is
+    /// the whole of the shaping: a shoot leaves its bud sideways, so a replant
+    /// planted at the surface would come out of the soil at a right angle
+    /// before turning up.
     ///
-    /// The wrapper has to hold whichever way the shoots were placed — the
-    /// instanced style only changes what hangs below it, never that there is
-    /// something to hang.
+    /// The depth scales with the plant, so a half-grown replant is buried half
+    /// as deep — a fixed depth would swallow a small one whole.
     #[test]
-    fn a_vine_prototype_is_an_xform_over_its_wood_and_its_shoots() {
-        for style in STYLES {
-            let (stage, _) = testing::grown(VineyardParams::default(), style);
-            let path =
-                |suffix: &str| openusd::sdf::path(format!("{PROTOTYPE}/Var_0{suffix}")).unwrap();
+    fn a_replant_is_one_buried_shoot_and_no_wood() {
+        for established in [0.55f32, 0.8] {
+            let config = VineConfig {
+                established,
+                ..config()
+            };
+            let built = build_vine(&config, 5).expect("a replant builds");
 
+            assert!(built.wood.is_none(), "no permanent wood on a replant");
+            let [Some(bud)] = &built.buds[..] else {
+                panic!("a replant is exactly one shoot, got {:?}", built.buds);
+            };
+            assert_eq!(bud.name, REPLANT_SHOOT);
+            assert_eq!(bud.scale, established);
             assert!(
-                openusd::schemas::geom::Xform::get(&stage, path(""))
-                    .unwrap()
-                    .is_some(),
-                "{style:?}: the variation is an Xform, so it can have children"
+                (bud.position.z + shoot::PLANT_DEPTH as f32 * established).abs() < 1e-6,
+                "buried in proportion, got {}",
+                bud.position.z
+            );
+            // The shoot's own frame is scaled with it, so what stays above
+            // ground is the straight rise either way.
+            let bend = shoot::PLANT_DEPTH as f32 * established;
+            assert!(bend > 0.0 && bud.position.z < 0.0, "and it is underground");
+        }
+    }
+
+    /// A replant may face any way; a bud on a spur may not stray far off the
+    /// stub it grew from.
+    #[test]
+    fn a_replants_shoot_may_face_anywhere() {
+        let replant = build_vine(&VineConfig { established: 0.7, ..config() }, 5).unwrap();
+        assert_eq!(replant.buds[0].as_ref().unwrap().spread, PI as f32);
+        assert!(buds(&config()).iter().all(|b| b.spread == BUD_SPREAD as f32));
+    }
+
+    // ─── The layer ──────────────────────────────────────────────────
+
+    /// Every planted vine comes out carrying wood from the library, and every
+    /// wood prim names a part that is actually in it.
+    #[test]
+    fn every_mature_vine_draws_its_wood_from_the_library() {
+        let mut app = testing::grown(VineyardParams::default());
+
+        let vines = organs::<VineConfig>(app.world_mut());
+        assert!(vines.len() > 20, "the fixture planted vines");
+        assert!(
+            vines.iter().any(|v| !v.config.is_mature()),
+            "and some of them are replants"
+        );
+
+        for vine in &vines {
+            let entity = testing::prim(
+                app.world_mut(),
+                &vine.path.split('/').collect::<Vec<_>>(),
+            )
+            .expect("the plant is on the scene graph");
+            let children = named_children(app.world_mut(), entity);
+            let has_wood = children.iter().any(|(name, _)| name == WOOD);
+            assert_eq!(
+                has_wood,
+                vine.config.is_mature(),
+                "{}: wood iff mature, got {children:?}",
+                vine.path
             );
             assert!(
-                openusd::schemas::geom::Mesh::get(&stage, path(""))
-                    .unwrap()
-                    .is_none(),
-                "{style:?}: and not a Mesh, which would swallow them"
+                children.iter().any(|(name, _)| name != WOOD),
+                "{}: and shoots on it",
+                vine.path
             );
-            assert!(usd_bevy::authoring::prim_exists(
-                &stage,
-                &format!("{PROTOTYPE}/Var_0/Wood")
-            ));
+        }
 
-            match style {
-                place::Style::Referenced => assert!(
-                    usd_bevy::authoring::prim_exists(
-                        &stage,
-                        &format!("{PROTOTYPE}/Var_0/Shoot_00_0")
-                    ),
-                    "the first bud of the first spur pushed a shoot"
-                ),
-                place::Style::Instanced => {
-                    let shoots = openusd::schemas::geom::PointInstancer::get(
-                        &stage,
-                        path(&format!("/{SHOOTS}")),
-                    )
-                    .unwrap()
-                    .expect("the shoots are one instancer, nested inside the prototype");
-                    // Nested instancing is where a `prototypes` relationship
-                    // is most easily lost — see `place::Style`. If these came
-                    // back empty, every previewed vine would grow bare wood.
-                    let targets = shoots.prototypes_rel().targets().unwrap();
-                    assert!(!targets.is_empty());
-                    assert!(
-                        targets
-                            .iter()
-                            .all(|t| usd_bevy::authoring::prim_exists(&stage, t.as_str())),
-                        "the nested instancer names shoot prototypes that exist, got \
-                         {targets:?}"
-                    );
-                }
+        let mut query = app.world_mut().query::<(&Name, &UsdReference)>();
+        let drawn: Vec<String> = query
+            .iter(app.world())
+            .filter(|(name, _)| name.as_str() == WOOD)
+            .map(|(_, reference)| reference.0.clone())
+            .collect();
+        let library = app.world().resource::<Prototypes>();
+        for name in &drawn {
+            assert!(
+                library.get(name).is_some(),
+                "{name} names a part that is not in the library"
+            );
+        }
+    }
+
+    /// The budget is a cap, and the metric is what spends it: given vines that
+    /// really differ, the distinct shapes have to come out on separate meshes.
+    #[test]
+    fn the_budget_caps_the_meshes_and_the_metric_spends_it() {
+        let mature = config();
+        let stunted = config_with(|p| p.trunk_height = 0.35);
+        let replant = VineConfig {
+            established: 0.6,
+            ..mature
+        };
+
+        // One replant among forty mature vines, and it still earns a mesh —
+        // k-center minimizes the worst distance, not the average, so a rare
+        // shape cannot be averaged away.
+        let mut population = vec![mature; 40];
+        population.push(replant);
+        population.extend([stunted; 4]);
+
+        let book = farthest_first(&population, 3, 0.0, &VineMetric);
+        assert_eq!(book.len(), 3);
+        assert_eq!(book.assignment[0], book.assignment[39], "the mature ones share");
+        assert_ne!(book.assignment[0], book.assignment[40], "the replant does not");
+        assert_ne!(book.assignment[0], book.assignment[41], "nor the stunted ones");
+
+        // And a budget of one is honoured, however varied the population.
+        assert_eq!(farthest_first(&population, 1, 0.0, &VineMetric).len(), 1);
+    }
+
+    /// The wood is shared and the canopy is not: two vines off one mesh still
+    /// have to carry different shoots, or the repeat is obvious down a row.
+    #[test]
+    fn vines_sharing_a_mesh_still_carry_their_own_shoots() {
+        let mut app = testing::grown(VineyardParams::default());
+
+        // Two plants that drew the same wood, found by what they reference —
+        // which mesh a plant drew is the codebook's business, not a test's.
+        let mut by_part: std::collections::BTreeMap<String, Vec<String>> = default();
+        for vine in organs::<VineConfig>(app.world_mut()) {
+            if let Some(part) = wood_of(&mut app, &vine.path) {
+                by_part.entry(part).or_default().push(vine.path);
+            }
+        }
+        let shared = by_part
+            .values()
+            .find(|paths| paths.len() > 1)
+            .expect("some mesh is shared by more than one plant");
+
+        let (a, b) = (
+            shoots_of(&mut app, &shared[0]),
+            shoots_of(&mut app, &shared[shared.len() - 1]),
+        );
+        assert!(!a.is_empty(), "the plants carry shoots");
+        assert_eq!(a.len(), b.len(), "the same buds, from the same wood");
+        assert_ne!(a, b, "but placed differently on them");
+        for (a, b) in a.iter().zip(&b) {
+            assert!(
+                (a.translation - b.translation).length() < 1e-6,
+                "a bud is where the wood put it, on both plants"
+            );
+        }
+    }
+
+    /// A rebuild that spends less of the budget must not leave the meshes it
+    /// no longer uses in the library, exported and referenced by nothing.
+    ///
+    /// The counts are bounds rather than equalities: a replant builds no wood,
+    /// so how much of a budget reaches the library depends on how many of the
+    /// representatives came out mature.
+    #[test]
+    fn shrinking_the_budget_drops_the_stale_meshes() {
+        let meshes = |app: &App| {
+            app.world()
+                .resource::<Prototypes>()
+                .iter()
+                .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+                .count()
+        };
+
+        let mut app = testing::grown(VineyardParams {
+                vine: VineParams {
+                    variations: 6,
+                    ..params()
+                },
+                ..default()
+            });
+        let before = meshes(&app);
+        assert!(
+            (2..=6).contains(&before),
+            "the budget bought several meshes and no more than it allows, got {before}"
+        );
+
+        app.world_mut().resource_mut::<VineParams>().variations = 1;
+        app.update();
+        assert!(
+            meshes(&app) < before,
+            "the ones it stopped using are gone, still {before}"
+        );
+    }
+
+    /// Two meshes the same brown would make a shared wood read as one plant
+    /// stamped out, which is the whole thing the budget is spent avoiding.
+    #[test]
+    fn every_vine_mesh_gets_its_own_shade() {
+        let app = testing::grown(VineyardParams::default());
+        let shades: Vec<[f32; 3]> = app
+            .world()
+            .resource::<Prototypes>()
+            .iter()
+            .filter(|(name, _)| name.starts_with(&format!("{PART}_")))
+            .map(|(_, part)| part.color)
+            .collect();
+
+        assert!(shades.len() > 1, "there is more than one to tell apart");
+        for (i, a) in shades.iter().enumerate() {
+            for b in shades.iter().skip(i + 1) {
+                assert_ne!(a, b, "two vine meshes came out the same shade");
             }
         }
     }
 
-    /// A young vine is a shoot in the ground and nothing else, and the burial
-    /// is the whole of the shaping: a shoot leaves its bud sideways, so a
-    /// replant planted at the surface would come out of the soil at a right
-    /// angle before turning up.
-    ///
-    /// Checked on the geometry rather than on the translate alone — the
-    /// translate is only right if it is deeper than the bend, and the thing
-    /// worth pinning is that nothing above ground is bent. At the surface the
-    /// tube is a stem's width across; unburied it would be a bend's, four
-    /// times that.
-    #[test]
-    fn a_young_vine_buries_the_bend_at_its_base() {
-        let (stage, _) = testing::grown(VineyardParams::default(), place::Style::Referenced);
-        let variation = format!("{YOUNG_PROTOTYPE}/Var_0");
-
-        let shoot = testing::instances(&stage, &variation)
+    /// The part a plant's `Wood` prim references, or `None` for a replant.
+    fn wood_of(app: &mut App, path: &str) -> Option<String> {
+        let entity = testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>())?;
+        let wood = named_children(app.world_mut(), entity)
             .into_iter()
-            .find(|i| i.prototype.starts_with(shoot::PROTOTYPE))
-            .expect("a young vine is a shoot, placed under its own variation");
-        assert!(
-            (shoot.position().z + shoot::PLANT_DEPTH as f32).abs() < 1e-6,
-            "sunk to the depth the shoot's own frame asks for, got {:?}",
-            shoot.position()
-        );
-
-        // In the prototype's frame, where the origin is where the soil is.
-        let stem = openusd::schemas::geom::Mesh::get(
-            &stage,
-            openusd::sdf::path(format!("{variation}/{YOUNG_SHOOT}/Stem")).unwrap(),
-        )
-        .unwrap()
-        .expect("with a stem composing in through the reference");
-        let Some(openusd::sdf::Value::Vec3fVec(points)) = stem.points_attr().get().unwrap() else {
-            panic!("a stem without points");
-        };
-        let points: Vec<Vec3> = points
-            .iter()
-            .map(|p| shoot.transform.transform_point3(Vec3::new(p.x, p.y, p.z)))
-            .collect();
-
-        assert!(
-            points.iter().any(|p| p.z < -(shoot::PLANT_DEPTH as f32)),
-            "the bud itself is underground"
-        );
-        let surface: Vec<Vec3> = points
-            .iter()
-            .copied()
-            .filter(|p| (0.0..0.02).contains(&p.z))
-            .collect();
-        assert!(!surface.is_empty(), "and the shoot crosses the surface");
-        let spread = surface
-            .iter()
-            .flat_map(|a| surface.iter().map(|b| a.truncate().distance(b.truncate())))
-            .fold(0.0f32, f32::max);
-        assert!(
-            spread < 0.03,
-            "the tube leaves the soil vertical: {spread} m across at the surface"
-        );
+            .find(|(name, _)| name == WOOD)?
+            .1;
+        Some(app.world().entity(wood).get::<UsdReference>()?.0.clone())
     }
 
-    /// One replant per shoot on offer — the young library's whole variety is
-    /// the shoot library's, since that is all a young vine is made of.
-    #[test]
-    fn the_young_library_holds_one_replant_per_shoot_variation() {
-        for style in STYLES {
-            let (stage, _) = testing::grown(
-                VineyardParams {
-                    shoot: shoot::ShootParams {
-                        variations: 3,
-                        ..default()
-                    },
-                    ..default()
-                },
-                style,
-            );
-            assert_eq!(prototype_count(&stage, YOUNG_PROTOTYPE), 3, "{style:?}");
-
-            let variation = format!("{YOUNG_PROTOTYPE}/Var_0");
-            assert!(
-                openusd::schemas::geom::Xform::get(&stage, openusd::sdf::path(&variation).unwrap())
-                    .unwrap()
-                    .is_some(),
-                "{style:?}: a replant is an Xform, so it can hold its shoot"
-            );
-            // Its own copy rather than the mature library's: a binding whose
-            // target sits outside the subtree being referenced is dropped, and
-            // a young vine is referenced onto the ground on its own.
-            assert!(
-                usd_bevy::authoring::prim_exists(&stage, &format!("{variation}/{LOOKS}/Foliage")),
-                "{style:?}: and carries the material it shades from"
-            );
-        }
-    }
-
-    #[test]
-    fn authors_one_prototype_per_variation() {
-        let stage = crate::generate::generate_stage(&VineyardParams {
-            vine: VineParams {
-                variations: 3,
-                ..params()
-            },
-            ..default()
-        })
-        .unwrap();
-
-        assert_eq!(
-            prototype_count(&stage, PROTOTYPE),
-            3,
-            "three variations authored, and nothing past them"
-        );
-    }
-
-    /// Re-authoring must not leave prototypes from a larger previous count
-    /// behind — the element owns its subtree and clears it first.
-    #[test]
-    fn shrinking_the_count_drops_stale_prototypes() {
-        let mut authoring = Authoring::new("vine.usda", author_prototypes);
-        authoring
-            .insert(ParcelParams::default())
-            .insert(place::Style::default())
-            .insert(VineParams {
-                variations: 4,
-                ..params()
-            })
-            .run();
-        assert!(authoring.has(&format!("{PROTOTYPE}/Var_3")));
-
-        authoring
-            .insert(VineParams {
-                variations: 2,
-                ..params()
-            })
-            .run();
-        assert!(
-            !authoring.has(&format!("{PROTOTYPE}/Var_3")),
-            "stale prototype removed on re-author"
-        );
+    /// Where a plant's shoots ended up, in the order they were hung.
+    fn shoots_of(app: &mut App, path: &str) -> Vec<Transform> {
+        let entity =
+            testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>()).unwrap();
+        named_children(app.world_mut(), entity)
+            .into_iter()
+            .filter(|(name, _)| name != WOOD)
+            .map(|(_, child)| *app.world().entity(child).get::<Transform>().unwrap())
+            .collect()
     }
 }

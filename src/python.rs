@@ -10,6 +10,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
 use crate::elements::VineyardParams;
+use crate::elements::SceneParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -17,8 +18,7 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
-use crate::generate::generate_stage;
-use usd_bevy::authoring::save_stage_as;
+use crate::generate::generate_scene;
 
 /// Formats with `{:#}` so `anyhow`'s full context chain reaches the Python
 /// traceback, not just the outermost error message.
@@ -99,7 +99,6 @@ impl VineParams {
     #[new]
     #[pyo3(signature = (
         variations=4,
-        seed=0,
         trunk_height=0.9,
         trunk_radius=0.035,
         trunk_wobble=0.02,
@@ -116,7 +115,6 @@ impl VineParams {
     #[allow(clippy::too_many_arguments)]
     fn py_new(
         variations: u32,
-        seed: u64,
         trunk_height: f32,
         trunk_radius: f32,
         trunk_wobble: f32,
@@ -132,7 +130,6 @@ impl VineParams {
     ) -> Self {
         Self {
             variations,
-            seed,
             trunk_height,
             trunk_radius,
             trunk_wobble,
@@ -154,12 +151,24 @@ impl VineParams {
 }
 
 #[pymethods]
+impl SceneParams {
+    #[new]
+    #[pyo3(signature = (seed=0))]
+    fn py_new(seed: u64) -> Self {
+        Self { seed }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
 impl PlantingParams {
     #[new]
-    #[pyo3(signature = (seed=0, miss_rate=0.03, young_rate=0.08, young_scale=0.55))]
-    fn py_new(seed: u64, miss_rate: f32, young_rate: f32, young_scale: f32) -> Self {
+    #[pyo3(signature = (miss_rate=0.03, young_rate=0.08, young_scale=0.55))]
+    fn py_new(miss_rate: f32, young_rate: f32, young_scale: f32) -> Self {
         Self {
-            seed,
             miss_rate,
             young_rate,
             young_scale,
@@ -177,7 +186,6 @@ impl ShootParams {
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         variations=4,
-        seed=0,
         length=0.75,
         radius=0.006,
         lean=0.06,
@@ -188,7 +196,6 @@ impl ShootParams {
     ))]
     fn py_new(
         variations: u32,
-        seed: u64,
         length: f32,
         radius: f32,
         lean: f32,
@@ -199,7 +206,6 @@ impl ShootParams {
     ) -> Self {
         Self {
             variations,
-            seed,
             length,
             radius,
             lean,
@@ -218,9 +224,9 @@ impl ShootParams {
 #[pymethods]
 impl LeafParams {
     #[new]
-    #[pyo3(signature = (detail=120))]
-    fn py_new(detail: u32) -> Self {
-        Self { detail }
+    #[pyo3(signature = (variations=5, detail=120))]
+    fn py_new(variations: u32, detail: u32) -> Self {
+        Self { variations, detail }
     }
 
     fn __repr__(&self) -> String {
@@ -236,6 +242,7 @@ impl LeafParams {
 /// throwaway copy while the scene silently kept the old value.
 #[pyclass(name = "VineyardParams", get_all, set_all)]
 pub struct PyVineyardParams {
+    pub scene: Py<SceneParams>,
     pub terrain: Py<TerrainParams>,
     pub parcel: Py<ParcelParams>,
     pub planting: Py<PlantingParams>,
@@ -249,11 +256,13 @@ pub struct PyVineyardParams {
 impl PyVineyardParams {
     #[new]
     #[pyo3(signature = (
-        terrain=None, parcel=None, planting=None, pole=None, vine=None, shoot=None, leaf=None
+        scene=None, terrain=None, parcel=None, planting=None, pole=None, vine=None,
+        shoot=None, leaf=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
         py: Python<'_>,
+        scene: Option<Py<SceneParams>>,
         terrain: Option<Py<TerrainParams>>,
         parcel: Option<Py<ParcelParams>>,
         planting: Option<Py<PlantingParams>>,
@@ -263,6 +272,10 @@ impl PyVineyardParams {
         leaf: Option<Py<LeafParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
+            scene: match scene {
+                Some(v) => v,
+                None => Py::new(py, SceneParams::default())?,
+            },
             terrain: match terrain {
                 Some(v) => v,
                 None => Py::new(py, TerrainParams::default())?,
@@ -298,35 +311,39 @@ impl PyVineyardParams {
         format!("{:?}", self.snapshot(py))
     }
 
-    /// Generates the scene and returns it as `usda` text.
+    /// Generates the scene and returns it as a JSON document.
     ///
-    /// Releases the GIL for the duration of the Rust/Bevy work via
-    /// `py.detach`: the params are copied out first, so nothing inside
-    /// touches Python objects, and other Python threads (e.g. in a host
-    /// application like Isaac Sim) keep making progress.
-    fn generate_usda(&self, py: Python<'_>) -> PyResult<String> {
+    /// The whole contract with the USD builder — see `src/scene/doc.rs`. Public
+    /// so a caller can cache the bytes, diff two scenes, or build the stage on
+    /// another machine.
+    ///
+    /// Releases the GIL for the Rust/Bevy work via `py.detach`: the params are
+    /// copied out first, so nothing inside touches Python objects and other
+    /// threads in a host application like Isaac Sim keep making progress.
+    fn generate_scene_json(&self, py: Python<'_>) -> PyResult<String> {
         let params = self.snapshot(py);
-        py.detach(|| {
-            let stage = generate_stage(&params)?;
-            stage.root_layer().export_to_string()
+        py.detach(|| -> anyhow::Result<String> {
+            Ok(serde_json::to_string(&generate_scene(&params)?)?)
         })
         .map_err(to_py_err)
     }
 
-    /// Generates the scene and writes it directly to `path` (format chosen
-    /// by extension — `.usda`, `.usdc`, `.usd`, `.usdz`).
+    /// Generates the scene and writes it to `path` as USD.
     ///
-    /// The binary formats depend on the `openusd` `[patch]` in `Cargo.toml`;
-    /// without it they are written with `TfTokenVector` fields typed as
-    /// `VtArray<TfToken>`, which Pixar USD rejects on open ("Invalid children
-    /// found in primChildren field"). `.usda` is unaffected either way.
+    /// The extension decides the format: `.usd`/`.usdc` for the binary crate
+    /// form (about a third the bytes and roughly 4x faster for USD to parse),
+    /// `.usda` for text. The file must not already exist.
+    ///
+    /// Rust owns the scene and Python owns USD, so this hands the document to
+    /// `vinerylab.usd.build_usd` — the only place in the project that knows
+    /// what USD is. That import needs `usd-core`, which is a dependency of this
+    /// package.
     fn write_usd(&self, py: Python<'_>, path: &str) -> PyResult<()> {
-        let params = self.snapshot(py);
-        py.detach(|| {
-            let stage = generate_stage(&params)?;
-            save_stage_as(&stage, path)
-        })
-        .map_err(to_py_err)
+        let document = self.generate_scene_json(py)?;
+        let doc = py.import("json")?.call_method1("loads", (document,))?;
+        py.import("vinerylab.usd")?
+            .call_method1("build_usd", (doc, path))?;
+        Ok(())
     }
 }
 
@@ -335,6 +352,7 @@ impl PyVineyardParams {
     /// aggregate, so the generation call needs no GIL.
     fn snapshot(&self, py: Python<'_>) -> VineyardParams {
         VineyardParams {
+            scene: (*self.scene.borrow(py)).clone(),
             terrain: (*self.terrain.borrow(py)).clone(),
             parcel: (*self.parcel.borrow(py)).clone(),
             planting: (*self.planting.borrow(py)).clone(),
@@ -356,6 +374,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // authored by a different generator are a different scene.
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyVineyardParams>()?;
+    m.add_class::<SceneParams>()?;
     m.add_class::<TerrainParams>()?;
     m.add_class::<ParcelParams>()?;
     m.add_class::<PlantingParams>()?;

@@ -10,9 +10,11 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - GUI based vineyard configurator
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
+ - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
 
 ## Upcoming features
  - Cover crops and weeds
+ - Optinally use PointInstancer to spawn organs without a unique prim path
  - Flexible shoot simulation with newton-physics
  - Simulate human workers and other safety critical scenarios
 
@@ -30,11 +32,12 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - Paste it into your Isaac Lab environment config and spawn it:
 
 ```python
-from vinerylab.isaaclab import VineyardCfg, ParcelCfg, VineCfg
+from vinerylab.isaaclab import VineyardCfg, ParcelCfg, SceneCfg, VineCfg
 
 VINEYARD_CFG = VineyardCfg(
+    scene=SceneCfg(seed=42),
     parcel=ParcelCfg(row_spacing=2.8, vine_spacing=1.05),
-    vine=VineCfg(arms=1, seed=42),
+    vine=VineCfg(arms=1),
 )
 
 # a plain script, or a direct env's `_setup_scene()`

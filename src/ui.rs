@@ -24,6 +24,7 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use crate::elements::VineyardParams;
 
 use crate::elements::leaf::ui as leaf_ui;
+use crate::elements::ui as scene_ui;
 use crate::elements::pole::ui as pole_ui;
 use crate::elements::shoot::ui as shoot_ui;
 use crate::elements::terrain::ui as terrain_ui;
@@ -74,6 +75,7 @@ fn params_panel() -> impl Scene {
                     }
                     ScrollArea
                     Children [
+                        scene_ui(),
                         terrain_ui(),
                         parcel_ui(),
                         pole_ui(),
