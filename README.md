@@ -24,6 +24,19 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - RTK-GNSS data generation
  - GeoJSON and TASKDATA.xml export
 
+## Quick commands to demo
+
+Run the editor
+```bash
+cargo run --release
+```
+
+Generate and run in Isaac Lab
+```bash
+cd examples/isaaclab_demo/
+uv run main.py
+```
+
 ## Workflow
  - Start the viewer `cargo run --release`.
  - Edit the scene parameters in the UI.
