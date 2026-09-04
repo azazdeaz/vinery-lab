@@ -158,6 +158,7 @@ meshes.
 ```text
 /Vineyard/Planting/Row_00/Vine_047     Xform, unique
   /Wood                                 -> parts/Vine_3, instanceable
+  /Collision                            Capsule, the trunk's physics proxy
   /Shoot_00_0                           Xform, unique
     /Stem                               -> parts/Shoot_1, instanceable
     /Leaf_00                            -> parts/Leaf_2, instanceable
@@ -165,8 +166,8 @@ meshes.
 
 An instanceable prim's descendants are not addressable, and a geometry prim has
 none — so the rule is safe and mechanical. An organ with nothing hanging off it
-(a post, a leaf) *is* the geometry prim rather than an `Xform` over one, which
-at six figures of leaves is half the prims in the scene.
+(a leaf) *is* the geometry prim rather than an `Xform` over one, which at six
+figures of leaves is half the prims in the scene.
 
 ### Quantization
 
@@ -307,6 +308,15 @@ its *descendants* through a prototype while the instance prim's own attributes
 stay on the instance, so referencing a bare mesh and marking it instanceable
 yields an empty prototype and a full copy of the points on every instance:
 valid, drawn correctly, and with none of the sharing that was the point.
+
+Colliders ride the same split. The document says *what* collides — a part that
+is its own collider (the ground, at `physics:approximation = "none"`) and
+`Capsule` prims for the posts and trunks — and `build.py` applies the schemas.
+Nothing is a rigid body, so every collider is static, which is what makes an
+exact triangle mesh legal for the ground. A part carrying a collider is
+referenced non-instanceable: a collider inside a prototype is reachable only
+through an instance proxy, and the ground has one instance, so it gives up
+nothing. Everything else stays instanced.
 
 ### Python
 

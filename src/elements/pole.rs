@@ -38,7 +38,7 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use crate::quantize::{Metric, farthest_first};
-use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
+use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 
 use super::Grow;
 use super::util::parcel::ParcelParams;
@@ -47,6 +47,13 @@ use super::util::{color, material};
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Pole";
+
+/// The prim a post's geometry takes, below the post itself.
+///
+/// A child rather than the post prim, because the post also carries a
+/// collision proxy and geometry prims carry no children — see
+/// [`scene`](crate::scene).
+pub const POST: &str = "Post";
 
 /// How many distinct post meshes the scene may hold.
 ///
@@ -156,8 +163,10 @@ pub fn plugin(app: &mut App) {
 
 /// Builds one mesh per distinct post and gives it to every post that drew it.
 ///
-/// A post has no children, so it carries its geometry directly rather than
-/// through a child prim.
+/// Every post gets two prims: the shared mesh, and a capsule standing in for
+/// it in physics. Both are sized from the *representative* the post drew, so
+/// the proxy matches the geometry beside it rather than the shape this post
+/// asked for and did not get.
 pub fn build(
     mut commands: Commands,
     mut library: Library,
@@ -182,7 +191,16 @@ pub fn build(
         .collect();
 
     for ((_, entity, _), drew) in posts.iter().zip(&book.assignment) {
-        commands.entity(*entity).insert(geometry[*drew as usize].clone());
+        let drew = *drew as usize;
+        let built = &book.representatives[drew];
+        let mut post = commands.entity(*entity);
+        // The layer owns everything below a post, so a rebuild replaces what
+        // the last one hung there rather than doubling it.
+        post.despawn_children();
+        post.with_child((Name::new(POST), geometry[drew].clone()));
+        // A post stands on the origin, so its proxy spans the same 0..height
+        // the mesh does.
+        post.with_child((Name::new(COLLISION), capsule(built.radius, 0.0, built.height)));
     }
 }
 
@@ -225,8 +243,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::testing::{self, bounds, organs};
-    use crate::scene::Prototypes;
+    use crate::elements::util::testing::{self, bounds, named_children, organs};
+    use crate::scene::{Collider, Prototypes};
 
     fn config(params: PoleParams, trellis_height: f32) -> PoleConfig {
         PoleConfig::new(
@@ -321,6 +339,31 @@ mod tests {
         assert_eq!(names.len(), 2);
         assert_eq!(drew[0], drew[1], "the two matching posts share a mesh");
         assert_ne!(drew[0], drew[2], "the thick one gets its own");
+    }
+
+    /// A post is two prims: the mesh every post shares, and the capsule a robot
+    /// bumps into. The proxy stands on the same origin the mesh does and
+    /// reaches the same top — a collider that missed either would leave a post
+    /// a robot walks through, or trips on nothing beside.
+    #[test]
+    fn a_post_is_a_mesh_and_a_proxy_that_covers_it() {
+        let mut app = testing::grown(VineyardParams::default());
+        let post = testing::prim(app.world_mut(), &["Planting", "Row_000", "Pole_000"])
+            .expect("the first post of the first row");
+        let built = *app.world().entity(post).get::<PoleConfig>().unwrap();
+
+        let children = named_children(app.world_mut(), post);
+        let names: Vec<&str> = children.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, [POST, COLLISION]);
+
+        let at = app.world().entity(children[1].1);
+        let shape = at.get::<Collider>().unwrap().0;
+        let z = at.get::<Transform>().unwrap().translation.z;
+        let reach = shape.height / 2.0 + shape.radius;
+
+        assert_eq!(shape.radius, built.radius);
+        assert!((z - reach).abs() < 1e-6, "stands on the origin, like the mesh");
+        assert!((z + reach - built.height).abs() < 1e-6, "and reaches the wire");
     }
 
     /// End to end through the schedule: every post the parcel planted comes out

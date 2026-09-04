@@ -8,10 +8,10 @@
 use anyhow::{anyhow, bail};
 use bevy::mesh::{PrimitiveTopology, VertexAttributeValues};
 use bevy::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use super::doc::{FORMAT, Node, PartEntry, SceneDoc, Xform};
-use super::{Part, Prototypes, UsdReference, UsdRoot, UsdType};
+use super::doc::{Capsule, FORMAT, Node, PartEntry, SceneDoc, Xform};
+use super::{Collider, Part, Prototypes, UsdReference, UsdRoot, UsdType};
 
 /// The scene's coordinate convention. Authored natively rather than corrected
 /// downstream: `upAxis` and `metersPerUnit` are root-layer-only stage metadata
@@ -28,9 +28,14 @@ const METERS_PER_UNIT: f64 = 1.0;
 /// the viewer's save key.
 pub fn scene_doc(world: &mut World) -> anyhow::Result<SceneDoc> {
     let parts = part_entries(world)?;
+    let solid: HashSet<&str> = parts
+        .iter()
+        .filter(|part| part.collision.is_some())
+        .map(|part| part.name.as_str())
+        .collect();
     let root = root_entity(world)?;
     let prims = collect_prims(world);
-    let root_node = build_node(root, &prims)?
+    let root_node = build_node(root, &prims, &solid)?
         .ok_or_else(|| anyhow!("the `UsdRoot` entity has no `Name`, so it has no prim path"))?;
 
     Ok(SceneDoc {
@@ -131,6 +136,7 @@ fn part_entry(name: &str, mesh: &Mesh, part: &Part) -> anyhow::Result<PartEntry>
         uvs,
         display_color: part.color,
         double_sided: part.double_sided,
+        collision: part.collision.map(str::to_string),
     })
 }
 
@@ -142,6 +148,7 @@ struct Prim {
     type_name: String,
     xform: Option<Xform>,
     reference: Option<String>,
+    collider: Option<Capsule>,
     children: Vec<Entity>,
 }
 
@@ -152,17 +159,19 @@ fn collect_prims(world: &mut World) -> HashMap<Entity, Prim> {
         Option<&Transform>,
         Option<&UsdType>,
         Option<&UsdReference>,
+        Option<&Collider>,
         Option<&Children>,
     )>();
 
     query
         .iter(world)
-        .map(|(entity, name, transform, prim_type, reference, children)| {
+        .map(|(entity, name, transform, prim_type, reference, collider, children)| {
             let prim = Prim {
                 name: name.as_str().to_string(),
                 type_name: prim_type.map_or("Xform", |t| t.0).to_string(),
                 xform: transform.and_then(xform_of),
                 reference: reference.map(|r| r.0.clone()),
+                collider: collider.map(|c| c.0),
                 children: children.map(|c| c.to_vec()).unwrap_or_default(),
             };
             (entity, prim)
@@ -184,7 +193,14 @@ fn xform_of(transform: &Transform) -> Option<Xform> {
     })
 }
 
-fn build_node(entity: Entity, prims: &HashMap<Entity, Prim>) -> anyhow::Result<Option<Node>> {
+/// One entity's prim and everything below it. `solid` names the parts that are
+/// their own collider, which is what decides whether a reference to one may be
+/// instanced.
+fn build_node(
+    entity: Entity,
+    prims: &HashMap<Entity, Prim>,
+    solid: &HashSet<&str>,
+) -> anyhow::Result<Option<Node>> {
     let Some(prim) = prims.get(&entity) else {
         // Unnamed: no prim path, so neither it nor its subtree is exported.
         return Ok(None);
@@ -193,7 +209,7 @@ fn build_node(entity: Entity, prims: &HashMap<Entity, Prim>) -> anyhow::Result<O
     let children: Vec<Node> = prim
         .children
         .iter()
-        .filter_map(|child| build_node(*child, prims).transpose())
+        .filter_map(|child| build_node(*child, prims, solid).transpose())
         .collect::<anyhow::Result<_>>()?;
 
     // The invariant `instanceable` rests on. An instanceable prim's
@@ -214,8 +230,16 @@ fn build_node(entity: Entity, prims: &HashMap<Entity, Prim>) -> anyhow::Result<O
         name: prim.name.clone(),
         type_name: prim.type_name.clone(),
         xform: prim.xform,
-        instanceable: prim.reference.is_some(),
+        // A part that is its own collider is referenced non-instanceable: the
+        // collision schema lives inside the part, and inside a prototype it
+        // would be reachable only through an instance proxy. It costs nothing
+        // — the ground is the only such part, and it has one instance.
+        instanceable: prim
+            .reference
+            .as_deref()
+            .is_some_and(|name| !solid.contains(name)),
         reference: prim.reference.clone(),
+        collider: prim.collider,
         children,
     }))
 }
@@ -223,6 +247,7 @@ fn build_node(entity: Entity, prims: &HashMap<Entity, Prim>) -> anyhow::Result<O
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scene::capsule;
     use bevy::mesh::Indices;
 
     /// A world with the resources the exporter reads and a single named root.
@@ -257,6 +282,7 @@ mod tests {
                 roughness: 0.9,
                 ior: 1.5,
                 double_sided: true,
+                collision: None,
             },
         )
     }
@@ -319,6 +345,35 @@ mod tests {
         assert_eq!(doc.parts[0].points.len(), 3);
         assert_eq!(doc.parts[0].indices, [0, 1, 2]);
         assert!(doc.parts[0].double_sided);
+    }
+
+    /// A collision proxy is a prim in its own right — no geometry, no
+    /// reference, and nothing to instance. It is the shape a physics engine
+    /// reads instead of the mesh beside it.
+    #[test]
+    fn a_collider_becomes_a_capsule_prim() {
+        let mut world = world();
+        let root = root(&mut world);
+        world.spawn((Name::new("Collision"), capsule(0.04, 0.0, 1.8), ChildOf(root)));
+        // Shorter than its own caps: a sphere, rather than a capsule with a
+        // negative side, which USD would take without a word.
+        world.spawn((Name::new("Stub"), capsule(0.5, 0.0, 0.2), ChildOf(root)));
+
+        let doc = scene_doc(&mut world).unwrap();
+        let node = &doc.root.children[0];
+
+        assert_eq!(node.type_name, "Capsule");
+        assert_eq!(
+            node.collider,
+            Some(Capsule {
+                radius: 0.04,
+                height: 1.8 - 2.0 * 0.04
+            })
+        );
+        assert_eq!(node.xform.unwrap().translate, [0.0, 0.0, 0.9]);
+        assert!(node.reference.is_none() && !node.instanceable);
+
+        assert_eq!(doc.root.children[1].collider.unwrap().height, 0.0);
     }
 
     /// The invariant `instanceable` rests on: USD would keep the prim and
@@ -391,8 +446,9 @@ mod tests {
                 mesh: Handle::default(),
                 color: [0.0; 3],
                 roughness: 0.5,
-            ior: 1.5,
+                ior: 1.5,
                 double_sided: false,
+                collision: None,
             },
         );
 

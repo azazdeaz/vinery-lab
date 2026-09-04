@@ -28,6 +28,7 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use curvo::prelude::{NurbsSurface, SurfaceTessellation3D};
 use nalgebra::Point4;
+use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
 
 use super::Grow;
@@ -147,6 +148,11 @@ pub(crate) fn build(
         // tell apart.
         material::GROUND.surface(color::srgb(color::GROUND)),
     );
+
+    // The ground is the one part whose mesh is also what a robot stands on, so
+    // it collides as itself rather than through a proxy: exact triangles,
+    // which is legal because nothing in the scene is a rigid body.
+    library.collide(&geometry, TRIANGLE_MESH);
 
     commands.spawn((Terrain, Name::new(TERRAIN), geometry, ChildOf(root.0)));
 
@@ -601,7 +607,6 @@ mod tests {
             .reference
             .as_deref()
             .expect("its geometry comes from the mesh library");
-        assert!(terrain.instanceable);
 
         let part = doc
             .parts
@@ -613,6 +618,11 @@ mod tests {
             part.normals.is_some(),
             "and normals, which the USD export used to leave to a consumer's guess"
         );
+        // Exact triangles: the ground is what a robot stands on, and its mesh
+        // is the shape to stand on. Instancing goes in exchange, so that the
+        // collider lands on a real prim rather than inside a prototype.
+        assert_eq!(part.collision.as_deref(), Some(TRIANGLE_MESH));
+        assert!(!terrain.instanceable);
     }
 
     /// A rebuild has to *replace* what the last one made. Left alone, a slider

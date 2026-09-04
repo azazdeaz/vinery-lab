@@ -12,6 +12,7 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
+ - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules
 
 ## Upcoming features
  - Cover crops and weeds
@@ -75,6 +76,10 @@ parameters, so only the first run pays for it — and an env regex prim path
 `VineyardCfg` is a `FileCfg`, so `scale`, `semantic_tags`, `rigid_props`,
 `collision_props` and visual materials all work on it as they would on a
 `UsdFileCfg`. See `examples/isaaclab_demo/main.py`.
+
+> The scene arrives solid: the ground collides as its own mesh, and every post
+and trunk carries a capsule. Nothing else does — a robot walks through the
+canopy — and nothing is a rigid body, so a vineyard stands where it was put.
 
 > Cached scenes live in `$VINERYLAB_CACHE_DIR`, else
 `$XDG_CACHE_HOME/vinerylab/scenes`, else `~/.cache/vinerylab/scenes`; set

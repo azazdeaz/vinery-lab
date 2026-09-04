@@ -30,11 +30,9 @@ import numpy as np
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
-from isaaclab.sim.utils.stage import get_current_stage
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from vinerylab.isaaclab import ParcelCfg, TerrainCfg, VineyardCfg
-from vinerylab.usd import GEOM
 
 from driver import DECIMATION, SIM_DT, Driver
 from markers import DebugMarkers
@@ -65,18 +63,9 @@ def design_scene() -> Articulation:
     )
     cfg.func("/World/Light", cfg)
 
+    # The generated scene brings its own colliders: the ground as its own mesh,
+    # the posts and trunks as capsules.
     VINEYARD_CFG.func(VINEYARD_PATH, VINEYARD_CFG)
-    # The generated scene carries no physics schemas at all, so the ground has
-    # to be made solid here or the robot drops through it. Every part is
-    # spawned instanceable, and nothing may be authored inside an instance, so
-    # the terrain gives up its instancing first -- there is one ground, so it
-    # was sharing its prototype with nobody.
-    # ponytail: terrain only -- do the same for the posts and trunks when the
-    # robot needs something to bump into.
-    get_current_stage().GetPrimAtPath(f"{VINEYARD_PATH}/Terrain").SetInstanceable(False)
-    sim_utils.define_collision_properties(
-        f"{VINEYARD_PATH}/Terrain/{GEOM}", sim_utils.CollisionPropertiesCfg(collision_enabled=True)
-    )
 
     return Articulation(ANYMAL_C_CFG.replace(prim_path=ROBOT_PATH))
 
