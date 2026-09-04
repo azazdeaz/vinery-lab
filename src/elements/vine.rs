@@ -66,7 +66,9 @@ use nalgebra::{Point3, Vector3};
 
 use super::shoot;
 use crate::quantize::{Metric, farthest_first};
-use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
+use crate::scene::{
+    COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
+};
 
 use super::util::parcel::ParcelParams;
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
@@ -857,6 +859,27 @@ fn build_vine(config: &VineConfig, seed: u64) -> anyhow::Result<VineBuild> {
     })
 }
 
+/// The trunk's collision proxy: a capsule up the trunk's nominal axis, from
+/// its buried base to the head. `None` for a replant, which has no wood.
+///
+/// Only the trunk. The cordons and spurs are what a vine's mesh mostly is, and
+/// nothing walking a vineyard has any business inside the canopy — while the
+/// trunk is the one part of a plant that stops a robot.
+///
+/// Sized at the graft union, the widest the trunk is authored anywhere. A
+/// straight capsule cannot follow [`VineConfig::trunk_wobble`], so proxy and
+/// wood part company by up to that much around mid-height — which is what a
+/// proxy is for.
+fn trunk_collider(config: &VineConfig) -> Option<impl Bundle + Copy> {
+    config.is_mature().then(|| {
+        capsule(
+            trunk_radius_at(config, GRAFT_HEIGHT) as f32,
+            TRUNK_BASE_Z as f32,
+            config.trunk_height,
+        )
+    })
+}
+
 /// Builds one mesh per distinct vine, and hangs a shoot on every bud.
 ///
 /// The wood is shared: each plant gets a `Wood` child referencing the mesh its
@@ -913,6 +936,11 @@ pub(crate) fn build(
 
         if let Some(geometry) = geometry {
             plant.with_child((Name::new(WOOD), geometry.clone()));
+        }
+        // From the representative, like the wood beside it: a proxy built from
+        // this plant's own config would describe a trunk it did not get.
+        if let Some(collider) = trunk_collider(&book.representatives[*drew as usize]) {
+            plant.with_child((Name::new(COLLISION), collider));
         }
 
         let mut rng = Rng::new(scene.seed ^ SHOOT_STREAM ^ salt(order.0));
@@ -1100,7 +1128,7 @@ mod tests {
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::util::mesh::MeshData;
-    use crate::scene::{Prototypes, UsdReference};
+    use crate::scene::{Collider, Prototypes, UsdReference};
 
     fn params() -> VineParams {
         VineParams::default()
@@ -1428,6 +1456,51 @@ mod tests {
         assert!(buds(&config()).iter().all(|b| b.spread == BUD_SPREAD as f32));
     }
 
+    /// The trunk's proxy has to cover the trunk it stands in for: short of the
+    /// head and a robot walks through the top of a vine, above the base and the
+    /// collider floats. It also has to be wide enough for the whole trunk, the
+    /// graft union included.
+    #[test]
+    fn a_trunk_collider_covers_the_trunk_and_a_replant_has_none() {
+        let mut world = World::new();
+        for config in [
+            config(),
+            config_with(|p| p.trunk_height = 0.4),
+            config_with(|p| p.trunk_radius = 0.1),
+            config_with(|p| p.trunk_wobble = 0.0),
+        ] {
+            let proxy = trunk_collider(&config).expect("a mature vine has a trunk");
+            let at = world.spawn(proxy).id();
+            let at = world.entity(at);
+            let shape = at.get::<Collider>().unwrap().0;
+            let z = at.get::<Transform>().unwrap().translation.z;
+            let reach = shape.height / 2.0 + shape.radius;
+
+            assert!(
+                (z - reach - TRUNK_BASE_Z as f32).abs() < 1e-6,
+                "{config:?} floats above its buried base"
+            );
+            assert!(
+                (z + reach - config.trunk_height).abs() < 1e-6,
+                "{config:?} stops short of its head"
+            );
+            for z in [TRUNK_BASE_Z, 0.0, GRAFT_HEIGHT, config.trunk_height as f64] {
+                assert!(
+                    shape.radius >= trunk_radius_at(&config, z) as f32,
+                    "{config:?} is thinner than its own trunk at {z} m"
+                );
+            }
+        }
+
+        // A replant is one green shoot out of bare ground — no wood, so
+        // nothing standing there for a robot to bump into.
+        let replant = VineConfig {
+            established: 0.6,
+            ..config()
+        };
+        assert!(trunk_collider(&replant).is_none());
+    }
+
     // ─── The layer ──────────────────────────────────────────────────
 
     /// Every planted vine comes out carrying wood from the library, and every
@@ -1450,15 +1523,16 @@ mod tests {
             )
             .expect("the plant is on the scene graph");
             let children = named_children(app.world_mut(), entity);
-            let has_wood = children.iter().any(|(name, _)| name == WOOD);
-            assert_eq!(
-                has_wood,
-                vine.config.is_mature(),
-                "{}: wood iff mature, got {children:?}",
-                vine.path
-            );
+            for prim in [WOOD, COLLISION] {
+                assert_eq!(
+                    children.iter().any(|(name, _)| name == prim),
+                    vine.config.is_mature(),
+                    "{}: {prim} iff mature, got {children:?}",
+                    vine.path
+                );
+            }
             assert!(
-                children.iter().any(|(name, _)| name != WOOD),
+                children.iter().any(|(name, _)| !is_fixture(name)),
                 "{}: and shoots on it",
                 vine.path
             );
@@ -1609,13 +1683,19 @@ mod tests {
         Some(app.world().entity(wood).get::<UsdReference>()?.0.clone())
     }
 
+    /// Whether a prim below a plant is part of the plant itself rather than a
+    /// shoot hung on it — everything a plant has that is not annual growth.
+    fn is_fixture(name: &str) -> bool {
+        name == WOOD || name == COLLISION
+    }
+
     /// Where a plant's shoots ended up, in the order they were hung.
     fn shoots_of(app: &mut App, path: &str) -> Vec<Transform> {
         let entity =
             testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>()).unwrap();
         named_children(app.world_mut(), entity)
             .into_iter()
-            .filter(|(name, _)| name != WOOD)
+            .filter(|(name, _)| !is_fixture(name))
             .map(|(_, child)| *app.world().entity(child).get::<Transform>().unwrap())
             .collect()
     }

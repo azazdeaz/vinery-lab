@@ -157,6 +157,28 @@ def test_generated_scene_is_a_usable_asset(cfg, tmp_path):
     assert stage.GetPrimAtPath("/Vineyard/Planting/Row_000/Vine_000")
 
 
+def test_the_cached_scene_arrives_solid(cfg, tmp_path):
+    """A robot needs something to stand on and something to bump into, and the
+    chain that puts it there -- codebook, document, builder, file -- is only
+    proven end to end."""
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    cfg.cache_dir = str(tmp_path)
+    stage = Usd.Stage.Open(vineyard.resolve_usd_path(cfg))
+
+    ground = stage.GetPrimAtPath("/Vineyard/Terrain/Geom")
+    assert ground.HasAPI(UsdPhysics.CollisionAPI), "the robot would drop through"
+    assert UsdPhysics.MeshCollisionAPI(ground).GetApproximationAttr().Get() == "none"
+    assert not stage.GetPrimAtPath("/Vineyard/Terrain").IsInstanceable(), (
+        "instanced, the collider would sit in a prototype rather than on a prim"
+    )
+
+    post = stage.GetPrimAtPath("/Vineyard/Planting/Row_000/Pole_000/Collision")
+    assert post.HasAPI(UsdPhysics.CollisionAPI)
+    assert post.GetTypeName() == "Capsule", "PhysX has no native cylinder"
+    assert UsdGeom.Capsule(post).GetHeightAttr().Get() > 0.0
+
+
 def test_cached_scene_composes_when_referenced(cfg, tmp_path):
     """Referencing the cached file gives a complete asset under `/World`.
 

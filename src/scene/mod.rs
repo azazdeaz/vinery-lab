@@ -19,6 +19,7 @@
 //! ```text
 //! /Vineyard/Planting/Row_00/Vine_047     Xform, unique
 //!   /Wood                                 -> parts/Vine_3, instanceable
+//!   /Collision                            Capsule, the trunk's proxy
 //!   /Shoot_00                             Xform, unique
 //!     /Stem                               -> parts/Shoot_11, instanceable
 //!     /Leaf_00                            -> parts/Leaf_2, instanceable
@@ -27,6 +28,14 @@
 //! Keeping geometry at the leaves is what makes `instanceable` safe to set
 //! unconditionally: an instanceable prim's descendants are not addressable,
 //! and these have no descendants to lose.
+//!
+//! # What a robot bumps into
+//!
+//! Only what it has to: the ground, the posts and the trunks. The ground
+//! collides as its own mesh ([`Library::collide`]) because the shape *is* the
+//! terrain; everything else gets a [`capsule`] proxy, which needs no cooking
+//! and is the only round shape PhysX has natively. Nothing is a rigid body —
+//! a vineyard is scenery that stands still.
 
 pub mod doc;
 pub mod export;
@@ -112,6 +121,34 @@ pub struct UsdReference(pub String);
 #[derive(Component, Clone, Copy, Debug)]
 pub struct UsdType(pub &'static str);
 
+/// The prim name a collision proxy takes, under the organ it stands in for.
+///
+/// One name for every element, so a consumer filtering the scene down to what
+/// it can bump into has a single rule.
+pub const COLLISION: &str = "Collision";
+
+/// A collision proxy — geometry a physics engine reads instead of the mesh
+/// beside it. See [`capsule`], which is the only way one is built.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Collider(pub doc::Capsule);
+
+/// The prim a capsule collider spanning `z0..z1` up the organ's own `+Z`
+/// becomes: its type, its shape, and the transform centering it on that span.
+///
+/// USD measures a capsule's `height` across its cylindrical section alone, so
+/// a span shorter than its own two caps degenerates into a sphere reaching
+/// past both ends of it.
+pub fn capsule(radius: f32, z0: f32, z1: f32) -> impl Bundle + Copy {
+    (
+        UsdType("Capsule"),
+        Collider(doc::Capsule {
+            radius,
+            height: (z1 - z0 - 2.0 * radius).max(0.0),
+        }),
+        Transform::from_translation(Vec3::Z * (z0 + z1) / 2.0),
+    )
+}
+
 /// One entry of the mesh library: the geometry built for a single
 /// representative, shared by every organ that drew it.
 #[derive(Clone, Debug)]
@@ -131,6 +168,9 @@ pub struct Part {
     /// from behind as well, since a canopy is looked up into as often as down
     /// onto.
     pub double_sided: bool,
+    /// The `physics:approximation` this mesh collides as, for a part that is
+    /// its own collider. See [`Library::collide`].
+    pub collision: Option<&'static str>,
 }
 
 impl Part {
@@ -235,11 +275,25 @@ impl Library<'_> {
             roughness: surface.roughness,
             ior: surface.ior,
             double_sided: surface.double_sided,
+            collision: None,
         };
         Geometry {
             mesh: Mesh3d(part.mesh.clone()),
             material: MeshMaterial3d(self.materials.add(part.material())),
             reference: UsdReference(self.prototypes.insert(prefix, index, part)),
+        }
+    }
+
+    /// Makes a registered part its own collider, at `approximation` — see
+    /// [`doc::TRIANGLE_MESH`].
+    ///
+    /// Worth it only where the mesh *is* the shape to collide with: the
+    /// ground. Anything a proxy describes better gets a [`capsule`] instead.
+    pub fn collide(&mut self, part: &Geometry, approximation: &'static str) {
+        // The name came off a `Geometry` this library handed out, so the entry
+        // is there by construction.
+        if let Some(entry) = self.prototypes.get_mut(&part.reference.0) {
+            entry.collision = Some(approximation);
         }
     }
 }
@@ -267,6 +321,10 @@ impl Prototypes {
 
     pub fn get(&self, name: &str) -> Option<&Part> {
         self.parts.get(name)
+    }
+
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Part> {
+        self.parts.get_mut(name)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Part)> {
@@ -302,6 +360,7 @@ mod tests {
             roughness: 0.8,
             ior: 1.5,
             double_sided: false,
+            collision: None,
         }
     }
 

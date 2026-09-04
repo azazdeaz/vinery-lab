@@ -75,6 +75,18 @@ A referencing prim is defined *typeless*
     prototype. The exporter enforces the no-authored-children half on the Rust
     side.
 
+Colliders are authored where physics can reach them
+    Nothing here is a rigid body -- a vineyard stands still -- so a collider is
+    a static one, which is what lets the ground collide as an exact triangle
+    mesh (``physics:approximation = "none"``, illegal on a dynamic collider).
+
+    The ground's collision schema lives *inside* its part, so it composes in
+    through the reference; the generator keeps every prim referencing such a
+    part non-instanceable, because a collider inside a prototype is reachable
+    only through an instance proxy. Everything else a robot bumps into is a
+    ``Capsule`` prim of its own -- the only round shape PhysX has natively,
+    needing no cooking -- marked ``purpose = "guide"`` so no renderer draws it.
+
 ``xformOp:orient`` rather than ``xformOp:rotateXYZ``
     USD's ``rotateXYZ`` and Bevy's Euler conventions disagree about intrinsic
     versus extrinsic composition, and a mismatch produces a scene that is
@@ -102,9 +114,9 @@ from __future__ import annotations
 import functools
 from typing import Any, Iterable, Mapping, Sequence
 
-from pxr import Gf, Sdf, Usd, UsdGeom, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
-FORMAT = 1
+FORMAT = 2
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -129,6 +141,10 @@ extend it alongside the generator.
 _XFORM_OP_ORDER = Vt.TokenArray(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
 
 _UP_AXIS_TOKENS = {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y, "Z": UsdGeom.Tokens.z}
+
+_COLLISION_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCollisionAPI"])
+"""What `UsdPhysics.CollisionAPI.Apply` writes, for the prims authored through
+`Sdf` -- which enforces no schema and so has no `Apply` of its own."""
 
 
 def build_usd(doc: Mapping[str, Any], path: str) -> None:
@@ -229,6 +245,15 @@ def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
     color = mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
     color.Set(Vt.Vec3fArray([tuple(part["display_color"])]))
 
+    if approximation := part.get("collision"):
+        # The mesh is its own collider. Authored inside the part so it composes
+        # in through the reference -- which the generator keeps
+        # non-instanceable for exactly this reason.
+        UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
+        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr(
+            approximation
+        )
+
     return mesh
 
 
@@ -267,6 +292,9 @@ def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
             raise ValueError(f"{path} is not transformable but carries a transform")
         _author_xform(spec, xform)
 
+    if collider := node.get("collider"):
+        _author_collider(spec, collider)
+
     for child in node.get("children", ()):
         _author_node(layer, f"{path}/{child['name']}", child)
 
@@ -303,3 +331,39 @@ def _author_xform(spec: Sdf.PrimSpec, xform: Mapping[str, Any]) -> None:
     Sdf.AttributeSpec(
         spec, "xformOpOrder", Sdf.ValueTypeNames.TokenArray, Sdf.VariabilityUniform
     ).default = _XFORM_OP_ORDER
+
+
+def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
+    """A capsule collision proxy: the shape, and the schema that makes it one.
+
+    The prim's ``axis`` is left unauthored -- USD's default is already the
+    ``+Z`` the document builds capsules about. ``height`` measures the
+    cylindrical section alone, so the capsule reaches ``height / 2 + radius``
+    either side of its origin, which is what ``extent`` bounds.
+
+    ``purpose = "guide"`` keeps it out of a render without hiding it from
+    physics, which reads collision independently of purpose.
+    """
+    radius = float(collider["radius"])
+    height = float(collider["height"])
+    reach = height / 2.0 + radius
+    for name, value_type, value in (
+        ("radius", Sdf.ValueTypeNames.Double, radius),
+        ("height", Sdf.ValueTypeNames.Double, height),
+        (
+            "extent",
+            Sdf.ValueTypeNames.Float3Array,
+            Vt.Vec3fArray(
+                [Gf.Vec3f(-radius, -radius, -reach), Gf.Vec3f(radius, radius, reach)]
+            ),
+        ),
+    ):
+        Sdf.AttributeSpec(spec, name, value_type).default = value
+
+    # Uniform, as the schema declares it: what a prim is for does not vary
+    # over time.
+    Sdf.AttributeSpec(
+        spec, "purpose", Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform
+    ).default = UsdGeom.Tokens.guide
+
+    spec.SetInfo("apiSchemas", _COLLISION_API)

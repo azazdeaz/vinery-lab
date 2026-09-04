@@ -169,6 +169,11 @@ class VineyardCfg(FileCfg):
     `rigid_props`, `collision_props`, visual materials, contact sensors)
     applies here too, and the prim path may be an env regex.
 
+    It comes with its own static colliders: the ground as its own mesh, each
+    post and trunk as a capsule. `collision_props` tunes those it can reach --
+    `apply_nested` skips instanced prims, and everything but the ground and the
+    proxies is instanced.
+
     .. code-block:: python
 
         VINEYARD_CFG = VineyardCfg(

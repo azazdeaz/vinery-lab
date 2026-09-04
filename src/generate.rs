@@ -154,6 +154,10 @@ mod tests {
     /// of the tree. Both are silent failures in USD: a dangling reference
     /// composes to an empty prim, and an `instanceable` prim's authored
     /// children are simply unreachable.
+    ///
+    /// A prim is instanceable unless the part it draws is its own collider —
+    /// the ground, which has one instance and so shares nothing by giving
+    /// instancing up.
     #[test]
     fn every_reference_resolves_to_a_part_and_carries_no_children() {
         let doc = scene();
@@ -169,7 +173,15 @@ mod tests {
             };
             assert!(parts.contains(reference.as_str()), "{path} draws a missing {reference}");
             assert!(node.children.is_empty(), "{path} references and has children");
-            assert!(node.instanceable, "{path} references without being instanceable");
+            let solid = doc
+                .parts
+                .iter()
+                .any(|part| &part.name == reference && part.collision.is_some());
+            assert_eq!(
+                node.instanceable, !solid,
+                "{path} draws {reference}, which {} a collider",
+                if solid { "carries" } else { "does not carry" }
+            );
         }
     }
 

@@ -1,5 +1,5 @@
 {
-  "format": 1,
+  "format": 2,
   "up_axis": "Z",
   "meters_per_unit": 1.0,
   "parts": [
@@ -10,6 +10,14 @@
       "uvs": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
       "display_color": [0.24, 0.42, 0.16],
       "double_sided": true
+    },
+    {
+      "name": "Terrain_0",
+      "points": [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.5]],
+      "indices": [0, 1, 2],
+      "display_color": [0.35, 0.28, 0.2],
+      "double_sided": false,
+      "collision": "none"
     },
     {
       "name": "Vine_0",
@@ -24,6 +32,11 @@
     "name": "Vineyard",
     "type_name": "Xform",
     "children": [
+      {
+        "name": "Terrain",
+        "type_name": "Xform",
+        "reference": "Terrain_0"
+      },
       {
         "name": "Planting",
         "type_name": "Xform",
@@ -46,6 +59,16 @@
                     "type_name": "Xform",
                     "reference": "Vine_0",
                     "instanceable": true
+                  },
+                  {
+                    "name": "Collision",
+                    "type_name": "Capsule",
+                    "xform": {
+                      "translate": [0.0, 0.0, 0.425],
+                      "orient": [0.0, 0.0, 0.0, 1.0],
+                      "scale": [1.0, 1.0, 1.0]
+                    },
+                    "collider": { "radius": 0.05, "height": 0.85 }
                   },
                   {
                     "name": "Shoot_00",

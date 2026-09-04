@@ -16,7 +16,7 @@ import json
 import pathlib
 
 import pytest
-from pxr import Gf, Usd, UsdGeom
+from pxr import Gf, Usd, UsdGeom, UsdPhysics
 
 from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
 
@@ -24,6 +24,7 @@ FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
 VINE = f"{ROOT}/Planting/Row_00/Vine_000"
 LEAF = f"{VINE}/Shoot_00/Leaf_00"
+TERRAIN = f"{ROOT}/Terrain"
 
 
 def part_mesh(stage: Usd.Stage, name: str) -> UsdGeom.Mesh:
@@ -128,6 +129,29 @@ def test_optional_attributes_are_authored_only_where_the_document_has_them(
     assert not UsdGeom.PrimvarsAPI(vine).HasPrimvar("st")
 
 
+def test_a_part_that_is_its_own_collider_says_how_it_collides(stage: Usd.Stage):
+    """Exact triangles, which only a static collider may be -- and nothing in
+    the scene is a rigid body. Without the approximation USD defaults to
+    convexHull, which turns a hollow of ground into a lid over it."""
+    ground = part_mesh(stage, "Terrain_0").GetPrim()
+    assert ground.HasAPI(UsdPhysics.CollisionAPI)
+    assert UsdPhysics.MeshCollisionAPI(ground).GetApproximationAttr().Get() == "none"
+    assert UsdPhysics.CollisionAPI(ground).GetCollisionEnabledAttr().Get() is True
+
+    assert not part_mesh(stage, "Vine_0").GetPrim().HasAPI(UsdPhysics.CollisionAPI)
+
+
+def test_a_collider_reaches_a_prim_physics_can_find(stage: Usd.Stage):
+    """The collision schema lives inside the part, so it arrives through the
+    reference. That only reaches a real prim while the reference stays
+    un-instanced: inside a prototype it would be an instance proxy, which is
+    why the generator gives instancing up for the one part this applies to --
+    there is a single ground, so it shares nothing either way."""
+    terrain = stage.GetPrimAtPath(TERRAIN)
+    assert not terrain.IsInstanceable()
+    assert stage.GetPrimAtPath(f"{TERRAIN}/{GEOM}").HasAPI(UsdPhysics.CollisionAPI)
+
+
 # --- the prim tree --------------------------------------------------
 
 
@@ -173,6 +197,36 @@ def test_instances_of_one_part_share_a_single_prototype(stage: Usd.Stage):
 
     original = stage.GetPrimAtPath(f"{VINE}/Wood")
     assert twin.GetPrototype() == original.GetPrototype()
+
+
+def test_a_collision_proxy_is_a_capsule_no_renderer_draws(stage: Usd.Stage):
+    """A capsule because PhysX has no native cylinder, and a prim of its own
+    because the geometry beside it is too detailed to collide with. `guide`
+    keeps it out of a render; physics reads collision regardless of purpose."""
+    prim = stage.GetPrimAtPath(f"{VINE}/Collision")
+    capsule = UsdGeom.Capsule(prim)
+
+    assert prim.GetTypeName() == "Capsule"
+    assert prim.HasAPI(UsdPhysics.CollisionAPI)
+    assert capsule.GetPurposeAttr().Get() == UsdGeom.Tokens.guide
+    assert capsule.GetRadiusAttr().Get() == pytest.approx(0.05)
+    # `height` is the cylindrical section alone, so the capsule reaches
+    # `height / 2 + radius` either side of its origin.
+    assert capsule.GetHeightAttr().Get() == pytest.approx(0.85)
+    assert capsule.GetAxisAttr().Get() == UsdGeom.Tokens.z, "USD's default, unauthored"
+    lo, hi = capsule.GetExtentAttr().Get()
+    assert tuple(lo) == pytest.approx((-0.05, -0.05, -0.475))
+    assert tuple(hi) == pytest.approx((0.05, 0.05, 0.475))
+
+
+def test_a_collision_proxy_is_placed_like_any_other_prim(stage: Usd.Stage):
+    """A capsule is centered on its own origin, so where it ends up is the
+    whole of where it covers: the trunk's runs from below ground to the head
+    of a vine standing at (1, 2)."""
+    world = UsdGeom.Xformable(
+        stage.GetPrimAtPath(f"{VINE}/Collision")
+    ).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    assert tuple(world.ExtractTranslation()) == pytest.approx((1.0, 2.0, 0.425))
 
 
 def test_a_transform_round_trips_through_the_op_stack(stage: Usd.Stage):

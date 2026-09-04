@@ -20,13 +20,16 @@
 //!   wrong.
 //! - A [`Node`] with a `reference` draws the [`PartEntry`] of that name and
 //!   has **no children** of its own — see [`Node::instanceable`].
+//! - Colliders are **static**: nothing here is a rigid body, so the builder
+//!   authors collision without mass, and the ground may be an exact triangle
+//!   mesh, which a dynamic collider could not be.
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped when the shape of this document changes incompatibly. The builder
 /// refuses anything it does not recognise, so a stale cached scene fails
 /// loudly instead of composing into something subtly wrong.
-pub const FORMAT: u32 = 1;
+pub const FORMAT: u32 = 2;
 
 /// One generated scene, ready to be turned into a USD stage.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -66,7 +69,20 @@ pub struct PartEntry {
     /// from behind as well, since a canopy is looked up into as often as down
     /// onto.
     pub double_sided: bool,
+    /// This mesh is also its own collider, at this `physics:approximation` —
+    /// [`TRIANGLE_MESH`] for the exact triangles. Absent on a part nothing
+    /// collides with.
+    ///
+    /// Every prim referencing such a part is authored non-instanceable, so the
+    /// collider lands on a real prim rather than inside a prototype — see
+    /// [`Node::instanceable`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collision: Option<String>,
 }
+
+/// The `physics:approximation` of an exact triangle-mesh collider. USD spells
+/// it "no approximation"; it is legal only on a static collider.
+pub const TRIANGLE_MESH: &str = "none";
 
 /// One prim.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -91,8 +107,18 @@ pub struct Node {
     /// while the renderer draws one prototype per part. It is safe precisely
     /// because a referencing prim has no children — an instanceable prim's
     /// descendants are not addressable, and these have no descendants to lose.
+    ///
+    /// Cleared on a prim referencing a part that carries
+    /// [`collision`](PartEntry::collision): a collider inside a prototype is
+    /// reached only through an instance proxy, and the one part that applies
+    /// to has a single instance, so it shares nothing anyway.
     #[serde(default, skip_serializing_if = "is_false")]
     pub instanceable: bool,
+    /// A collision proxy standing in for geometry too detailed to collide
+    /// with. Present only on prims whose `type_name` is `"Capsule"`, which
+    /// carry it instead of a `reference`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collider: Option<Capsule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -105,6 +131,20 @@ pub struct Xform {
     /// takes the real part first, so the builder reorders on the way in.
     pub orient: [f32; 4],
     pub scale: [f32; 3],
+}
+
+/// A capsule about the prim's own **+Z**, centered on its origin — USD's
+/// default axis, so the builder authors none.
+///
+/// A capsule rather than a cylinder because PhysX has a native capsule and no
+/// native cylinder: a `Cylinder` collider is convex-hull-approximated or
+/// routed through custom geometry, both dearer than the analytic shape.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Capsule {
+    pub radius: f32,
+    /// The **cylindrical section alone**, as USD measures it: the capsule
+    /// reaches `height / 2 + radius` either side of its origin.
+    pub height: f32,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -120,6 +160,7 @@ impl Node {
             xform: None,
             reference: None,
             instanceable: false,
+            collider: None,
             children: Vec::new(),
         }
     }
@@ -139,8 +180,15 @@ mod tests {
             scale: [1.0, 1.0, 1.0],
         });
 
+        let mut collider = Node::group("Collision", "Capsule");
+        collider.collider = Some(Capsule {
+            radius: 0.04,
+            height: 1.72,
+        });
+
         let mut root = Node::group("Vineyard", "Xform");
         root.children.push(leaf);
+        root.children.push(collider);
 
         SceneDoc {
             format: FORMAT,
@@ -154,6 +202,7 @@ mod tests {
                 uvs: None,
                 display_color: [0.2, 0.5, 0.1],
                 double_sided: true,
+                collision: None,
             }],
             root,
         }
@@ -169,6 +218,13 @@ mod tests {
         assert_eq!(back.parts[0].name, "Leaf_2");
         assert_eq!(back.root.children[0].reference.as_deref(), Some("Leaf_2"));
         assert!(back.root.children[0].instanceable);
+        assert_eq!(
+            back.root.children[1].collider,
+            Some(Capsule {
+                radius: 0.04,
+                height: 1.72
+            })
+        );
     }
 
     /// At tens of thousands of prims the defaults are most of the bytes, so
@@ -179,6 +235,8 @@ mod tests {
 
         assert!(!json.contains("\"normals\""), "got:\n{json}");
         assert!(!json.contains("\"uvs\""), "got:\n{json}");
+        assert!(!json.contains("\"collision\""), "got:\n{json}");
+        assert_eq!(json.matches("\"collider\"").count(), 1, "got:\n{json}");
         // The root has no transform, no reference and is not instanceable;
         // the leaf has all three, so each key appears exactly once.
         assert_eq!(json.matches("\"xform\"").count(), 1, "got:\n{json}");
