@@ -80,10 +80,26 @@ A referencing prim is defined *typeless*
     versus extrinsic composition, and a mismatch produces a scene that is
     plausibly wrong rather than obviously wrong. The document carries
     quaternions; there is no convention left to disagree about.
+
+The prim tree is authored through ``Sdf``, not the ``Usd`` stage API
+    ``Sdf.CreatePrimInLayer`` and ``Sdf.AttributeSpec`` write layer specs
+    directly, inside one ``Sdf.ChangeBlock``; ``Usd.Stage.DefinePrim`` and the
+    ``UsdGeom.Xformable`` op helpers recompose and notify per call, which at
+    this scene's prim count is around five times slower for the same output.
+    Two consequences to respect:
+
+    * Nothing inside the block may read *composed* state -- that is what
+      ``Usd.Stage.DefinePrim`` does, and calling it there throws. The parts
+      library is authored through the ``Usd`` API before the block opens,
+      where its fourteen prims cost nothing.
+    * ``Sdf`` enforces no schema, so authoring an op stack onto a prim type
+      that cannot carry one now fails silently rather than raising. See
+      `NON_TRANSFORMABLE`.
 """
 
 from __future__ import annotations
 
+import functools
 from typing import Any, Iterable, Mapping, Sequence
 
 from pxr import Gf, Sdf, Usd, UsdGeom, Vt
@@ -100,6 +116,17 @@ PARTS = f"{ROOT}/parts"
 GEOM = "Geom"
 """Name of the `Mesh` inside a part. See the module docstring for why a part
 wraps its mesh rather than being one."""
+
+NON_TRANSFORMABLE = frozenset({"Scope"})
+"""Prim types the generator emits that cannot carry an xform op stack.
+
+Authoring goes through `Sdf`, which checks no schema, so this stands in for
+the `UsdGeom.Xformable(prim)` test the `Usd` API used to make for free. It
+lists the types the document can actually name, not every such type in USD --
+extend it alongside the generator.
+"""
+
+_XFORM_OP_ORDER = Vt.TokenArray(["xformOp:translate", "xformOp:orient", "xformOp:scale"])
 
 _UP_AXIS_TOKENS = {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y, "Z": UsdGeom.Tokens.z}
 
@@ -138,9 +165,9 @@ def build_stage(doc: Mapping[str, Any], path: str) -> Usd.Stage:
     _author_stage_metadata(stage, doc)
     _author_parts(stage, doc.get("parts", ()))
 
-    root = doc["root"]
-    root_prim = _author_node(stage, ROOT, root)
-    stage.SetDefaultPrim(root_prim)
+    with Sdf.ChangeBlock():
+        _author_node(stage.GetRootLayer(), ROOT, doc["root"])
+    stage.SetDefaultPrim(stage.GetPrimAtPath(ROOT))
     return stage
 
 
@@ -219,44 +246,60 @@ def _extent(
 # --- the prim tree --------------------------------------------------
 
 
-def _author_node(stage: Usd.Stage, path: str, node: Mapping[str, Any]) -> Usd.Prim:
-    reference = node.get("reference")
+def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
+    spec = Sdf.CreatePrimInLayer(layer, path)
+    # `CreatePrimInLayer` leaves an `over`, and authors ancestors as overs too
+    # -- harmless here, since a node is always authored before its children.
+    spec.specifier = Sdf.SpecifierDef
 
+    reference = node.get("reference")
     if reference is not None:
         # Typeless: the referenced Mesh supplies the type, and a local opinion
         # would win over it. See the module docstring.
-        prim = stage.DefinePrim(path)
-        prim.GetReferences().AddInternalReference(Sdf.Path(f"{PARTS}/{reference}"))
+        spec.referenceList.prependedItems = [Sdf.Reference(primPath=_part_path(reference))]
         if node.get("instanceable"):
-            prim.SetInstanceable(True)
+            spec.instanceable = True
     else:
-        prim = stage.DefinePrim(path, node.get("type_name", "Xform"))
+        spec.typeName = node.get("type_name", "Xform")
 
     if xform := node.get("xform"):
-        _author_xform(prim, xform)
+        if spec.typeName in NON_TRANSFORMABLE:
+            raise ValueError(f"{path} is not transformable but carries a transform")
+        _author_xform(spec, xform)
 
     for child in node.get("children", ()):
-        _author_node(stage, f"{path}/{child['name']}", child)
-
-    return prim
+        _author_node(layer, f"{path}/{child['name']}", child)
 
 
-def _author_xform(prim: Usd.Prim, xform: Mapping[str, Any]) -> None:
+@functools.cache
+def _part_path(name: str) -> Sdf.Path:
+    """The library path a part of this name lives at.
+
+    Cached because every one of the scene's prims references one of a handful
+    of parts, and parsing the same path back out of a string each time is a
+    measurable slice of authoring a large scene.
+    """
+    return Sdf.Path(f"{PARTS}/{name}")
+
+
+def _author_xform(spec: Sdf.PrimSpec, xform: Mapping[str, Any]) -> None:
     """The translate / orient / scale op stack, in that order.
 
     Float precision throughout, matching the f32 the document carries -- a
     double-precision op would only pad the values back out with zeroes.
     """
-    xformable = UsdGeom.Xformable(prim)
-    if not xformable:
-        raise ValueError(f"{prim.GetPath()} is not transformable but carries a transform")
-
-    translate = xform["translate"]
-    xformable.AddTranslateOp(UsdGeom.XformOp.PrecisionFloat).Set(Gf.Vec3f(*translate))
-
     # The document is xyzw (Bevy's `Quat` layout); Gf.Quatf takes the real
     # part first.
     x, y, z, w = xform["orient"]
-    xformable.AddOrientOp(UsdGeom.XformOp.PrecisionFloat).Set(Gf.Quatf(w, Gf.Vec3f(x, y, z)))
+    for name, value_type, value in (
+        ("xformOp:translate", Sdf.ValueTypeNames.Float3, Gf.Vec3f(*xform["translate"])),
+        ("xformOp:orient", Sdf.ValueTypeNames.Quatf, Gf.Quatf(w, Gf.Vec3f(x, y, z))),
+        ("xformOp:scale", Sdf.ValueTypeNames.Float3, Gf.Vec3f(*xform["scale"])),
+    ):
+        Sdf.AttributeSpec(spec, name, value_type).default = value
 
-    xformable.AddScaleOp(UsdGeom.XformOp.PrecisionFloat).Set(Gf.Vec3f(*xform["scale"]))
+    # Uniform, as `UsdGeom.Xformable` authors it: the op stack is a fact about
+    # the prim, not something that varies over time.
+    Sdf.AttributeSpec(
+        spec, "xformOpOrder", Sdf.ValueTypeNames.TokenArray, Sdf.VariabilityUniform
+    ).default = _XFORM_OP_ORDER

@@ -44,6 +44,7 @@ from isaaclab.sim.utils import clone
 
 import vinerylab
 import vinerylab._core
+import vinerylab.usd.build
 
 from .vineyard_cfg import FRAGMENTS
 
@@ -155,15 +156,22 @@ def _fingerprint(cfg: VineyardCfg) -> str:
 
 @functools.cache
 def _generator_id() -> str:
-    """Identifies the generator, so a rebuilt one doesn't read a stale cache.
+    """Identifies the generator, so a changed one doesn't read a stale cache.
+
+    Two modules decide what lands on disk: the Rust extension that solves the
+    scene, and the Python module that authors it as USD. Both are keyed --
+    a change to either produces a different file from the same parameters.
 
     The version alone is not enough during development, where `maturin
-    develop` changes the generator without touching the version. The
-    extension module's size and mtime do change on every rebuild, which errs
-    toward regenerating -- the safe direction.
+    develop` or an edit changes a generator without touching it. Size and
+    mtime do change every time, which errs toward regenerating -- the safe
+    direction.
     """
-    stat = pathlib.Path(vinerylab._core.__file__).stat()
-    return f"{vinerylab.__version__}-{stat.st_size}-{stat.st_mtime_ns}"
+    fields = [vinerylab.__version__]
+    for module in (vinerylab._core, vinerylab.usd.build):
+        stat = pathlib.Path(module.__file__).stat()
+        fields += [str(stat.st_size), str(stat.st_mtime_ns)]
+    return "-".join(fields)
 
 
 def _cache_dir(cfg: VineyardCfg) -> pathlib.Path:
