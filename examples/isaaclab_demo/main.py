@@ -1,11 +1,18 @@
-"""Launch Isaac Sim Simulator first."""
+"""Walk a quadruped down the alleys of a generated vineyard.
+
+The vineyard and the quadruped are set up here; the route comes from `route`,
+the walking from `driver`, and the debug markers that show what the follower
+is doing from `markers`.
+
+Launch Isaac Sim Simulator first.
+"""
 
 import argparse
 
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="This script demonstrates different legged robots.")
+parser = argparse.ArgumentParser(description="This script drives a quadruped through a generated vineyard.")
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # demos should open Kit visualizer by default
@@ -20,25 +27,23 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import numpy as np
-import torch
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
-from isaaclab.sim import SimulationCfg
-from isaaclab_newton.physics import NewtonCfg
-from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
-from isaaclab_newton.physics import NewtonManager, NewtonSolverCfg
+from isaaclab.sim.utils.stage import get_current_stage
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.utils.configclass import configclass
 
-from vinerylab.isaaclab import ParcelCfg, VineyardCfg, TerrainCfg
+from vinerylab.isaaclab import ParcelCfg, TerrainCfg, VineyardCfg
+from vinerylab.usd import GEOM
+
+from driver import DECIMATION, SIM_DT, Driver
+from markers import DebugMarkers
+from route import alley_route
 
 ##
 # Pre-defined configs
 ##
-from isaaclab_assets.robots.anymal import ANYMAL_B_CFG, ANYMAL_C_CFG, ANYMAL_D_CFG  # isort:skip
-from isaaclab_assets.robots.spot import SPOT_CFG  # isort:skip
-from isaaclab_assets.robots.unitree import UNITREE_A1_CFG, UNITREE_GO1_CFG, UNITREE_GO2_CFG  # isort:skip
+from isaaclab_assets.robots.anymal import ANYMAL_C_CFG  # isort:skip
 
 
 # The scene is generated on first use and cached on these parameters, so a
@@ -47,25 +52,12 @@ VINEYARD_CFG = VineyardCfg(
     terrain=TerrainCfg(height=82.0, width=82.0, max_elevation=8.9),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
 )
+VINEYARD_PATH = "/World/Vineyard"
+ROBOT_PATH = "/World/Robot"
 
 
-def define_origins(num_origins: int, spacing: float) -> list[list[float]]:
-    """Defines the origins of the scene."""
-    # create tensor based on number of environments
-    env_origins = torch.zeros(num_origins, 3)
-    # create a grid of origins
-    num_cols = np.floor(np.sqrt(num_origins))
-    num_rows = np.ceil(num_origins / num_cols)
-    xx, yy = torch.meshgrid(torch.arange(num_rows), torch.arange(num_cols), indexing="xy")
-    env_origins[:, 0] = spacing * xx.flatten()[:num_origins] - spacing * (num_rows - 1) / 2
-    env_origins[:, 1] = spacing * yy.flatten()[:num_origins] - spacing * (num_cols - 1) / 2
-    env_origins[:, 2] = 0.0
-    # return the origins
-    return env_origins.tolist()
-
-
-def design_scene() -> tuple[dict, list[list[float]]]:
-    """Designs the scene."""
+def design_scene() -> Articulation:
+    """The vineyard, a sky, and one quadruped to walk it."""
     # HDR dome light (IBL + visible sky). Outdoor locomotion envs use this map.
     cfg = sim_utils.DomeLightCfg(
         intensity=750.0,
@@ -73,138 +65,52 @@ def design_scene() -> tuple[dict, list[list[float]]]:
     )
     cfg.func("/World/Light", cfg)
 
-    # Create separate groups called "Origin1", "Origin2", "Origin3"
-    # Each group will have a mount and a robot on top of it
-    origins = define_origins(num_origins=7, spacing=1.25)
+    VINEYARD_CFG.func(VINEYARD_PATH, VINEYARD_CFG)
+    # The generated scene carries no physics schemas at all, so the ground has
+    # to be made solid here or the robot drops through it. Every part is
+    # spawned instanceable, and nothing may be authored inside an instance, so
+    # the terrain gives up its instancing first -- there is one ground, so it
+    # was sharing its prototype with nobody.
+    # ponytail: terrain only -- do the same for the posts and trunks when the
+    # robot needs something to bump into.
+    get_current_stage().GetPrimAtPath(f"{VINEYARD_PATH}/Terrain").SetInstanceable(False)
+    sim_utils.define_collision_properties(
+        f"{VINEYARD_PATH}/Terrain/{GEOM}", sim_utils.CollisionPropertiesCfg(collision_enabled=True)
+    )
 
-    # Origin 1 with Anymal B
-    sim_utils.create_prim("/World/Origin1", "Xform", translation=origins[0])
-
-    VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
-
-    
-    # -- Robot
-    # anymal_b = Articulation(ANYMAL_B_CFG.replace(prim_path="/World/Origin1/Robot"))
-
-    # # Origin 2 with Anymal C
-    # sim_utils.create_prim("/World/Origin2", "Xform", translation=origins[1])
-    # # -- Robot
-    # anymal_c = Articulation(ANYMAL_C_CFG.replace(prim_path="/World/Origin2/Robot"))
-
-    # # Origin 3 with Anymal D
-    # sim_utils.create_prim("/World/Origin3", "Xform", translation=origins[2])
-    # # -- Robot
-    # anymal_d = Articulation(ANYMAL_D_CFG.replace(prim_path="/World/Origin3/Robot"))
-
-    # # Origin 4 with Unitree A1
-    # sim_utils.create_prim("/World/Origin4", "Xform", translation=origins[3])
-    # # -- Robot
-    # unitree_a1 = Articulation(UNITREE_A1_CFG.replace(prim_path="/World/Origin4/Robot"))
-
-    # # Origin 5 with Unitree Go1
-    # sim_utils.create_prim("/World/Origin5", "Xform", translation=origins[4])
-    # # -- Robot
-    # unitree_go1 = Articulation(UNITREE_GO1_CFG.replace(prim_path="/World/Origin5/Robot"))
-
-    # # Origin 6 with Unitree Go2
-    # sim_utils.create_prim("/World/Origin6", "Xform", translation=origins[5])
-    # # -- Robot
-    # unitree_go2 = Articulation(UNITREE_GO2_CFG.replace(prim_path="/World/Origin6/Robot"))
-
-    # # Origin 7 with Boston Dynamics Spot
-    # sim_utils.create_prim("/World/Origin7", "Xform", translation=origins[6])
-    # # -- Robot
-    # spot = Articulation(SPOT_CFG.replace(prim_path="/World/Origin7/Robot"))
-
-    # return the scene information
-    scene_entities = {
-        # "anymal_b": anymal_b,
-        # "anymal_c": anymal_c,
-        # "anymal_d": anymal_d,
-        # "unitree_a1": unitree_a1,
-        # "unitree_go1": unitree_go1,
-        # "unitree_go2": unitree_go2,
-        # "spot": spot,
-    }
-    return scene_entities, origins
+    return Articulation(ANYMAL_C_CFG.replace(prim_path=ROBOT_PATH))
 
 
-def run_simulator(sim: sim_utils.SimulationContext, entities: dict[str, Articulation], origins: torch.Tensor):
+def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: np.ndarray):
     """Runs the simulation loop."""
-    # Define simulation stepping
-    sim_dt = sim.get_physics_dt()
-    sim_time = 0.0
-    count = 0
-    # Simulate physics
-    while simulation_app.is_running():
-        # reset
-        if count % 200 == 0:
-            # reset counters
-            sim_time = 0.0
-            count = 0
-            # reset robots
-            for index, robot in enumerate(entities.values()):
-                # root state
-                root_pose = robot.data.default_root_pose.torch.clone()
-                root_pose[:, :3] += origins[index]
-                robot.write_root_pose_to_sim_index(root_pose=root_pose)
-                root_vel = robot.data.default_root_vel.torch.clone()
-                robot.write_root_velocity_to_sim_index(root_velocity=root_vel)
-                # joint state
-                joint_pos, joint_vel = (
-                    robot.data.default_joint_pos.torch.clone(),
-                    robot.data.default_joint_vel.torch.clone(),
-                )
-                robot.write_joint_position_to_sim_index(position=joint_pos)
-                robot.write_joint_velocity_to_sim_index(velocity=joint_vel)
-                # reset the internal state
-                robot.reset()
-            print("[INFO]: Resetting robots state...")
-        # apply default actions to the quadrupedal robots
-        for robot in entities.values():
-            # generate random joint positions
-            joint_pos_target = robot.data.default_joint_pos.torch + torch.randn_like(robot.data.joint_pos.torch) * 0.1
-            # apply action to the robot
-            robot.set_joint_position_target_index(target=joint_pos_target)
-            # write data to sim
-            robot.write_data_to_sim()
-        # perform step
-        sim.step()
-        # update sim-time
-        sim_time += sim_dt
-        count += 1
-        # update buffers
-        for robot in entities.values():
-            robot.update(sim_dt)
+    driver = Driver(route, robot)
+    markers = DebugMarkers(route)
+    driver.place()
 
-@configclass
-class MySolverCfg(NewtonSolverCfg):
-    class_type: type[NewtonManager] | str = "{DIR}.my_solver_manager:NewtonMySolverManager"
-    solver_type: str = "my_solver"
-    iterations: int = 16
+    step = 0
+    while simulation_app.is_running():
+        if step % DECIMATION == 0:
+            driver.control()
+            markers.show(robot, driver.target, driver.command)
+        robot.write_data_to_sim()
+        sim.step()
+        robot.update(SIM_DT)
+        step += 1
+
 
 def main():
     """Main function."""
-
-    # Initialize the simulation context
-    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
-        dt=0.01,
-        # physics=NewtonCfg(
-        #     solver_cfg=MySolverCfg(iterations=32),
-        #     num_substeps=2,
-        # )
-    ))
-    # Set main camera
-    sim.set_camera_view(eye=[2.5, 2.5, 2.5], target=[0.0, 0.0, 0.0])
-    # design scene
-    scene_entities, scene_origins = design_scene()
-    scene_origins = torch.tensor(scene_origins, device=sim.device)
+    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=SIM_DT))
+    route = alley_route(VINEYARD_CFG)
+    robot = design_scene()
+    # Look down the first alley from behind the robot's start.
+    sim.set_camera_view(eye=(route[0] + [4.0, 4.0, 3.0]).tolist(), target=route[0].tolist())
     # Play the simulator
     sim.reset()
     # Now we are ready!
-    print("[INFO]: Setup complete...")
+    print(f"[INFO]: Setup complete, {len(route)} waypoints to walk...")
     # Run the simulator
-    run_simulator(sim, scene_entities, scene_origins)
+    run_simulator(sim, robot, route)
 
 
 if __name__ == "__main__":
