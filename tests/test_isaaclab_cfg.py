@@ -44,8 +44,9 @@ def params_attrs(params_cls: type) -> set[str]:
 def cfg() -> VineyardCfg:
     """A cfg with something moved in more than one fragment."""
     return VineyardCfg(
+        scene=isaaclab_cfg.SceneCfg(seed=42),
         parcel=isaaclab_cfg.ParcelCfg(row_spacing=2.8),
-        vine=isaaclab_cfg.VineCfg(arms=1, seed=42),
+        vine=isaaclab_cfg.VineCfg(arms=1),
     )
 
 
@@ -86,7 +87,7 @@ def test_to_params_round_trips_every_fragment(cfg):
     params = vineyard.to_params(cfg)
     assert math.isclose(params.parcel.row_spacing, 2.8, rel_tol=1e-6)
     assert params.vine.arms == 1
-    assert params.vine.seed == 42
+    assert params.scene.seed == 42
     # Untouched fragments still arrive at their defaults rather than missing.
     assert params.terrain.detail == isaaclab_cfg.TerrainCfg().detail
 
