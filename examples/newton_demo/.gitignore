@@ -1,0 +1,8 @@
+__pycache__/
+.venv
+
+# Generated stages, keyed on the parameters that made them.
+/vineyard_*.usd
+
+# Viewer window layout, written on exit.
+/imgui.ini

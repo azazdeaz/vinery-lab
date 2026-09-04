@@ -39,6 +39,12 @@ cd examples/isaaclab_demo/
 uv run main.py
 ```
 
+Generate and run in Newton, without Isaac Lab
+```bash
+cd examples/newton_demo/
+uv run main.py
+```
+
 ## Workflow
  - Start the viewer `cargo run --release`.
  - Edit the scene parameters in the UI.
