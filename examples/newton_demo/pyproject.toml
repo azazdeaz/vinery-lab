@@ -1,0 +1,14 @@
+[project]
+name = "levinery-newton-demo"
+version = "0.1.0"
+description = "The generated vineyard in Newton, without Isaac Lab."
+requires-python = ">=3.12"
+dependencies = [
+    "vinerylab",
+    # `examples` brings the OpenGL viewer and `importers`, whose USD stack is
+    # what parses the offshoot curves.
+    "newton[examples,rtx]>=1.5",
+]
+
+[tool.uv.sources]
+vinerylab = { path = "../../", editable = true }
