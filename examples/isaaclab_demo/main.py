@@ -88,8 +88,7 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: 
 
 
 def main():
-    """Main function."""
-    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=SIM_DT))
+    sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(dt=SIM_DT, device="cpu"))
     route = alley_route(VINEYARD_CFG)
     robot = design_scene()
     # Look down the first alley from behind the robot's start.

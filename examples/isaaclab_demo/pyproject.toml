@@ -9,9 +9,30 @@ dependencies = [
     "isaaclab[isaacsim,all]",
 ]
 
+# The repo's test suite runs from this venv, not the root one: it needs Isaac Lab.
+[dependency-groups]
+dev = ["pytest"]
+
 [tool.uv]
 index-strategy = "unsafe-best-match"
 prerelease = "allow"
+# Isaac Lab keeps these pins in its root pyproject, which the wheel it builds does not
+# carry. Without them the `isaacsim` extra downgrades the stack it is resolved against.
+# Mirrors IsaacLab tools/wheel_builder/uv-overrides.txt; update it when bumping `rev`.
+override-dependencies = [
+    "numpy>=2",
+    "mujoco~=3.11.0",
+    "mujoco-warp~=3.11.0",
+    "newton[sim] @ git+https://github.com/newton-physics/newton.git@24bd863528d6b91137408930d0fbe8fa216ad962",
+    "newton-usd-schemas>=0.4.1",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "torchaudio==2.11.0",
+    "typing-extensions>=4.15.0",
+    "websockets>=14.0,<17.0.0",
+    "coverage>=7.6.1",
+    "packaging>=20,<27",
+]
 
 [[tool.uv.index]]
 name = "nvidia"
@@ -19,3 +40,7 @@ url = "https://pypi.nvidia.com"
 
 [tool.uv.sources]
 vinerylab = { path = "../../", editable = true }
+# Isaac Lab release wheels lag the features we need. `tools/wheel_builder` is a PEP 517
+# backend that builds the same aggregate package from any revision. Pin a commit: a branch
+# name lets a re-lock pick up a new revision and dependency set.
+isaaclab = { git = "https://github.com/isaac-sim/IsaacLab.git", rev = "ab34e8c5e3ee7a2c5f260d1511714e5be3bed3eb", subdirectory = "tools/wheel_builder" }
