@@ -53,7 +53,8 @@ impl<C> Organ<C> {
 
 /// Every organ carrying `C`, in the order planting authored them.
 pub fn organs<C: Component + Clone>(world: &mut World) -> Vec<Organ<C>> {
-    let mut query = world.query_filtered::<Entity, (With<Name>, With<crate::scene::Order>, With<C>)>();
+    let mut query =
+        world.query_filtered::<Entity, (With<Name>, With<crate::scene::Order>, With<C>)>();
     let entities: Vec<Entity> = query.iter(world).collect();
 
     let mut found: Vec<(crate::scene::Order, Organ<C>)> = entities
@@ -66,7 +67,10 @@ pub fn organs<C: Component + Clone>(world: &mut World) -> Vec<Organ<C>> {
                 transform: *at.get::<Transform>().unwrap(),
                 config: at.get::<C>().unwrap().clone(),
             };
-            (*world.entity(entity).get::<crate::scene::Order>().unwrap(), organ)
+            (
+                *world.entity(entity).get::<crate::scene::Order>().unwrap(),
+                organ,
+            )
         })
         .collect();
     found.sort_by_key(|(order, _)| *order);

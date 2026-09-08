@@ -53,8 +53,8 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
-use super::util::outline::{Outline, outline_mesh};
 use super::util::mesh::MeshData;
+use super::util::outline::{Outline, outline_mesh};
 use super::util::{color, material};
 use super::{Grow, Rng};
 use crate::quantize::{Metric, farthest_first};
@@ -141,7 +141,11 @@ pub struct LeafMetric;
 
 impl Metric<LeafConfig> for LeafMetric {
     fn distance(&self, a: &LeafConfig, b: &LeafConfig) -> f32 {
-        let shape = if a.outline == b.outline { 0.0 } else { OUTLINE_APART };
+        let shape = if a.outline == b.outline {
+            0.0
+        } else {
+            OUTLINE_APART
+        };
         // Weighted to stay well under the categorical step across the whole
         // range `detail` can be set to, so resolution never outbids shape.
         let detail = (a.detail as f32 - b.detail as f32) * 0.001;
@@ -225,7 +229,12 @@ pub(crate) fn build(
     hung.sort_by_key(|(order, ..)| *order);
 
     let configs: Vec<LeafConfig> = hung.iter().map(|(_, _, config)| *config).collect();
-    let book = farthest_first(&configs, params.variations.max(1) as usize, 0.0, &LeafMetric);
+    let book = farthest_first(
+        &configs,
+        params.variations.max(1) as usize,
+        0.0,
+        &LeafMetric,
+    );
 
     let geometry = book
         .representatives
@@ -239,7 +248,9 @@ pub(crate) fn build(
         .collect::<anyhow::Result<Vec<Geometry>>>()?;
 
     for ((_, entity, _), drew) in hung.iter().zip(&book.assignment) {
-        commands.entity(*entity).insert(geometry[*drew as usize].clone());
+        commands
+            .entity(*entity)
+            .insert(geometry[*drew as usize].clone());
     }
     Ok(())
 }
@@ -458,8 +469,14 @@ mod tests {
     /// knob is worth is measured past that floor.
     #[test]
     fn more_detail_spends_more_triangles() {
-        let coarse = blades(&LeafParams { detail: 8, ..params() });
-        let fine = blades(&LeafParams { detail: 400, ..params() });
+        let coarse = blades(&LeafParams {
+            detail: 8,
+            ..params()
+        });
+        let fine = blades(&LeafParams {
+            detail: 400,
+            ..params()
+        });
         for (i, (c, f)) in coarse.iter().zip(&fine).enumerate() {
             assert!(
                 f.face_vertex_counts.len() > c.face_vertex_counts.len(),
@@ -476,8 +493,14 @@ mod tests {
     /// than divide by zero.
     #[test]
     fn a_blade_with_no_subdivision_asked_for_still_builds() {
-        let mesh = blade_mesh(&LeafConfig::new(&LeafParams { detail: 0, ..params() }, 0))
-            .expect("a leaf at the slider's bottom stop still builds");
+        let mesh = blade_mesh(&LeafConfig::new(
+            &LeafParams {
+                detail: 0,
+                ..params()
+            },
+            0,
+        ))
+        .expect("a leaf at the slider's bottom stop still builds");
         assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
         assert!(!mesh.face_vertex_counts.is_empty());
     }
@@ -530,9 +553,16 @@ mod tests {
 
         let mut app = app;
         let leaves = organs::<LeafConfig>(app.world_mut());
-        assert!(leaves.len() > 1000, "the fixture hung leaves, got {}", leaves.len());
         assert!(
-            leaves.iter().map(|l| l.config.outline).collect::<std::collections::BTreeSet<_>>()
+            leaves.len() > 1000,
+            "the fixture hung leaves, got {}",
+            leaves.len()
+        );
+        assert!(
+            leaves
+                .iter()
+                .map(|l| l.config.outline)
+                .collect::<std::collections::BTreeSet<_>>()
                 == (0..SHAPES as u32).collect(),
             "and the shoots picked from every shape"
         );
@@ -549,9 +579,14 @@ mod tests {
             .query_filtered::<(Entity, Option<&Children>), With<LeafConfig>>();
         let (entity, children) = query.iter(app.world()).next().expect("some leaf was hung");
 
-        assert!(children.is_none_or(|c| c.is_empty()), "a blade is a leaf of the tree");
         assert!(
-            app.world().entity(entity).contains::<crate::scene::UsdReference>(),
+            children.is_none_or(|c| c.is_empty()),
+            "a blade is a leaf of the tree"
+        );
+        assert!(
+            app.world()
+                .entity(entity)
+                .contains::<crate::scene::UsdReference>(),
             "and references its blade directly"
         );
     }

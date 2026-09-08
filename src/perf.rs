@@ -125,15 +125,9 @@ pub fn plugin(app: &mut App) {
                 mark("author:planting")
                     .after(planting::plant)
                     .before(pole::build),
-                mark("author:pole")
-                    .after(pole::build)
-                    .before(vine::build),
-                mark("author:vine")
-                    .after(vine::build)
-                    .before(shoot::build),
-                mark("author:shoot")
-                    .after(shoot::build)
-                    .before(leaf::build),
+                mark("author:pole").after(pole::build).before(vine::build),
+                mark("author:vine").after(vine::build).before(shoot::build),
+                mark("author:shoot").after(shoot::build).before(leaf::build),
                 mark("author:leaf").after(leaf::build),
             ),
         )

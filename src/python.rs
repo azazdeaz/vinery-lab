@@ -9,8 +9,8 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
-use crate::elements::VineyardParams;
 use crate::elements::SceneParams;
+use crate::elements::VineyardParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;

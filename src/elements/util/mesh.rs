@@ -48,19 +48,18 @@ impl MeshData {
             let face = &self.face_vertex_indices[cursor..cursor + *count as usize];
             cursor += face.len();
             for corner in 1..face.len().saturating_sub(1) {
-                indices.extend([
-                    face[0] as u32,
-                    face[corner] as u32,
-                    face[corner + 1] as u32,
-                ]);
+                indices.extend([face[0] as u32, face[corner] as u32, face[corner + 1] as u32]);
             }
         }
 
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.points.clone())
-            .with_inserted_indices(Indices::U32(indices))
-            // Use area-weighted normals because the angle-weighted normals become zero for small edges
-            .with_computed_area_weighted_normals()
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.points.clone())
+        .with_inserted_indices(Indices::U32(indices))
+        // Use area-weighted normals because the angle-weighted normals become zero for small edges
+        .with_computed_area_weighted_normals()
     }
 }
 
@@ -270,7 +269,11 @@ mod tests {
         // Eight barrel quads plus two eight-sided caps: 8*2 + 2*6.
         assert_eq!(triangles(&cylinder_mesh(0.05, 1.0, 8)).len(), 28);
 
-        assert_eq!(box_mesh(2.0).to_mesh().count_vertices(), 24, "points are untouched");
+        assert_eq!(
+            box_mesh(2.0).to_mesh().count_vertices(),
+            24,
+            "points are untouched"
+        );
     }
 
     /// A fan from the first corner keeps each face's orientation, and getting
@@ -281,7 +284,10 @@ mod tests {
         for mesh in [box_mesh(2.0), cylinder_mesh(0.4, 1.0, 8)] {
             // Both shapes enclose the average of their own points, so
             // "outward" is "away from that" for the caps as well as the sides.
-            let center = mesh.points.iter().fold(Vec3::ZERO, |sum, p| sum + Vec3::from(*p))
+            let center = mesh
+                .points
+                .iter()
+                .fold(Vec3::ZERO, |sum, p| sum + Vec3::from(*p))
                 / mesh.points.len() as f32;
             for (i, [a, b, c]) in triangles(&mesh).into_iter().enumerate() {
                 let normal = (b - a).cross(c - a);
@@ -317,7 +323,10 @@ mod tests {
         // The barrel's rings are shared, so its normals point out from the
         // axis rather than along a face.
         let n = Vec3::from(normals[0]);
-        assert!(n.z.abs() < 0.2, "a barrel normal is level with the axis: {n}");
+        assert!(
+            n.z.abs() < 0.2,
+            "a barrel normal is level with the axis: {n}"
+        );
     }
 
     /// Normals must not depend on how big the thing is. A leaf blade is a
@@ -348,8 +357,14 @@ mod tests {
         assert_eq!(merged.face_vertex_counts, vec![4; 12]);
         // The second box's faces must index into its own copy of the points,
         // which starts where the first box's ended.
-        assert_eq!(merged.face_vertex_indices[..24], (0..24).collect::<Vec<_>>());
-        assert_eq!(merged.face_vertex_indices[24..], (24..48).collect::<Vec<_>>());
+        assert_eq!(
+            merged.face_vertex_indices[..24],
+            (0..24).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            merged.face_vertex_indices[24..],
+            (24..48).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -357,5 +372,4 @@ mod tests {
         let merged = merge_meshes(&[]);
         assert!(merged.points.is_empty() && merged.face_vertex_counts.is_empty());
     }
-
 }

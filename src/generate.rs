@@ -165,20 +165,30 @@ mod tests {
 
         let prims = prims(&doc);
         let referencing = prims.iter().filter(|(_, n)| n.reference.is_some()).count();
-        assert!(referencing > 1000, "the scene draws geometry, got {referencing}");
+        assert!(
+            referencing > 1000,
+            "the scene draws geometry, got {referencing}"
+        );
 
         for (path, node) in &prims {
             let Some(reference) = &node.reference else {
                 continue;
             };
-            assert!(parts.contains(reference.as_str()), "{path} draws a missing {reference}");
-            assert!(node.children.is_empty(), "{path} references and has children");
+            assert!(
+                parts.contains(reference.as_str()),
+                "{path} draws a missing {reference}"
+            );
+            assert!(
+                node.children.is_empty(),
+                "{path} references and has children"
+            );
             let solid = doc
                 .parts
                 .iter()
                 .any(|part| &part.name == reference && part.collision.is_some());
             assert_eq!(
-                node.instanceable, !solid,
+                node.instanceable,
+                !solid,
                 "{path} draws {reference}, which {} a collider",
                 if solid { "carries" } else { "does not carry" }
             );

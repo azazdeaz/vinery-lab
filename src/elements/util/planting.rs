@@ -499,8 +499,7 @@ mod tests {
             ..default()
         });
         let planted = vines(&mut app);
-        let (young, grown): (Vec<_>, Vec<_>) =
-            planted.iter().partition(|v| !v.config.is_mature());
+        let (young, grown): (Vec<_>, Vec<_>) = planted.iter().partition(|v| !v.config.is_mature());
 
         assert!(!young.is_empty(), "some slots drew a replant");
         assert!(!grown.is_empty(), "and most did not");
@@ -563,10 +562,7 @@ mod tests {
             "and the youngest of them are the least grown"
         );
         for e in &established {
-            assert!(
-                *e >= p.young_scale - 1e-6,
-                "inside the age band, got {e}"
-            );
+            assert!(*e >= p.young_scale - 1e-6, "inside the age band, got {e}");
         }
     }
 

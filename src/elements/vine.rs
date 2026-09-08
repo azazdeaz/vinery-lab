@@ -70,9 +70,9 @@ use crate::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
 };
 
+use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
-use super::util::mesh::merge_meshes;
 use super::util::{color, material};
 use super::{Grow, Rng, SceneParams, salt};
 
@@ -265,12 +265,7 @@ impl VineConfig {
     /// The plant these params call for, at this stage of establishment and
     /// this `vigour` — a multiplier about `1.0`, drawn per plant. See
     /// [`VINE_VIGOUR`].
-    pub fn new(
-        params: &VineParams,
-        parcel: &ParcelParams,
-        established: f32,
-        vigour: f32,
-    ) -> Self {
+    pub fn new(params: &VineParams, parcel: &ParcelParams, established: f32, vigour: f32) -> Self {
         Self {
             established: established.clamp(0.0, 1.0),
             trunk_height: params.trunk_height.max(MIN_TRUNK_HEIGHT),
@@ -694,13 +689,7 @@ impl Spur {
 /// The `index`-th spur on a cordon running in direction `sign`, angled up and
 /// out from the cordon and alternating sides the way a pruned vine's spurs
 /// alternate along the wire.
-fn spur(
-    config: &VineConfig,
-    base: Point3<f64>,
-    sign: f64,
-    index: usize,
-    rng: &mut Rng,
-) -> Spur {
+fn spur(config: &VineConfig, base: Point3<f64>, sign: f64, index: usize, rng: &mut Rng) -> Spur {
     let side = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
     let jitter = rng.range(-0.15, 0.15);
     let length = config.spur_length as f64 * rng.range(0.8, 1.2);
@@ -1126,8 +1115,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::util::mesh::MeshData;
+    use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::scene::{Collider, Prototypes, UsdReference};
 
     fn params() -> VineParams {
@@ -1260,7 +1249,10 @@ mod tests {
             "{x0}..{x1}"
         );
         let (y0, y1) = bounds(&mesh, 1);
-        assert!(y0 > -0.2 && y1 < 0.2, "narrow across the row, got {y0}..{y1}");
+        assert!(
+            y0 > -0.2 && y1 < 0.2,
+            "narrow across the row, got {y0}..{y1}"
+        );
         let (z0, z1) = bounds(&mesh, 2);
         assert!(z0 > -0.1 && z1 < c.trunk_height + slack, "{z0}..{z1}");
     }
@@ -1451,9 +1443,20 @@ mod tests {
     /// stub it grew from.
     #[test]
     fn a_replants_shoot_may_face_anywhere() {
-        let replant = build_vine(&VineConfig { established: 0.7, ..config() }, 5).unwrap();
+        let replant = build_vine(
+            &VineConfig {
+                established: 0.7,
+                ..config()
+            },
+            5,
+        )
+        .unwrap();
         assert_eq!(replant.buds[0].as_ref().unwrap().spread, PI as f32);
-        assert!(buds(&config()).iter().all(|b| b.spread == BUD_SPREAD as f32));
+        assert!(
+            buds(&config())
+                .iter()
+                .all(|b| b.spread == BUD_SPREAD as f32)
+        );
     }
 
     /// The trunk's proxy has to cover the trunk it stands in for: short of the
@@ -1517,11 +1520,8 @@ mod tests {
         );
 
         for vine in &vines {
-            let entity = testing::prim(
-                app.world_mut(),
-                &vine.path.split('/').collect::<Vec<_>>(),
-            )
-            .expect("the plant is on the scene graph");
+            let entity = testing::prim(app.world_mut(), &vine.path.split('/').collect::<Vec<_>>())
+                .expect("the plant is on the scene graph");
             let children = named_children(app.world_mut(), entity);
             for prim in [WOOD, COLLISION] {
                 assert_eq!(
@@ -1573,9 +1573,18 @@ mod tests {
 
         let book = farthest_first(&population, 3, 0.0, &VineMetric);
         assert_eq!(book.len(), 3);
-        assert_eq!(book.assignment[0], book.assignment[39], "the mature ones share");
-        assert_ne!(book.assignment[0], book.assignment[40], "the replant does not");
-        assert_ne!(book.assignment[0], book.assignment[41], "nor the stunted ones");
+        assert_eq!(
+            book.assignment[0], book.assignment[39],
+            "the mature ones share"
+        );
+        assert_ne!(
+            book.assignment[0], book.assignment[40],
+            "the replant does not"
+        );
+        assert_ne!(
+            book.assignment[0], book.assignment[41],
+            "nor the stunted ones"
+        );
 
         // And a budget of one is honoured, however varied the population.
         assert_eq!(farthest_first(&population, 1, 0.0, &VineMetric).len(), 1);
@@ -1632,12 +1641,12 @@ mod tests {
         };
 
         let mut app = testing::grown(VineyardParams {
-                vine: VineParams {
-                    variations: 6,
-                    ..params()
-                },
-                ..default()
-            });
+            vine: VineParams {
+                variations: 6,
+                ..params()
+            },
+            ..default()
+        });
         let before = meshes(&app);
         assert!(
             (2..=6).contains(&before),
@@ -1691,8 +1700,7 @@ mod tests {
 
     /// Where a plant's shoots ended up, in the order they were hung.
     fn shoots_of(app: &mut App, path: &str) -> Vec<Transform> {
-        let entity =
-            testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>()).unwrap();
+        let entity = testing::prim(app.world_mut(), &path.split('/').collect::<Vec<_>>()).unwrap();
         named_children(app.world_mut(), entity)
             .into_iter()
             .filter(|(name, _)| !is_fixture(name))

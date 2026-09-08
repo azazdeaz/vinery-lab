@@ -63,8 +63,8 @@ use nalgebra::Point3;
 
 use super::leaf;
 use super::util::color;
+use super::util::material;
 use super::util::strand::{Bark, Strand, strand_mesh};
-use super::util::{material};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
@@ -601,7 +601,12 @@ pub(crate) fn build(
     grown.sort_by_key(|(order, ..)| *order);
 
     let configs: Vec<ShootConfig> = grown.iter().map(|(_, _, config)| *config).collect();
-    let book = farthest_first(&configs, params.variations.max(1) as usize, 0.0, &ShootMetric);
+    let book = farthest_first(
+        &configs,
+        params.variations.max(1) as usize,
+        0.0,
+        &ShootMetric,
+    );
 
     let mut built: Vec<(Vec<LeafNode>, Geometry)> = Vec::with_capacity(book.len());
     for (index, config) in book.representatives.iter().enumerate() {
@@ -763,8 +768,8 @@ pub fn ui() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::util::mesh::MeshData;
+    use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::vine;
     use crate::scene::{Prototypes, UsdReference};
 
@@ -907,7 +912,11 @@ mod tests {
     #[test]
     fn leaves_climb_the_shoot_from_its_base_to_its_tip() {
         let (axis, nodes) = nodes(&config(), 1);
-        assert!(nodes.len() > 4, "a default shoot is leafy, got {}", nodes.len());
+        assert!(
+            nodes.len() > 4,
+            "a default shoot is leafy, got {}",
+            nodes.len()
+        );
 
         let heights: Vec<f32> = nodes.iter().map(|n| n.position.z).collect();
         assert!(
@@ -935,7 +944,8 @@ mod tests {
         let (axis, nodes) = nodes(&config(), 1);
         for node in &nodes {
             let on_axis = axis.at_height(node.position.z as f64);
-            let off = (node.position.x as f64 - on_axis.x).hypot(node.position.y as f64 - on_axis.y);
+            let off =
+                (node.position.x as f64 - on_axis.x).hypot(node.position.y as f64 - on_axis.y);
             assert!(off < 1e-6, "{} sits on the axis, off by {off}", node.name);
         }
     }
@@ -977,7 +987,10 @@ mod tests {
             .map(|n| n.maturity)
             .collect();
 
-        assert!(mature.len() > 3, "most of a shoot is mature, got {mature:?}");
+        assert!(
+            mature.len() > 3,
+            "most of a shoot is mature, got {mature:?}"
+        );
         assert!(
             mature.iter().all(|m| (m - 1.0).abs() < 1e-6),
             "a grown leaf is exactly full size before its vigour, got {mature:?}"
@@ -1057,16 +1070,17 @@ mod tests {
         let mut app = testing::grown(VineyardParams::default());
 
         let shoots = organs::<ShootConfig>(app.world_mut());
-        assert!(shoots.len() > 100, "the fixture grew shoots, got {}", shoots.len());
+        assert!(
+            shoots.len() > 100,
+            "the fixture grew shoots, got {}",
+            shoots.len()
+        );
 
         // Two shoots that drew the same stem still have to differ in canopy.
         let mut by_part: std::collections::BTreeMap<String, Vec<String>> = default();
         for shoot in &shoots {
-            let entity = testing::prim(
-                app.world_mut(),
-                &shoot.path.split('/').collect::<Vec<_>>(),
-            )
-            .expect("the shoot is on the scene graph");
+            let entity = testing::prim(app.world_mut(), &shoot.path.split('/').collect::<Vec<_>>())
+                .expect("the shoot is on the scene graph");
             let children = named_children(app.world_mut(), entity);
             let stem = children
                 .iter()
@@ -1077,7 +1091,13 @@ mod tests {
                 "{}: and leaves on it, got {children:?}",
                 shoot.path
             );
-            let part = app.world().entity(stem.1).get::<UsdReference>().unwrap().0.clone();
+            let part = app
+                .world()
+                .entity(stem.1)
+                .get::<UsdReference>()
+                .unwrap()
+                .0
+                .clone();
             by_part.entry(part).or_default().push(shoot.path.clone());
         }
 
@@ -1158,12 +1178,12 @@ mod tests {
         };
 
         let mut app = testing::grown(VineyardParams {
-                shoot: ShootParams {
-                    variations: 5,
-                    ..params()
-                },
-                ..default()
-            });
+            shoot: ShootParams {
+                variations: 5,
+                ..params()
+            },
+            ..default()
+        });
         assert_eq!(meshes(&app), 5, "the budget is spent");
 
         app.world_mut().resource_mut::<ShootParams>().variations = 2;

@@ -166,17 +166,19 @@ fn collect_prims(world: &mut World) -> HashMap<Entity, Prim> {
 
     query
         .iter(world)
-        .map(|(entity, name, transform, prim_type, reference, collider, children)| {
-            let prim = Prim {
-                name: name.as_str().to_string(),
-                type_name: prim_type.map_or("Xform", |t| t.0).to_string(),
-                xform: transform.and_then(xform_of),
-                reference: reference.map(|r| r.0.clone()),
-                collider: collider.map(|c| c.0),
-                children: children.map(|c| c.to_vec()).unwrap_or_default(),
-            };
-            (entity, prim)
-        })
+        .map(
+            |(entity, name, transform, prim_type, reference, collider, children)| {
+                let prim = Prim {
+                    name: name.as_str().to_string(),
+                    type_name: prim_type.map_or("Xform", |t| t.0).to_string(),
+                    xform: transform.and_then(xform_of),
+                    reference: reference.map(|r| r.0.clone()),
+                    collider: collider.map(|c| c.0),
+                    children: children.map(|c| c.to_vec()).unwrap_or_default(),
+                };
+                (entity, prim)
+            },
+        )
         .collect()
 }
 
@@ -302,7 +304,10 @@ mod tests {
         assert_eq!(doc.root.name, "Vineyard");
         assert_eq!(doc.root.type_name, "Xform");
         assert_eq!(doc.up_axis, "Z");
-        assert!(doc.root.xform.is_none(), "an identity transform is not authored");
+        assert!(
+            doc.root.xform.is_none(),
+            "an identity transform is not authored"
+        );
     }
 
     #[test]
@@ -320,7 +325,10 @@ mod tests {
 
         let doc = scene_doc(&mut world).unwrap();
         let row = &doc.root.children[0];
-        assert_eq!((row.name.as_str(), row.type_name.as_str()), ("Row_00", "Scope"));
+        assert_eq!(
+            (row.name.as_str(), row.type_name.as_str()),
+            ("Row_00", "Scope")
+        );
 
         let vine = &row.children[0];
         assert_eq!(vine.name, "Vine_000");
@@ -356,7 +364,11 @@ mod tests {
     fn a_collider_becomes_a_capsule_prim() {
         let mut world = world();
         let root = root(&mut world);
-        world.spawn((Name::new("Collision"), capsule(0.04, 0.0, 1.8), ChildOf(root)));
+        world.spawn((
+            Name::new("Collision"),
+            capsule(0.04, 0.0, 1.8),
+            ChildOf(root),
+        ));
         // Shorter than its own caps: a sphere, rather than a capsule with a
         // negative side, which USD would take without a word.
         world.spawn((Name::new("Stub"), capsule(0.5, 0.0, 0.2), ChildOf(root)));
@@ -417,7 +429,11 @@ mod tests {
         let root = root(&mut world);
         for i in [3, 0, 2, 1] {
             let name = add_part(&mut world, "Leaf", i);
-            world.spawn((Name::new(format!("Leaf_{i:02}")), UsdReference(name), ChildOf(root)));
+            world.spawn((
+                Name::new(format!("Leaf_{i:02}")),
+                UsdReference(name),
+                ChildOf(root),
+            ));
         }
 
         let once = scene_json(&mut world).unwrap();

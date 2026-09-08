@@ -30,8 +30,8 @@ use std::f64::consts::TAU;
 use curvo::prelude::*;
 use nalgebra::Point3;
 
-use crate::elements::Rng;
 use super::mesh::MeshData;
+use crate::elements::Rng;
 
 /// Degree of the fitted centerline, clamped down when a strand has too few
 /// control points to support it (a 2-point strand is a straight line).
@@ -235,8 +235,8 @@ impl Strand {
     ) -> Self {
         let (points, radii) = merge_coincident(points, radii);
         let length: f64 = points.windows(2).map(|w| (w[1] - w[0]).norm()).sum();
-        let stations = ((length * rings_per_meter).round() as usize + 1)
-            .clamp(MIN_STATIONS, MAX_STATIONS);
+        let stations =
+            ((length * rings_per_meter).round() as usize + 1).clamp(MIN_STATIONS, MAX_STATIONS);
         Self {
             points,
             radii,
@@ -249,10 +249,7 @@ impl Strand {
 
 /// Drops control points that sit on top of their predecessor, carrying their
 /// radii with them. See [`MERGE_DISTANCE`] for why this is not optional.
-fn merge_coincident(
-    points: Vec<Point3<f64>>,
-    radii: Vec<f64>,
-) -> (Vec<Point3<f64>>, Vec<f64>) {
+fn merge_coincident(points: Vec<Point3<f64>>, radii: Vec<f64>) -> (Vec<Point3<f64>>, Vec<f64>) {
     let mut kept_points: Vec<Point3<f64>> = Vec::with_capacity(points.len());
     let mut kept_radii: Vec<f64> = Vec::with_capacity(radii.len());
     for (point, radius) in points.into_iter().zip(radii) {
@@ -409,9 +406,7 @@ fn stations(rail: &NurbsCurve3D<f64>, count: usize) -> (Vec<f64>, Vec<f64>) {
     // The finiteness check is not belt-and-braces: a degenerate segment makes
     // the binary search return NaN, which would otherwise flow straight into
     // `compute_frenet_frames` and come back out as NaN vertices.
-    if parameters.iter().any(|u| !u.is_finite())
-        || parameters.windows(2).any(|w| w[1] <= w[0])
-    {
+    if parameters.iter().any(|u| !u.is_finite()) || parameters.windows(2).any(|w| w[1] <= w[0]) {
         return uniform();
     }
 
@@ -835,7 +830,10 @@ mod tests {
         };
         assert!((bulge.value(0.15) - 0.45).abs() < 1e-12);
         assert!(bulge.value(0.20) < 0.45 && bulge.value(0.20) > 0.0);
-        assert!(bulge.value(0.60) < 1e-6, "gone well before the next feature");
+        assert!(
+            bulge.value(0.60) < 1e-6,
+            "gone well before the next feature"
+        );
 
         let detail = bulge.detail_positions();
         assert!(

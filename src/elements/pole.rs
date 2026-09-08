@@ -33,16 +33,16 @@
 //! [`ParcelParams::trellis_height`]: super::util::parcel::ParcelParams::trellis_height
 //! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
 
+use crate::quantize::{Metric, farthest_first};
+use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use crate::quantize::{Metric, farthest_first};
-use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 
 use super::Grow;
-use super::util::parcel::ParcelParams;
 use super::util::mesh::{MeshData, cylinder_mesh};
+use super::util::parcel::ParcelParams;
 use super::util::{color, material};
 
 /// The mesh-library prefix this element registers its geometry under.
@@ -200,7 +200,10 @@ pub fn build(
         post.with_child((Name::new(POST), geometry[drew].clone()));
         // A post stands on the origin, so its proxy spans the same 0..height
         // the mesh does.
-        post.with_child((Name::new(COLLISION), capsule(built.radius, 0.0, built.height)));
+        post.with_child((
+            Name::new(COLLISION),
+            capsule(built.radius, 0.0, built.height),
+        ));
     }
 }
 
@@ -303,8 +306,20 @@ mod tests {
     #[test]
     fn a_post_asked_for_at_the_stops_still_builds() {
         for (params, trellis_height) in [
-            (PoleParams { radius: 0.0, sides: 0 }, 0.0),
-            (PoleParams { radius: 1.0, sides: 64 }, 12.0),
+            (
+                PoleParams {
+                    radius: 0.0,
+                    sides: 0,
+                },
+                0.0,
+            ),
+            (
+                PoleParams {
+                    radius: 1.0,
+                    sides: 64,
+                },
+                12.0,
+            ),
         ] {
             let mesh = config(params.clone(), trellis_height).mesh();
             assert!(mesh.points.iter().flatten().all(|c| c.is_finite()));
@@ -332,7 +347,13 @@ mod tests {
         let posts = vec![
             config(PoleParams::default(), 1.8),
             config(PoleParams::default(), 1.8),
-            config(PoleParams { radius: 0.2, sides: 8 }, 1.8),
+            config(
+                PoleParams {
+                    radius: 0.2,
+                    sides: 8,
+                },
+                1.8,
+            ),
         ];
         let (names, drew) = built(&posts, 2);
 
@@ -362,8 +383,14 @@ mod tests {
         let reach = shape.height / 2.0 + shape.radius;
 
         assert_eq!(shape.radius, built.radius);
-        assert!((z - reach).abs() < 1e-6, "stands on the origin, like the mesh");
-        assert!((z + reach - built.height).abs() < 1e-6, "and reaches the wire");
+        assert!(
+            (z - reach).abs() < 1e-6,
+            "stands on the origin, like the mesh"
+        );
+        assert!(
+            (z + reach - built.height).abs() < 1e-6,
+            "and reaches the wire"
+        );
     }
 
     /// End to end through the schedule: every post the parcel planted comes out
