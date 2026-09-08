@@ -143,6 +143,10 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
+#[expect(
+    clippy::type_complexity,
+    reason = "the table's shape is its documentation"
+)]
 const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 8] = [
     ("scene", "SceneCfg", |p, out| scene(&p.scene, out)),
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),

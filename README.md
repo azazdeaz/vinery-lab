@@ -1,5 +1,7 @@
 :construction: This project is still under development.
 
+[![CI](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml)
+
 ## Project description
 
 This is a parametric vineyard generator. It generates USD scenes for robotics simulation. Mainly targeting Isaac Lab.

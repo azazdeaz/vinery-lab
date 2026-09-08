@@ -20,7 +20,6 @@ isaaclab_cfg = pytest.importorskip(
 )
 vineyard = pytest.importorskip("vinerylab.isaaclab.vineyard")
 
-import vinerylab  # noqa: E402
 
 FRAGMENTS = isaaclab_cfg.FRAGMENTS
 VineyardCfg = isaaclab_cfg.VineyardCfg

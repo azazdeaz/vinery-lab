@@ -128,6 +128,10 @@ impl Default for PlantingParams {
 /// configs into meshes and knows nothing about rows, terrain or age. Anything
 /// that depends on *where* a plant stands has to be decided here, or two plants
 /// sharing a mesh would silently diverge.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system takes one argument per resource it reads"
+)]
 pub fn plant(
     mut commands: Commands,
     scene: Res<SceneParams>,

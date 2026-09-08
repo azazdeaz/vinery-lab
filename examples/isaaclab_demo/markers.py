@@ -17,7 +17,11 @@ import torch
 
 from isaaclab.assets import Articulation
 from isaaclab.markers import VisualizationMarkers
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG, SPHERE_MARKER_CFG
+from isaaclab.markers.config import (
+    BLUE_ARROW_X_MARKER_CFG,
+    GREEN_ARROW_X_MARKER_CFG,
+    SPHERE_MARKER_CFG,
+)
 from isaaclab.utils.math import quat_from_euler_xyz, quat_mul
 
 ARROW_BASE = (0.3, 0.3, 0.3)  # scale of a zero-length velocity arrow

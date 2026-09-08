@@ -28,6 +28,37 @@ If you only changed Rust source (not pyproject.toml), force a rebuild:
 
     uvx maturin build --release
 
+## Checks
+
+`.github/workflows/ci.yml` runs all of these on every push and pull request:
+
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --features python -- -D warnings
+    cargo test
+    ruff check . && ruff format --check .
+    mypy
+    pytest tests
+
+`--features python` is what puts `src/python.rs` in front of clippy —
+it is out of the default feature set, so a plain `cargo clippy` never sees it.
+
+Isaac Lab is not installed on the runner, so `tests/test_isaaclab_cfg.py` skips
+itself there. It runs locally, from the demo venv:
+
+    examples/isaaclab_demo/.venv/bin/python -m pytest tests/ -q -s < /dev/null
+
+Capture has to be off: pytest's stdin capture breaks Kit's kernel bootstrap.
+The demo's own tests live beside its code and run the same way:
+
+    examples/isaaclab_demo/.venv/bin/python -m pytest examples/isaaclab_demo -q -s < /dev/null
+
+Formatting and the fast lints are also available as commit hooks:
+
+    uvx pre-commit install
+
+Clippy and the test suites stay out of them — a Bevy rebuild is too slow to sit
+in front of a commit.
+
 ## Viewer (interactive)
 
     cargo run --release

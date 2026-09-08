@@ -43,7 +43,9 @@ ROBOT_PATH = "/World/Robot"
 
 def parse_args() -> argparse.Namespace:
     """This script's arguments, on top of Isaac Lab's launcher ones."""
-    parser = argparse.ArgumentParser(description="This script drives a quadruped through a generated vineyard.")
+    parser = argparse.ArgumentParser(
+        description="This script drives a quadruped through a generated vineyard."
+    )
     parser.add_argument(
         "--physics",
         default="physx",
@@ -97,7 +99,9 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: 
 
 def main():
     args_cli = parse_args()
-    sim_cfg = sim_utils.SimulationCfg(dt=SIM_DT, device=args_cli.device, physics=make_physics_cfg(args_cli.physics))
+    sim_cfg = sim_utils.SimulationCfg(
+        dt=SIM_DT, device=args_cli.device, physics=make_physics_cfg(args_cli.physics)
+    )
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it on exit.
     with launch_simulation(sim_cfg, args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)

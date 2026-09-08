@@ -45,11 +45,15 @@ def alley_route(cfg: VineyardCfg) -> np.ndarray:
     """
     stage = Usd.Stage.Open(resolve_usd_path(cfg))
     rows = [
-        np.array([
-            UsdGeom.Xformable(post).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).ExtractTranslation()
-            for post in row.GetChildren()
-            if post.GetName().startswith("Pole_")
-        ])
+        np.array(
+            [
+                UsdGeom.Xformable(post)
+                .ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+                .ExtractTranslation()
+                for post in row.GetChildren()
+                if post.GetName().startswith("Pole_")
+            ]
+        )
         for row in stage.GetPrimAtPath(f"{ROOT}/Planting").GetChildren()
     ]
 

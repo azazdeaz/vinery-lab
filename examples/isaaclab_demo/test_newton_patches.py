@@ -30,7 +30,13 @@ def solver(monkeypatch):
     mujoco = pytest.importorskip("mujoco")
     solver = types.SimpleNamespace(
         mj_model=types.SimpleNamespace(
-            geom_type=np.array([mujoco.mjtGeom.mjGEOM_PLANE, mujoco.mjtGeom.mjGEOM_HFIELD, mujoco.mjtGeom.mjGEOM_BOX]),
+            geom_type=np.array(
+                [
+                    mujoco.mjtGeom.mjGEOM_PLANE,
+                    mujoco.mjtGeom.mjGEOM_HFIELD,
+                    mujoco.mjtGeom.mjGEOM_BOX,
+                ]
+            ),
             geom_pos=np.array([[0, 0, 0], [1, 2, 0.5], [0, 0, 3]], dtype=np.float32),
         ),
         mjw_model=types.SimpleNamespace(geom_pos=FakeArray(np.zeros((2, 3, 3)))),
@@ -55,7 +61,9 @@ def test_a_scene_without_height_fields_is_untouched(solver):
 
 
 # No Newton backend at all, then Newton imported but not yet solving.
-@pytest.mark.parametrize("manager", [None, types.SimpleNamespace(NewtonManager=types.SimpleNamespace(_solver=None))])
+@pytest.mark.parametrize(
+    "manager", [None, types.SimpleNamespace(NewtonManager=types.SimpleNamespace(_solver=None))]
+)
 def test_nothing_to_do_before_a_solver_exists(manager, monkeypatch):
     monkeypatch.delitem(sys.modules, "isaaclab_newton.physics", raising=False)
     if manager is not None:
