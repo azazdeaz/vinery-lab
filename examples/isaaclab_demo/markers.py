@@ -6,11 +6,11 @@ velocity actually achieved.
 
 Green and blue apart means the policy is not tracking the command; the robot
 away from the yellow line means the follower is at fault.
-
-Import only after the Isaac Sim app has been launched.
 """
 
 from __future__ import annotations
+
+import sys
 
 import numpy as np
 import torch
@@ -29,6 +29,7 @@ class DebugMarkers:
     """The route drawn once, plus per-step target and velocity markers."""
 
     def __init__(self, route: np.ndarray):
+        _give_newton_an_env_count()
         # The route never moves, so it is drawn here and not touched again --
         # the markers are a USD point instancer, and its transforms stay where
         # they were written.
@@ -77,3 +78,16 @@ def _along(velocity_b: torch.Tensor, quat_w: torch.Tensor) -> tuple[torch.Tensor
     heading = torch.atan2(velocity_b[:, 1], velocity_b[:, 0])
     zeros = torch.zeros_like(heading)
     return scale, quat_mul(quat_w, quat_from_euler_xyz(zeros, zeros, heading))
+
+
+def _give_newton_an_env_count() -> None:
+    """Newton's viewer cannot draw markers until it knows how many envs there are.
+
+    `NewtonManager` counts envs only on a cloned `/World/envs/env_*` stage. This
+    scene is flat, so the count stays `None` and the Newton marker renderer
+    raises comparing it against an int. Zero is the value that renderer reads as
+    "no envs", drawing every marker in world space.
+    """
+    physics = sys.modules.get("isaaclab_newton.physics")  # unimported unless Newton is in play
+    if physics is not None and physics.NewtonManager.get_num_envs() is None:
+        physics.NewtonManager._num_envs = 0
