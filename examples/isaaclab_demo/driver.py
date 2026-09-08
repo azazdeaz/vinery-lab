@@ -3,8 +3,6 @@
 Two nested loops, both in `Driver.control`: a waypoint follower turns the
 route into a velocity command, and a pre-trained locomotion policy turns that
 command into joint targets.
-
-Import only after the Isaac Sim app has been launched.
 """
 
 from __future__ import annotations
@@ -21,6 +19,14 @@ from route import STRIDE
 # Blind flat-terrain policy for ANYmal-C, as shipped with Isaac Lab: 48
 # observations in, 12 joint-position offsets out.
 POLICY_PATH = f"{ISAACLAB_NUCLEUS_DIR}/Policies/ANYmal-C/Blind/policy.pt"
+# The joint order the policy was trained in. Backends import the articulation
+# in their own order -- PhysX by tree level, Newton leg by leg -- so the joints
+# are addressed by name and never by the order the backend hands them over in.
+POLICY_JOINTS = [
+    "LF_HAA", "LH_HAA", "RF_HAA", "RH_HAA",
+    "LF_HFE", "LH_HFE", "RF_HFE", "RH_HFE",
+    "LF_KFE", "LH_KFE", "RF_KFE", "RH_KFE",
+]  # fmt: skip
 ACTION_SCALE = 0.5
 # 200 Hz physics under a 50 Hz policy, the rates it was trained at. Change
 # either and a joint-position target stops meaning what the policy learnt.
@@ -44,6 +50,7 @@ class Driver:
         self.robot = robot
         self.waypoints = torch.tensor(route, dtype=torch.float32, device=robot.device)
         self.policy = torch.jit.load(read_file(POLICY_PATH)).to(robot.device).eval()
+        self.joints, _ = robot.find_joints(POLICY_JOINTS, preserve_order=True)
         self.index = 0
         self.action = torch.zeros(1, robot.num_joints, device=robot.device)
         self.command = torch.zeros(1, 3, device=robot.device)
@@ -61,21 +68,23 @@ class Driver:
         self.command = self._steer()
         # The order the policy was trained with; changing it silently produces
         # a robot that twitches rather than an error.
-        default_joint_pos = self.robot.data.default_joint_pos.torch
+        default_joint_pos = self.robot.data.default_joint_pos.torch[:, self.joints]
         observation = torch.cat(
             [
                 self.robot.data.root_lin_vel_b.torch,
                 self.robot.data.root_ang_vel_b.torch,
                 self.robot.data.projected_gravity_b.torch,
                 self.command,
-                self.robot.data.joint_pos.torch - default_joint_pos,
-                self.robot.data.joint_vel.torch,
+                self.robot.data.joint_pos.torch[:, self.joints] - default_joint_pos,
+                self.robot.data.joint_vel.torch[:, self.joints],
                 self.action,
             ],
             dim=-1,
         )
         self.action = self.policy(observation)
-        self.robot.set_joint_position_target_index(target=default_joint_pos + ACTION_SCALE * self.action)
+        self.robot.set_joint_position_target_index(
+            target=default_joint_pos + ACTION_SCALE * self.action, joint_ids=self.joints
+        )
 
     def place(self):
         """Stand the robot on the current waypoint, facing the one after it."""
