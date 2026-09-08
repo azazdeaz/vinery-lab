@@ -12,7 +12,7 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
- - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules
+ - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
 
 ## Upcoming features
  - Cover crops and weeds
@@ -37,6 +37,11 @@ Generate and run in Isaac Lab
 ```bash
 cd examples/isaaclab_demo/
 uv run main.py
+```
+
+The same demo on a Newton backend and in the Newton viewer
+```bash
+uv run main.py --physics newton_mjwarp --viz newton
 ```
 
 ## Workflow
