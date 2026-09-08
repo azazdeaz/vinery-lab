@@ -83,7 +83,10 @@ Colliders are authored where physics can reach them
     The ground's collision schema lives *inside* its part, so it composes in
     through the reference; the generator keeps every prim referencing such a
     part non-instanceable, because a collider inside a prototype is reachable
-    only through an instance proxy. Everything else a robot bumps into is a
+    only through an instance proxy. The ground also carries
+    ``newton:heightfield:resolution``, its grid spacing in meters: Newton
+    rasterizes it into a height field at that spacing rather than handing
+    MuJoCo a mesh, which MuJoCo would collide as its convex hull. Everything else a robot bumps into is a
     ``Capsule`` prim of its own -- the only round shape PhysX has natively,
     needing no cooking -- marked ``purpose = "guide"`` so no renderer draws it.
 
@@ -253,6 +256,13 @@ def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
         UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr(
             approximation
         )
+
+    if resolution := part.get("heightfield_resolution"):
+        # Newton rasterizes this collider into a height field at this spacing.
+        # Backends that read the triangles ignore the attribute.
+        mesh.GetPrim().CreateAttribute(
+            "newton:heightfield:resolution", Sdf.ValueTypeNames.Float
+        ).Set(resolution)
 
     return mesh
 

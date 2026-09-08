@@ -17,7 +17,8 @@
       "indices": [0, 1, 2],
       "display_color": [0.35, 0.28, 0.2],
       "double_sided": false,
-      "collision": "none"
+      "collision": "none",
+      "heightfield_resolution": 0.5
     },
     {
       "name": "Vine_0",

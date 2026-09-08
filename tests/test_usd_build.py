@@ -141,6 +141,16 @@ def test_a_part_that_is_its_own_collider_says_how_it_collides(stage: Usd.Stage):
     assert not part_mesh(stage, "Vine_0").GetPrim().HasAPI(UsdPhysics.CollisionAPI)
 
 
+def test_a_ground_that_is_a_height_field_says_at_what_spacing(stage: Usd.Stage):
+    """MuJoCo collides a mesh as its convex hull; Newton reads this attribute
+    and rasterizes the ground into a height field instead, which collides as
+    the ground actually is."""
+    ground = part_mesh(stage, "Terrain_0").GetPrim()
+    assert ground.GetAttribute("newton:heightfield:resolution").Get() == 0.5
+
+    assert not part_mesh(stage, "Vine_0").GetPrim().HasAttribute("newton:heightfield:resolution")
+
+
 def test_a_collider_reaches_a_prim_physics_can_find(stage: Usd.Stage):
     """The collision schema lives inside the part, so it arrives through the
     reference. That only reaches a real prim while the reference stays
