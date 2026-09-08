@@ -8,7 +8,8 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 
 
 ## Features
- - GUI based vineyard configurator
+ - Parameter configurator with live preview
+ - Fully reproducible scene generation
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
@@ -28,7 +29,7 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 
 ## Quick commands to demo
 
-Run the editor
+Run the parameter editor
 ```bash
 cargo run --release
 ```
@@ -45,7 +46,7 @@ uv run main.py --physics newton_mjwarp --viz newton
 ```
 
 ## Workflow
- - Start the viewer `cargo run --release`.
+ - Start the parameter editor with `cargo run --release`.
  - Edit the scene parameters in the UI.
  - Press **Copy Isaac Lab cfg** to put the current settings on the clipboard as
    a `VineyardCfg(...)` construction — only the fields you moved.
