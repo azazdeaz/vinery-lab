@@ -73,9 +73,10 @@ fn scene(p: &SceneParams, out: &mut Fields) {
 
 fn terrain(p: &TerrainParams, out: &mut Fields) {
     let d = TerrainParams::default();
+    out.float("length", p.length, d.length);
     out.float("width", p.width, d.width);
-    out.float("height", p.height, d.height);
-    out.float("max_elevation", p.max_elevation, d.max_elevation);
+    out.float("max_inclination", p.max_inclination, d.max_inclination);
+    out.float("feature_size", p.feature_size, d.feature_size);
     out.int("detail", p.detail as u64, d.detail as u64);
 }
 

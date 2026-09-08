@@ -156,13 +156,13 @@ pub fn author(
     *layout = solve(&parcel, &terrain);
 }
 
-/// Solves the row layout for a rectangular terrain of `terrain.width` by
-/// `terrain.height`, centered on the origin. Pure function of its
+/// Solves the row layout for a rectangular terrain of `terrain.length` by
+/// `terrain.width`, centered on the origin. Pure function of its
 /// parameters, so it's the whole surface worth testing.
 fn solve(parcel: &ParcelParams, terrain: &TerrainParams) -> VineyardLayout {
     let half = Vec2::new(
+        (terrain.length / 2.0).max(0.0),
         (terrain.width / 2.0).max(0.0),
-        (terrain.height / 2.0).max(0.0),
     );
     let extent = Rect::from_center_half_size(Vec2::ZERO, half);
     let bounds = extent.inflate(-parcel.headland.max(0.0));
@@ -423,8 +423,8 @@ mod tests {
 
     fn terrain() -> TerrainParams {
         TerrainParams {
-            width: 80.0,
-            height: 50.0,
+            length: 80.0,
+            width: 50.0,
             ..default()
         }
     }

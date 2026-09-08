@@ -32,12 +32,24 @@ class SceneCfg:
 
 @configclass
 class TerrainCfg:
-    """The ground surface the vineyard stands on."""
+    """The ground surface the vineyard stands on.
 
-    width: float = 80.0
-    height: float = 50.0
-    max_elevation: float = 3.0
-    detail: int = 6
+    `length` runs along X -- the direction rows take at `ParcelCfg.orientation`
+    0 -- and `width` along Y. The ground is noise sampled over that extent:
+    `feature_size` is the distance in meters from one hill to the next and is
+    anchored in world space, so a larger field shows more hills rather than
+    larger ones. `max_inclination`, in degrees, caps how steep the ground gets
+    -- the elevation is solved from it and `feature_size`, so the same angle
+    means the same steepness at any size. `detail` is grid samples per
+    feature, which sets both the mesh density and the collision height field's
+    resolution.
+    """
+
+    length: float = 80.0
+    width: float = 50.0
+    max_inclination: float = 20.0
+    feature_size: float = 16.0
+    detail: int = 8
 
 
 @configclass

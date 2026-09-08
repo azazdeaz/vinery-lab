@@ -30,18 +30,19 @@ class SceneParams:
     def __repr__(self) -> str: ...
 
 class TerrainParams:
+    length: float
     width: float
-    height: float
-    max_elevation: float
-    variations: int
+    max_inclination: float
+    feature_size: float
     detail: int
 
     def __init__(
         self,
-        width: float = 80.0,
-        height: float = 50.0,
-        max_elevation: float = 3.0,
-        detail: int = 6,
+        length: float = 80.0,
+        width: float = 50.0,
+        max_inclination: float = 20.0,
+        feature_size: float = 16.0,
+        detail: int = 8,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

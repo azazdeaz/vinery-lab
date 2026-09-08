@@ -29,12 +29,25 @@ fn to_py_err(err: anyhow::Error) -> PyErr {
 #[pymethods]
 impl TerrainParams {
     #[new]
-    #[pyo3(signature = (width=80.0, height=50.0, max_elevation=3.0, detail=6))]
-    fn py_new(width: f32, height: f32, max_elevation: f32, detail: u32) -> Self {
+    #[pyo3(signature = (
+        length=80.0,
+        width=50.0,
+        max_inclination=20.0,
+        feature_size=16.0,
+        detail=8,
+    ))]
+    fn py_new(
+        length: f32,
+        width: f32,
+        max_inclination: f32,
+        feature_size: f32,
+        detail: u32,
+    ) -> Self {
         Self {
+            length,
             width,
-            height,
-            max_elevation,
+            max_inclination,
+            feature_size,
             detail,
         }
     }

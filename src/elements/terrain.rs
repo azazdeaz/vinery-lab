@@ -1,11 +1,13 @@
 //! Terrain element — the ground surface everything else sits on.
 //!
-//! Builds a NURBS surface by lofting through cross sections: `detail`
-//! sections spaced along Y, each a curve over `detail` control points spread
-//! along X at random elevations, then tessellates that surface into a mesh.
-//! The same tessellation also feeds the [`Ground`] resource, a height-field
-//! sampler that [`parcel`](super::parcel) uses to drape row layouts onto the
-//! surface.
+//! The ground is a Perlin noise field sampled on a regular XY grid. The wave
+//! has a size in meters (`feature_size`) and the field is anchored in world
+//! space, so growing the ground uncovers more of the same landscape instead
+//! of stretching one undulation across it, and the amplitude solved from
+//! `max_inclination` holds the steepness at any size. That one grid is both
+//! the mesh handed to the exporter and the [`Ground`] resource, the
+//! height-field sampler [`parcel`](super::parcel) uses to drape row layouts
+//! onto the surface.
 //!
 //! The scene root `/Vineyard` is not this element's to define —
 //! [`crate::stage::new_stage`] authors it, along with the default prim it
@@ -26,8 +28,6 @@ use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use curvo::prelude::{NurbsSurface, SurfaceTessellation3D};
-use nalgebra::Point4;
 use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
 
@@ -45,18 +45,26 @@ const PART: &str = "Terrain";
 #[derive(Component)]
 pub struct Terrain;
 
-/// Degree of the lofted surface in both directions, clamped down when there
-/// are too few control points to support it.
-const DEGREE: usize = 3;
-
-/// Tessellated quads per control-point span. The surface is smooth between
-/// control points, so it needs subdividing past them to look like anything.
-const TESSELLATION: usize = 4;
-
-/// Fixed seed for the elevation field. Terrain has no seed parameter yet, and
+/// Fixed seed for the noise field. Terrain has no seed parameter yet, and
 /// the generated stage has to be byte-identical across runs for the same
 /// params, so the randomness is deterministic rather than sampled.
 const SEED: u64 = 0x5EED_1EAF;
+
+/// The largest gradient magnitude [`perlin`] attains, per unit of its input.
+/// Dividing by it turns a requested inclination into an elevation amplitude.
+///
+/// Measured over the field, not derived: the analytic bound is three times
+/// looser, and honouring it would flatten the ground to guard against
+/// gradient alignments that random angles never produce.
+/// `the_noise_stays_under_its_slope_bound` re-measures it.
+const MAX_NOISE_SLOPE: f64 = 2.5;
+
+/// Floor on `feature_size`, so nothing divides by a slider left at zero.
+const MIN_FEATURE_SIZE: f64 = 0.5;
+
+/// Cap on grid samples per axis. Fine detail over a large field would
+/// otherwise build a mesh too heavy to rebuild while a slider is dragged.
+const MAX_SAMPLES: usize = 256;
 
 #[derive(Resource, Clone, Debug)]
 #[cfg_attr(
@@ -64,26 +72,32 @@ const SEED: u64 = 0x5EED_1EAF;
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct TerrainParams {
-    /// Extent along X, in meters.
+    /// Extent along X, in meters. Rows run along it at orientation 0.
+    pub length: f32,
+    /// Extent along Y, in meters.
     pub width: f32,
-    /// Extent along Y, in meters. (Not vertical — the stage is Z-up; see
-    /// [`max_elevation`](Self::max_elevation) for that.)
-    pub height: f32,
-    /// Upper bound on control-point elevation, in meters. The surface stays
-    /// within its control points' convex hull, so it never exceeds this.
-    pub max_elevation: f32,
-    /// Resolution of the control-point lattice: how many cross sections to
-    /// loft through, and how many control points each one spans.
+    /// Upper bound on the ground's slope, in degrees. The elevation amplitude
+    /// is solved from this and `feature_size`, so the same value gives the
+    /// same steepness whatever the field's extent or resolution.
+    pub max_inclination: f32,
+    /// Distance from one hill to the next, in meters. The noise field is
+    /// anchored in world space at this size, so changing the extent uncovers
+    /// more or less of the same landscape rather than rescaling it.
+    pub feature_size: f32,
+    /// Grid samples per feature — how finely the mesh follows the noise. The
+    /// grid steps `feature_size / detail` meters, capped at [`MAX_SAMPLES`]
+    /// samples per axis.
     pub detail: u32,
 }
 
 impl Default for TerrainParams {
     fn default() -> Self {
         Self {
-            width: 80.0,
-            height: 50.0,
-            max_elevation: 3.0,
-            detail: 6,
+            length: 80.0,
+            width: 50.0,
+            max_inclination: 20.0,
+            feature_size: 16.0,
+            detail: 8,
         }
     }
 }
@@ -139,12 +153,11 @@ pub(crate) fn build(
     }
     library.clear(PART);
 
-    let (tessellation, divisions) = terrain_tessellation(&params)?;
-    let field = Ground::from_tessellation(&tessellation, divisions);
+    let field = terrain_grid(&params);
     let geometry = library.part(
         PART,
         0,
-        mesh_data(&tessellation).to_mesh(),
+        mesh_data(&field).to_mesh(),
         // Unjittered: there is one ground, so nothing for a per-mesh drift to
         // tell apart.
         material::GROUND.surface(color::srgb(color::GROUND)),
@@ -166,114 +179,81 @@ pub(crate) fn build(
     Ok(())
 }
 
-/// Builds the terrain surface and tessellates it, returning the tessellation
-/// alongside the (square) division count used to build it — [`Ground`] needs
-/// that count to index back into the point grid.
-///
-/// Built directly via [`NurbsSurface::new`] with one shared, explicit knot
-/// vector in both directions, rather than [`NurbsSurface::try_loft`]'s
-/// per-column chord-length interpolation: `try_loft` derives each column's
-/// fit from the Euclidean distance between its (randomly elevated) points,
-/// so with elevation baked into the lofted curves themselves, different
-/// columns end up fit against slightly different implicit parametrizations
-/// even though they share one knot vector on the resulting surface — which
-/// makes the surface's `x`/`y` only *approximately* separable, undermining
-/// the whole point of [`Ground`]. Every control point's x depends only on
-/// its column index and y only on its row index here (both spread evenly by
-/// construction), so building the grid with one explicit shared knot vector
-/// keeps x and y exactly separable regardless of the random elevation —
-/// see `the_tessellation_grid_is_rectilinear_in_xy` below.
-fn terrain_tessellation(
-    params: &TerrainParams,
-) -> anyhow::Result<(SurfaceTessellation3D<f64>, usize)> {
-    // A curve needs more control points than its degree, and a surface
-    // needs at least two rows/columns, so one span is the floor for both
-    // directions.
-    let count = (params.detail as usize).max(2);
-    let degree = DEGREE.min(count - 1);
-    let knots = clamped_uniform_knots(count, degree);
-    let mut elevations = Elevations::new(SEED, params.max_elevation as f64);
-    // Drawn row-by-row (`j` outer, `i` inner) so reseeding keeps assigning
-    // the same draw to the same (i, j) grid cell regardless of how the grid
-    // is later built up.
-    let heights: Vec<f64> = (0..count * count).map(|_| elevations.next()).collect();
+/// Samples the noise field over the parcel's extent: the grid that is both
+/// the ground mesh and the height-field sampler.
+fn terrain_grid(params: &TerrainParams) -> Ground {
+    let feature = (params.feature_size as f64).max(MIN_FEATURE_SIZE);
+    let spacing = feature / params.detail.max(1) as f64;
+    let xs = axis(params.length as f64, spacing);
+    let ys = axis(params.width as f64, spacing);
 
-    // control_points[i][j]: column `i` spread along x, row `j` spread along
-    // y — matching curvo's own `[u][v]` control-point layout, so this slots
-    // straight into `NurbsSurface::new` without curvo needing to infer
-    // anything about the grid's shape.
-    let control_points: Vec<Vec<_>> = (0..count)
-        .map(|i| {
-            let x = spread(params.width as f64, i, count);
-            (0..count)
-                .map(|j| {
-                    let y = spread(params.height as f64, j, count);
-                    Point4::new(x, y, heights[j * count + i], 1.0)
-                })
-                .collect()
+    // The noise field's own slope is at most `MAX_NOISE_SLOPE` per unit of
+    // input, so stretched over `feature` meters an amplitude `a` tilts the
+    // ground by at most `a * MAX_NOISE_SLOPE / feature`. Solving that for the
+    // requested angle makes steepness a property of the wave rather than of
+    // how much ground there is -- which is the point of sampling a field
+    // anchored in world space instead of fitting one to the extent.
+    let slope = params.max_inclination.clamp(0.0, 89.0).to_radians().tan() as f64;
+    let amplitude = slope * feature / MAX_NOISE_SLOPE;
+
+    let heights = xs
+        .iter()
+        .flat_map(|&x| {
+            ys.iter().map(move |&y| {
+                (amplitude * perlin(x as f64 / feature, y as f64 / feature)) as f32
+            })
         })
         .collect();
-
-    let surface = NurbsSurface::new(degree, degree, knots.clone(), knots, control_points);
-    let divisions = (count - 1) * TESSELLATION;
-    Ok((surface.regular_tessellate(divisions, divisions), divisions))
+    Ground { xs, ys, heights }
 }
 
-/// Position `i` of `count` evenly spaced across `extent`, centered on 0.
-fn spread(extent: f64, i: usize, count: usize) -> f64 {
-    extent * (i as f64 / (count - 1) as f64 - 0.5)
-}
-
-/// A clamped uniform knot vector for `count` control points of `degree`:
-/// `degree + 1` repeats at each end (so the curve reaches its first and last
-/// control point) and single interior knots between.
+/// Sample coordinates across `extent`, centered on 0 and about `spacing`
+/// apart.
 ///
-/// Every cross section shares this vector, which is what lets the loft
-/// combine them without first refining them into a common one.
-fn clamped_uniform_knots(count: usize, degree: usize) -> Vec<f64> {
-    let spans = (count - degree) as f64;
-    std::iter::repeat_n(0.0, degree + 1)
-        .chain((1..spans as usize).map(|i| i as f64))
-        .chain(std::iter::repeat_n(spans, degree + 1))
+/// The ends land exactly on the extent, so the spacing is rounded to whole
+/// spans: one at least, and never more than [`MAX_SAMPLES`] allows.
+fn axis(extent: f64, spacing: f64) -> Vec<f32> {
+    let spans = ((extent / spacing).round() as usize).clamp(1, MAX_SAMPLES - 1);
+    (0..=spans)
+        .map(|i| (extent * (i as f64 / spans as f64 - 0.5)) as f32)
         .collect()
 }
 
-/// Converts a tessellated surface into USD's mesh layout.
+/// The grid as one quad per cell, in USD's mesh layout.
 ///
-/// curvo's triangles already wind counter-clockwise seen from above, which is
-/// what USD's default right-handed orientation needs for the ground to face
-/// up, so the indices carry over unchanged.
-fn mesh_data(tessellation: &SurfaceTessellation3D<f64>) -> MeshData {
+/// Corners are wound counter-clockwise seen from above, which is what USD's
+/// default right-handed orientation needs for the ground to face up.
+fn mesh_data(ground: &Ground) -> MeshData {
+    let (nx, ny) = (ground.xs.len(), ground.ys.len());
+    let points = (0..nx)
+        .flat_map(|ix| (0..ny).map(move |iy| (ix, iy)))
+        .map(|(ix, iy)| [ground.xs[ix], ground.ys[iy], ground.heights[ix * ny + iy]])
+        .collect();
+
+    let mut face_vertex_indices = Vec::with_capacity((nx - 1) * (ny - 1) * 4);
+    for ix in 0..nx - 1 {
+        for iy in 0..ny - 1 {
+            let (a, b) = ((ix * ny + iy) as i32, ((ix + 1) * ny + iy) as i32);
+            face_vertex_indices.extend([a, b, b + 1, a + 1]);
+        }
+    }
+
     MeshData {
-        points: tessellation
-            .points()
-            .iter()
-            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
-            .collect(),
-        face_vertex_counts: vec![3; tessellation.faces().len()],
-        face_vertex_indices: tessellation
-            .faces()
-            .iter()
-            .flat_map(|[a, b, c]| [*a as i32, *b as i32, *c as i32])
-            .collect(),
+        points,
+        face_vertex_counts: vec![4; face_vertex_indices.len() / 4],
+        face_vertex_indices,
     }
 }
 
 /// The terrain's height field, sampled on a rectilinear XY grid.
 ///
-/// `regular_tessellate` lays its points out u-major (`points[iu * m + iv]`),
-/// and because every control point's x comes from [`spread`] over `i` alone
-/// and its y from the section index alone, the loft's x depends only on u
-/// and its y only on v — so the tessellated grid is rectilinear in XY even
-/// though the surface itself is a general NURBS loft. That turns height
-/// lookup into two binary searches and a bilinear blend instead of a NURBS
-/// parameter inversion, and — since it samples the same grid the mesh is
-/// built from — it agrees exactly with the collision geometry at the grid
-/// points.
+/// The same grid the ground mesh is built from, so height lookup is two
+/// binary searches and a bilinear blend, and it agrees exactly with the
+/// collision geometry at the grid points.
 ///
 /// Rows are drawn in plan view and lifted onto this field afterwards, rather
-/// than following the surface's own parameterization: see
-/// [`parcel`](super::parcel) for where that happens.
+/// than following the ground as they go: see [`parcel`](super::parcel) for
+/// where that happens.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Ground {
     /// Strictly increasing x coordinates of the grid columns.
@@ -285,33 +265,14 @@ pub struct Ground {
 }
 
 impl Ground {
-    /// Builds the sampler from a tessellation known to have `divs + 1`
-    /// points along each parametric direction, laid out u-major.
-    fn from_tessellation(tessellation: &SurfaceTessellation3D<f64>, divs: usize) -> Self {
-        let n = divs + 1;
-        let points = tessellation.points();
-        if points.len() != n * n {
-            // Defensive: a mismatch here means the u/v layout assumption
-            // above no longer holds, and any grid built from it would just
-            // be wrong. Fall back to "no terrain" rather than sample garbage.
-            return Self::default();
-        }
-        Self {
-            xs: (0..n).map(|iu| points[iu * n].x as f32).collect(),
-            ys: (0..n).map(|iv| points[iv].y as f32).collect(),
-            heights: points.iter().map(|p| p.z as f32).collect(),
-        }
-    }
-
     /// The narrowest gap between adjacent grid lines, in meters. `0.0` if the
     /// grid hasn't been built yet.
     ///
-    /// The grid is rectilinear but not evenly spaced: `regular_tessellate`
-    /// steps the surface's *parameter* uniformly, and a clamped knot vector
-    /// does not carry that onto evenly spaced x. Resampling the field -- which
-    /// is what [`Library::heightfield`](crate::scene::Library::heightfield)
-    /// has a consumer do -- has to match this rather than the average to
-    /// resolve every span the mesh carries.
+    /// Each axis rounds its own spacing to whole spans, so this is not simply
+    /// `feature_size / detail`. Resampling the field -- which is what
+    /// [`Library::heightfield`](crate::scene::Library::heightfield) has a
+    /// consumer do -- has to match the narrower of the two to resolve every
+    /// span the mesh carries.
     pub fn finest_spacing(&self) -> f32 {
         if self.xs.len() < 2 || self.ys.len() < 2 {
             return 0.0;
@@ -368,35 +329,63 @@ fn segment(axis: &[f32], v: f32) -> (usize, usize, f32) {
     (i, i + 1, t)
 }
 
-/// The random elevation field, as a stream of heights in `0..=max`.
-///
-/// Uses the same inlined SplitMix64 as the variation picker (see
-/// [`super::split_mix_64`]) for the same reason: a fixed algorithm is what
-/// makes the scene reproducible across machines and crate versions.
-struct Elevations {
-    state: u64,
-    max: f64,
+/// The unit vector at lattice corner `(ix, iy)`, at an angle hashed from the
+/// corner's coordinates.
+fn gradient(ix: i64, iy: i64) -> (f64, f64) {
+    // Odd multipliers, so the two coordinates cannot cancel each other out.
+    let mut state = SEED
+        ^ (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+    // Top 53 bits, the mantissa width of an f64, for a uniform unit float.
+    let unit = (super::split_mix_64(&mut state) >> 11) as f64 / (1u64 << 53) as f64;
+    let angle = unit * std::f64::consts::TAU;
+    (angle.cos(), angle.sin())
 }
 
-impl Elevations {
-    fn new(seed: u64, max: f64) -> Self {
-        Self { state: seed, max }
-    }
-
-    fn next(&mut self) -> f64 {
-        // Top 53 bits, the mantissa width of an f64, for a uniform unit float.
-        let unit = (super::split_mix_64(&mut self.state) >> 11) as f64 / (1u64 << 53) as f64;
-        unit * self.max
-    }
+/// Perlin gradient noise over the unit lattice, in about `-0.7..=0.7`.
+///
+/// Written out rather than pulled from a crate, for the same reason the
+/// variation picker inlines SplitMix64 (see [`super::split_mix_64`]): the
+/// generated stage has to be byte-identical across machines and across
+/// dependency updates, and a noise crate is free to change what it returns
+/// between versions.
+fn perlin(x: f64, y: f64) -> f64 {
+    let (cx, cy) = (x.floor(), y.floor());
+    let (fx, fy) = (x - cx, y - cy);
+    // Each corner's gradient, dotted with the offset from that corner.
+    let corner = |dx: i64, dy: i64| {
+        let (gx, gy) = gradient(cx as i64 + dx, cy as i64 + dy);
+        gx * (fx - dx as f64) + gy * (fy - dy as f64)
+    };
+    // Quintic fade: zero first and second derivatives at the lattice lines, so
+    // neighbouring cells meet without a visible crease.
+    let fade = |t: f64| t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    let lerp = |a: f64, b: f64, t: f64| a + t * (b - a);
+    let (u, v) = (fade(fx), fade(fy));
+    lerp(
+        lerp(corner(0, 0), corner(1, 0), u),
+        lerp(corner(0, 1), corner(1, 1), u),
+        v,
+    )
 }
 
 pub fn ui() -> impl Scene {
     bsn! {
         Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
         Children [
-            label_small("Terrain width"),
+            label_small("Terrain length"),
             (
                 @FeathersSlider { @min: 5.0, @max: 200.0, @value: 80.0 }
+                SliderStep(1.0)
+                SliderPrecision(0)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                    params.length = change.value;
+                })
+            ),
+            label_small("Terrain width"),
+            (
+                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 50.0 }
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -404,34 +393,34 @@ pub fn ui() -> impl Scene {
                     params.width = change.value;
                 })
             ),
-            label_small("Terrain height"),
+            label_small("Max inclination (deg)"),
             (
-                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 50.0 }
+                @FeathersSlider { @min: 0.0, @max: 45.0, @value: 20.0 }
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.height = change.value;
+                    params.max_inclination = change.value;
                 })
             ),
-            label_small("Max elevation"),
+            label_small("Feature size (m)"),
             (
-                @FeathersSlider { @min: 0.0, @max: 15.0, @value: 3.0 }
-                SliderStep(0.1)
-                SliderPrecision(1)
+                @FeathersSlider { @min: 2.0, @max: 60.0, @value: 16.0 }
+                SliderStep(1.0)
+                SliderPrecision(0)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.max_elevation = change.value;
+                    params.feature_size = change.value;
                 })
             ),
             label_small("Terrain detail"),
             (
-                @FeathersSlider { @min: 2.0, @max: 24.0, @value: 6.0 }
+                @FeathersSlider { @min: 2.0, @max: 16.0, @value: 8.0 }
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.detail = change.value.round().max(2.0) as u32;
+                    params.detail = change.value.round().max(1.0) as u32;
                 })
             ),
         ]
@@ -458,59 +447,164 @@ mod tests {
     }
 
     fn mesh(params: &TerrainParams) -> MeshData {
-        let (tessellation, _) = terrain_tessellation(params).expect("terrain lofts");
-        mesh_data(&tessellation)
+        mesh_data(&terrain_grid(params))
     }
 
+    /// The grid steps `feature_size / detail` meters, and carries one quad
+    /// per cell.
     #[test]
-    fn detail_drives_the_tessellation_size() {
-        let m = mesh(&TerrainParams {
+    fn the_grid_steps_feature_size_over_detail() {
+        let params = TerrainParams {
+            length: 40.0,
+            width: 20.0,
+            feature_size: 8.0,
             detail: 4,
             ..default()
-        });
-        let divisions = (4 - 1) * TESSELLATION;
-        assert_eq!(m.points.len(), (divisions + 1) * (divisions + 1));
-        assert_eq!(m.face_vertex_counts.len(), divisions * divisions * 2);
-        assert_eq!(m.face_vertex_indices.len(), m.face_vertex_counts.len() * 3);
+        };
+        let ground = terrain_grid(&params);
+        // 2 m steps: 20 spans across 40 m, 10 across 20 m.
+        assert_eq!((ground.xs.len(), ground.ys.len()), (21, 11));
+        assert!((ground.finest_spacing() - 2.0).abs() < 1e-4);
+
+        let m = mesh(&params);
+        assert_eq!(m.points.len(), 21 * 11);
+        assert_eq!(m.face_vertex_counts.len(), 20 * 10);
+        assert_eq!(m.face_vertex_indices.len(), m.face_vertex_counts.len() * 4);
     }
 
-    /// The lowest usable detail must still loft: two sections of two control
-    /// points each, which forces the degree down to 1 in both directions.
+    /// Neither end of a slider may divide by zero or build a mesh nothing can
+    /// carry: a feature size and a detail of zero both floor, and a fine grid
+    /// over a large field stops at the sample cap.
     #[test]
-    fn the_coarsest_terrain_still_builds() {
+    fn the_grid_survives_both_extremes() {
         assert!(
             !mesh(&TerrainParams {
-                detail: 1,
+                feature_size: 0.0,
+                detail: 0,
                 ..default()
             })
             .points
             .is_empty()
         );
+
+        let dense = terrain_grid(&TerrainParams {
+            length: 200.0,
+            feature_size: 0.5,
+            detail: 16,
+            ..default()
+        });
+        assert_eq!(dense.xs.len(), MAX_SAMPLES);
     }
 
     #[test]
     fn the_surface_spans_the_requested_extent() {
         let params = TerrainParams {
-            width: 8.0,
-            height: 3.0,
-            max_elevation: 1.5,
-            detail: 5,
+            length: 8.0,
+            width: 3.0,
+            feature_size: 4.0,
+            ..default()
         };
         let m = mesh(&params);
         let (x0, x1) = bounds(&m, 0);
         let (y0, y1) = bounds(&m, 1);
-        let (z0, z1) = bounds(&m, 2);
-        assert!((x1 - x0 - params.width).abs() < 1e-4, "width {x0}..{x1}");
-        assert!((y1 - y0 - params.height).abs() < 1e-4, "height {y0}..{y1}");
+        assert!((x1 - x0 - params.length).abs() < 1e-4, "length {x0}..{x1}");
+        assert!((y1 - y0 - params.width).abs() < 1e-4, "width {y0}..{y1}");
+    }
+
+    /// The steepest slope between two adjacent grid samples.
+    fn steepest_slope(ground: &Ground) -> f64 {
+        let (nx, ny) = (ground.xs.len(), ground.ys.len());
+        let height = |ix: usize, iy: usize| ground.heights[ix * ny + iy] as f64;
+        let mut steepest = 0.0_f64;
+        for ix in 0..nx {
+            for iy in 0..ny {
+                let steps = [
+                    (ix + 1 < nx).then(|| {
+                        let run = (ground.xs[ix + 1] - ground.xs[ix]) as f64;
+                        (height(ix + 1, iy) - height(ix, iy), run)
+                    }),
+                    (iy + 1 < ny).then(|| {
+                        let run = (ground.ys[iy + 1] - ground.ys[iy]) as f64;
+                        (height(ix, iy + 1) - height(ix, iy), run)
+                    }),
+                ];
+                for (rise, run) in steps.into_iter().flatten() {
+                    steepest = steepest.max(rise.abs() / run);
+                }
+            }
+        }
+        steepest
+    }
+
+    /// Slope is a property of the ground, not of how much of it there is.
+    /// Elevation used to be capped in meters over a lattice fitted to the
+    /// extent, which made the same cap on a smaller field mean steeper
+    /// ground; the cap must now hold at any size.
+    #[test]
+    fn inclination_bounds_the_slope_at_any_field_size() {
+        let steepest = |length, width| {
+            steepest_slope(&terrain_grid(&TerrainParams {
+                length,
+                width,
+                max_inclination: 20.0,
+                ..default()
+            }))
+        };
+
+        let (large, small) = (steepest(80.0, 50.0), steepest(8.0, 5.0));
+        let cap = 20.0_f64.to_radians().tan();
+        assert!(small > 0.0, "20 degrees is not flat ground: {small}");
+        assert!(large <= cap && small <= cap, "{large} and {small} under {cap}");
+    }
+
+    /// The undulation is anchored in the world rather than fitted to the
+    /// field: two grounds differing only in extent agree wherever they
+    /// overlap. Stretching one wave across the whole field is what made a
+    /// smaller ground come out wavier.
+    #[test]
+    fn the_wave_does_not_stretch_with_the_field() {
+        // A whole meter per sample, and both extents are whole multiples of
+        // it, so the two grids share these sample points exactly.
+        let ground = |length, width| {
+            terrain_grid(&TerrainParams {
+                length,
+                width,
+                detail: 16,
+                ..default()
+            })
+        };
+        let (large, small) = (ground(80.0, 50.0), ground(20.0, 20.0));
+        for (x, y) in [(0.0, 0.0), (3.0, -2.0), (-5.0, 4.0)] {
+            assert_eq!(large.height(x, y), small.height(x, y), "at ({x}, {y})");
+        }
+    }
+
+    /// `MAX_NOISE_SLOPE` is measured rather than derived, so it is worth
+    /// re-measuring: the inclination cap is only a cap while the noise field
+    /// stays under it, and only useful while it stays near it.
+    #[test]
+    fn the_noise_stays_under_its_slope_bound() {
+        let h = 1e-5;
+        let mut steepest = 0.0_f64;
+        // 30 cells square -- more of the lattice than the largest field at
+        // the smallest feature size reaches.
+        for i in 0..400 {
+            for j in 0..400 {
+                let (x, y) = (i as f64 * 0.075 - 15.0, j as f64 * 0.075 - 15.0);
+                let dx = (perlin(x + h, y) - perlin(x - h, y)) / (2.0 * h);
+                let dy = (perlin(x, y + h) - perlin(x, y - h)) / (2.0 * h);
+                steepest = steepest.max(dx.hypot(dy));
+            }
+        }
+        assert!(steepest < MAX_NOISE_SLOPE, "measured {steepest}");
         assert!(
-            z0 >= -1e-4 && z1 <= params.max_elevation + 1e-4,
-            "elevation {z0}..{z1} stays within 0..={}",
-            params.max_elevation
+            steepest > MAX_NOISE_SLOPE * 0.5,
+            "not so loose it flattens the ground: {steepest}"
         );
     }
 
-    /// Every triangle must wind counter-clockwise seen from above, or the
-    /// ground renders as a hole under USD's default right-handed orientation.
+    /// Every face must wind counter-clockwise seen from above, or the ground
+    /// renders as a hole under USD's default right-handed orientation.
     #[test]
     fn faces_wind_upward() {
         let m = mesh(&TerrainParams::default());
@@ -519,57 +613,15 @@ mod tests {
         }
     }
 
-    /// The rectilinear-grid assumption `Ground` relies on: every point in a
-    /// tessellation column shares an x, and every point in a row shares a y.
-    /// If curvo ever laid the loft's u/v out the other way round, this is
-    /// the test that would catch it — `Ground::from_tessellation` would
-    /// otherwise silently sample a transposed field.
-    #[test]
-    fn the_tessellation_grid_is_rectilinear_in_xy() {
-        let (tessellation, divisions) = terrain_tessellation(&TerrainParams {
-            width: 8.0,
-            height: 3.0,
-            max_elevation: 1.5,
-            detail: 5,
-        })
-        .unwrap();
-        let n = divisions + 1;
-        let points = tessellation.points();
-        assert_eq!(points.len(), n * n);
-
-        for iu in 0..n {
-            let x0 = points[iu * n].x;
-            for iv in 1..n {
-                assert!(
-                    (points[iu * n + iv].x - x0).abs() < 1e-9,
-                    "column {iu} shares one x"
-                );
-            }
-        }
-        for iv in 0..n {
-            let y0 = points[iv].y;
-            for iu in 1..n {
-                assert!(
-                    (points[iu * n + iv].y - y0).abs() < 1e-9,
-                    "row {iv} shares one y"
-                );
-            }
-        }
-    }
-
     #[test]
     fn ground_height_matches_the_mesh_at_grid_points() {
-        let params = TerrainParams {
-            width: 8.0,
-            height: 3.0,
-            max_elevation: 1.5,
-            detail: 5,
-        };
-        let (tessellation, divisions) = terrain_tessellation(&params).unwrap();
-        let ground = Ground::from_tessellation(&tessellation, divisions);
-
-        for point in tessellation.points() {
-            let (x, y, z) = (point.x as f32, point.y as f32, point.z as f32);
+        let ground = terrain_grid(&TerrainParams {
+            length: 8.0,
+            width: 3.0,
+            feature_size: 4.0,
+            ..default()
+        });
+        for [x, y, z] in mesh_data(&ground).points {
             assert!(
                 (ground.height(x, y) - z).abs() < 1e-4,
                 "grid point ({x}, {y}) samples back to its own height"
@@ -577,11 +629,10 @@ mod tests {
         }
     }
 
-    /// Exercises the bilinear math directly against a hand-built grid,
-    /// rather than a real terrain's — real elevation is independently random
-    /// per control point, so nothing says a real height field is anywhere
-    /// near linear between two neighbouring grid samples, which is exactly
-    /// what a midpoint check like this needs to hold.
+    /// Exercises the bilinear math directly against a hand-built grid rather
+    /// than a real terrain's: a midpoint check like this needs the field to
+    /// be exactly linear between neighbouring samples, which noise is only
+    /// approximately.
     #[test]
     fn ground_height_interpolates_between_grid_points() {
         let ground = Ground {
@@ -604,13 +655,12 @@ mod tests {
     #[test]
     fn ground_height_clamps_outside_the_grid() {
         let params = TerrainParams::default();
-        let (tessellation, divisions) = terrain_tessellation(&params).unwrap();
-        let ground = Ground::from_tessellation(&tessellation, divisions);
+        let ground = terrain_grid(&params);
 
         let far_below = ground.height(-1e6, -1e6);
         let corner = ground.height(
+            (-(params.length as f64) / 2.0) as f32,
             (-(params.width as f64) / 2.0) as f32,
-            (-(params.height as f64) / 2.0) as f32,
         );
         assert!((far_below - corner).abs() < 1e-3, "clamps to the near edge");
     }

@@ -33,7 +33,8 @@ from isaaclab_assets.robots.anymal import ANYMAL_C_CFG  # isort:skip
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
 VINEYARD_CFG = VineyardCfg(
-    terrain=TerrainCfg(height=22.0, width=22.0, max_elevation=0.9),
+    # A small field, so a wave to match: roughly 0.8 m of relief across it.
+    terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
 )
 VINEYARD_PATH = "/World/Vineyard"
