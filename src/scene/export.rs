@@ -137,6 +137,7 @@ fn part_entry(name: &str, mesh: &Mesh, part: &Part) -> anyhow::Result<PartEntry>
         display_color: part.color,
         double_sided: part.double_sided,
         collision: part.collision.map(str::to_string),
+        heightfield_resolution: part.heightfield_resolution,
     })
 }
 
@@ -283,6 +284,7 @@ mod tests {
                 ior: 1.5,
                 double_sided: true,
                 collision: None,
+                heightfield_resolution: None,
             },
         )
     }
@@ -449,6 +451,7 @@ mod tests {
                 ior: 1.5,
                 double_sided: false,
                 collision: None,
+                heightfield_resolution: None,
             },
         );
 

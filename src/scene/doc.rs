@@ -78,6 +78,13 @@ pub struct PartEntry {
     /// [`Node::instanceable`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collision: Option<String>,
+    /// Horizontal grid spacing, in meters, of a collider whose surface is a
+    /// height field in xy — authored as `newton:heightfield:resolution`.
+    /// A backend that collides height fields rasterizes the mesh at this
+    /// spacing instead of approximating it; MuJoCo, for one, collides every
+    /// mesh as its convex hull. Absent on a part that is not one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heightfield_resolution: Option<f32>,
 }
 
 /// The `physics:approximation` of an exact triangle-mesh collider. USD spells
@@ -203,6 +210,7 @@ mod tests {
                 display_color: [0.2, 0.5, 0.1],
                 double_sided: true,
                 collision: None,
+                heightfield_resolution: None,
             }],
             root,
         }

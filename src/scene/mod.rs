@@ -171,6 +171,9 @@ pub struct Part {
     /// The `physics:approximation` this mesh collides as, for a part that is
     /// its own collider. See [`Library::collide`].
     pub collision: Option<&'static str>,
+    /// The grid spacing this mesh is a height field at. See
+    /// [`Library::heightfield`].
+    pub heightfield_resolution: Option<f32>,
 }
 
 impl Part {
@@ -276,6 +279,7 @@ impl Library<'_> {
             ior: surface.ior,
             double_sided: surface.double_sided,
             collision: None,
+            heightfield_resolution: None,
         };
         Geometry {
             mesh: Mesh3d(part.mesh.clone()),
@@ -294,6 +298,15 @@ impl Library<'_> {
         // is there by construction.
         if let Some(entry) = self.prototypes.get_mut(&part.reference.0) {
             entry.collision = Some(approximation);
+        }
+    }
+
+    /// Records that a registered collider's surface is a height field in xy,
+    /// sampled every `resolution` meters — see
+    /// [`PartEntry::heightfield_resolution`](doc::PartEntry::heightfield_resolution).
+    pub fn heightfield(&mut self, part: &Geometry, resolution: f32) {
+        if let Some(entry) = self.prototypes.get_mut(&part.reference.0) {
+            entry.heightfield_resolution = Some(resolution);
         }
     }
 }
@@ -361,6 +374,7 @@ mod tests {
             ior: 1.5,
             double_sided: false,
             collision: None,
+            heightfield_resolution: None,
         }
     }
 
