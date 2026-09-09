@@ -25,12 +25,10 @@ import tempfile
 from typing import TYPE_CHECKING
 
 from filelock import FileLock
-from isaaclab.sim.spawners.from_files.from_files import _spawn_from_usd_file
 from isaaclab.sim.utils import clone
 
 import vinerylab
 import vinerylab._core
-import vinerylab.usd.build
 
 from .vineyard_cfg import FRAGMENTS
 
@@ -68,6 +66,10 @@ def spawn_vineyard(
     Returns:
         The prim of the spawned vineyard.
     """
+    # Imported here, not at module level: it pulls in `pxr`, and Kit's own copy
+    # of `pxr` only wins the import if nothing loaded the pip one before Kit started.
+    from isaaclab.sim.spawners.from_files.from_files import _spawn_from_usd_file
+
     return _spawn_from_usd_file(
         prim_path, resolve_usd_path(cfg), cfg, translation, orientation, **kwargs
     )
@@ -144,16 +146,23 @@ def _fingerprint(cfg: VineyardCfg) -> str:
 def _generator_id() -> str:
     """Identifies the generator, so a changed one doesn't read a stale cache.
 
-    Two modules decide what lands on disk: the Rust extension that solves the
-    scene, and the Python module that authors it as USD. Both are keyed --
-    a change to either produces a different file from the same parameters.
+    Three things decide what lands on disk: the Rust extension that solves the
+    scene, the Python module that authors it as USD, and the OpenUSD build that
+    writes the file -- a run under Kit and a kitless one author with different
+    ones. All three are keyed: a change to any produces a different file from
+    the same parameters.
 
-    The version alone is not enough during development, where `maturin
+    The package version alone is not enough during development, where `maturin
     develop` or an edit changes a generator without touching it. Size and
     mtime do change every time, which errs toward regenerating -- the safe
     direction.
     """
-    fields = [vinerylab.__version__]
+    # Imported here, not at module level: see `spawn_vineyard`.
+    from pxr import Usd
+
+    import vinerylab.usd.build
+
+    fields = [vinerylab.__version__, ".".join(map(str, Usd.GetVersion()))]
     for module in (vinerylab._core, vinerylab.usd.build):
         stat = pathlib.Path(module.__file__).stat()
         fields += [str(stat.st_size), str(stat.st_mtime_ns)]

@@ -3,18 +3,14 @@
 The waypoints come out of the generated scene itself -- the trellis posts --
 so the route re-solves whenever the vineyard parameters change, with nothing
 to keep in sync by hand.
-
-Import only after the Isaac Sim app has been launched.
 """
 
 from __future__ import annotations
 
 import numpy as np
-from pxr import Usd, UsdGeom
 
 from vinerylab.isaaclab import VineyardCfg
 from vinerylab.isaaclab.vineyard import resolve_usd_path
-from vinerylab.usd import ROOT
 
 STRIDE = 1.0  # m between waypoints along an alley
 RUNOUT = 3.0  # m an alley carries on past its rows' end posts, into the headland
@@ -43,6 +39,12 @@ def alley_route(cfg: VineyardCfg) -> np.ndarray:
     height reads them, and the two are centimeters apart on any terrain this
     generator produces.
     """
+    # Imported here, not at module level: both pull in `pxr`, and Kit's own
+    # copy of `pxr` only wins the import if nothing loaded the pip one first.
+    from pxr import Usd, UsdGeom
+
+    from vinerylab.usd import ROOT
+
     stage = Usd.Stage.Open(resolve_usd_path(cfg))
     rows = [
         np.array(
