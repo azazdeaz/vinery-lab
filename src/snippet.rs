@@ -15,8 +15,8 @@
 //! compare it against the derived `Debug` output — which names every field of
 //! the real struct — and fail the moment the two disagree.
 
-use crate::elements::VineyardParams;
 use crate::elements::SceneParams;
+use crate::elements::VineyardParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -143,11 +143,17 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
+#[expect(
+    clippy::type_complexity,
+    reason = "the table's shape is its documentation"
+)]
 const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 8] = [
     ("scene", "SceneCfg", |p, out| scene(&p.scene, out)),
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),
     ("parcel", "ParcelCfg", |p, out| parcel(&p.parcel, out)),
-    ("planting", "PlantingCfg", |p, out| planting(&p.planting, out)),
+    ("planting", "PlantingCfg", |p, out| {
+        planting(&p.planting, out)
+    }),
     ("pole", "PoleCfg", |p, out| pole(&p.pole, out)),
     ("vine", "VineCfg", |p, out| vine(&p.vine, out)),
     ("shoot", "ShootCfg", |p, out| shoot(&p.shoot, out)),
@@ -250,7 +256,10 @@ mod tests {
     #[test]
     fn defaults_emit_a_bare_cfg() {
         let snippet = vineyard_cfg(&VineyardParams::default());
-        assert!(snippet.contains("VINEYARD_CFG = VineyardCfg()"), "{snippet}");
+        assert!(
+            snippet.contains("VINEYARD_CFG = VineyardCfg()"),
+            "{snippet}"
+        );
         assert!(
             !snippet.contains("TerrainCfg"),
             "an untouched fragment is not imported: {snippet}"

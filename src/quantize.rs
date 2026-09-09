@@ -253,7 +253,11 @@ mod tests {
             "the one diseased sample in a thousand took a slot"
         );
         assert!(
-            book.representatives.iter().filter(|r| r.disease > 0.0).count() == 1,
+            book.representatives
+                .iter()
+                .filter(|r| r.disease > 0.0)
+                .count()
+                == 1,
             "and only the one, since there is only one to cover"
         );
     }

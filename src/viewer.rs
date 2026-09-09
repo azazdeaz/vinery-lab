@@ -22,25 +22,25 @@ const SCENE_PATH: &str = "scene.json";
 pub fn run() {
     let mut app = App::new();
     app.add_plugins((
-            DefaultPlugins,
-            PanOrbitCameraPlugin,
-            crate::scene::plugin,
-            crate::elements::plugin,
-            crate::ui::plugin,
-            // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
-            // headless generation path's `MinimalPlugins` doesn't provide —
-            // see `parcel::debug_plugin`'s docs for why it's kept separate
-            // from `crate::elements::plugin`.
-            parcel::debug_plugin,
-        ))
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
-                sync_camera_enabled_with_ui,
-            ),
-        );
+        DefaultPlugins,
+        PanOrbitCameraPlugin,
+        crate::scene::plugin,
+        crate::elements::plugin,
+        crate::ui::plugin,
+        // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
+        // headless generation path's `MinimalPlugins` doesn't provide —
+        // see `parcel::debug_plugin`'s docs for why it's kept separate
+        // from `crate::elements::plugin`.
+        parcel::debug_plugin,
+    ))
+    .add_systems(Startup, setup)
+    .add_systems(
+        Update,
+        (
+            save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
+            sync_camera_enabled_with_ui,
+        ),
+    );
 
     // Off by default: it logs a line per re-authored frame, which during a
     // slider drag is every frame. See [`crate::perf`].

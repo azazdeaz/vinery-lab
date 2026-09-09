@@ -128,6 +128,10 @@ impl Default for PlantingParams {
 /// configs into meshes and knows nothing about rows, terrain or age. Anything
 /// that depends on *where* a plant stands has to be decided here, or two plants
 /// sharing a mesh would silently diverge.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system takes one argument per resource it reads"
+)]
 pub fn plant(
     mut commands: Commands,
     scene: Res<SceneParams>,
@@ -499,8 +503,7 @@ mod tests {
             ..default()
         });
         let planted = vines(&mut app);
-        let (young, grown): (Vec<_>, Vec<_>) =
-            planted.iter().partition(|v| !v.config.is_mature());
+        let (young, grown): (Vec<_>, Vec<_>) = planted.iter().partition(|v| !v.config.is_mature());
 
         assert!(!young.is_empty(), "some slots drew a replant");
         assert!(!grown.is_empty(), "and most did not");
@@ -563,10 +566,7 @@ mod tests {
             "and the youngest of them are the least grown"
         );
         for e in &established {
-            assert!(
-                *e >= p.young_scale - 1e-6,
-                "inside the age band, got {e}"
-            );
+            assert!(*e >= p.young_scale - 1e-6, "inside the age band, got {e}");
         }
     }
 

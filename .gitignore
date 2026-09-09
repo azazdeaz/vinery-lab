@@ -1,4 +1,6 @@
 /target
+# `uv sync` writes one; the root package is a library, so it is not pinned.
+/uv.lock
 /.venv
 /python/vinerylab/*.so
 __pycache__/

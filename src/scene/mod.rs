@@ -459,7 +459,11 @@ mod tests {
 
         let parent = entity.get::<ChildOf>().expect("the root has a parent").0;
         assert_eq!(
-            app.world().entity(parent).get::<Transform>().unwrap().rotation,
+            app.world()
+                .entity(parent)
+                .get::<Transform>()
+                .unwrap()
+                .rotation,
             z_up_to_y_up()
         );
     }

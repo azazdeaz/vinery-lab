@@ -24,12 +24,12 @@
 //! the [`Ground`] field, and chaining them here guarantees the ordering that
 //! system-ordering-across-elements would only imply.
 
+use crate::scene::doc::TRIANGLE_MESH;
+use crate::scene::{Library, PrimRoot};
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
-use crate::scene::doc::TRIANGLE_MESH;
-use crate::scene::{Library, PrimRoot};
 
 use super::Grow;
 use super::util::mesh::MeshData;
@@ -199,9 +199,8 @@ fn terrain_grid(params: &TerrainParams) -> Ground {
     let heights = xs
         .iter()
         .flat_map(|&x| {
-            ys.iter().map(move |&y| {
-                (amplitude * perlin(x as f64 / feature, y as f64 / feature)) as f32
-            })
+            ys.iter()
+                .map(move |&y| (amplitude * perlin(x as f64 / feature, y as f64 / feature)) as f32)
         })
         .collect();
     Ground { xs, ys, heights }
@@ -554,7 +553,10 @@ mod tests {
         let (large, small) = (steepest(80.0, 50.0), steepest(8.0, 5.0));
         let cap = 20.0_f64.to_radians().tan();
         assert!(small > 0.0, "20 degrees is not flat ground: {small}");
-        assert!(large <= cap && small <= cap, "{large} and {small} under {cap}");
+        assert!(
+            large <= cap && small <= cap,
+            "{large} and {small} under {cap}"
+        );
     }
 
     /// The undulation is anchored in the world rather than fitted to the

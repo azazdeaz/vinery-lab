@@ -254,9 +254,7 @@ def test_a_transform_round_trips_through_the_op_stack(stage: Usd.Stage):
 def test_a_quaternion_keeps_its_real_part_in_usds_order(stage: Usd.Stage):
     """The document is xyzw and Gf.Quatf is real-first. Getting this backwards
     yields a scene that is plausibly wrong rather than obviously wrong."""
-    _, orient, _ = UsdGeom.Xformable(
-        stage.GetPrimAtPath(f"{VINE}/Shoot_00")
-    ).GetOrderedXformOps()
+    _, orient, _ = UsdGeom.Xformable(stage.GetPrimAtPath(f"{VINE}/Shoot_00")).GetOrderedXformOps()
     quat = orient.Get()
 
     assert quat.GetReal() == pytest.approx(0.7071068)

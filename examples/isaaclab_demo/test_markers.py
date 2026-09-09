@@ -18,7 +18,9 @@ markers = pytest.importorskip("markers", reason="Isaac Lab is not installed")
 @pytest.mark.parametrize("counted, expected", [(None, 0), (4, 4)])
 def test_newton_env_count_only_filled_in_when_missing(counted, expected, monkeypatch):
     manager = types.SimpleNamespace(get_num_envs=lambda: counted, _num_envs=counted)
-    monkeypatch.setitem(sys.modules, "isaaclab_newton.physics", types.SimpleNamespace(NewtonManager=manager))
+    monkeypatch.setitem(
+        sys.modules, "isaaclab_newton.physics", types.SimpleNamespace(NewtonManager=manager)
+    )
     markers._give_newton_an_env_count()
     assert manager._num_envs == expected
 

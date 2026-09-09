@@ -115,7 +115,8 @@ The prim tree is authored through ``Sdf``, not the ``Usd`` stage API
 from __future__ import annotations
 
 import functools
-from typing import Any, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
@@ -176,9 +177,7 @@ def build_stage(doc: Mapping[str, Any], path: str) -> Usd.Stage:
     """
     format_version = doc.get("format")
     if format_version != FORMAT:
-        raise ValueError(
-            f"scene document is format {format_version}, this builder speaks {FORMAT}"
-        )
+        raise ValueError(f"scene document is format {format_version}, this builder speaks {FORMAT}")
 
     stage = Usd.Stage.CreateNew(path)
     _author_stage_metadata(stage, doc)
@@ -253,9 +252,7 @@ def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
         # in through the reference -- which the generator keeps
         # non-instanceable for exactly this reason.
         UsdPhysics.CollisionAPI.Apply(mesh.GetPrim())
-        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr(
-            approximation
-        )
+        UsdPhysics.MeshCollisionAPI.Apply(mesh.GetPrim()).CreateApproximationAttr(approximation)
 
     if resolution := part.get("heightfield_resolution"):
         # Newton rasterizes this collider into a height field at this spacing.
@@ -363,9 +360,7 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
         (
             "extent",
             Sdf.ValueTypeNames.Float3Array,
-            Vt.Vec3fArray(
-                [Gf.Vec3f(-radius, -radius, -reach), Gf.Vec3f(radius, radius, reach)]
-            ),
+            Vt.Vec3fArray([Gf.Vec3f(-radius, -radius, -reach), Gf.Vec3f(radius, radius, reach)]),
         ),
     ):
         Sdf.AttributeSpec(spec, name, value_type).default = value

@@ -93,14 +93,28 @@ class Driver:
         device = self.robot.device
         pose = torch.tensor(
             # Position, then orientation as a quaternion in (x, y, z, w).
-            [[here[0], here[1], here[2] + STAND_HEIGHT, 0.0, 0.0, np.sin(yaw / 2), np.cos(yaw / 2)]],
+            [
+                [
+                    here[0],
+                    here[1],
+                    here[2] + STAND_HEIGHT,
+                    0.0,
+                    0.0,
+                    np.sin(yaw / 2),
+                    np.cos(yaw / 2),
+                ]
+            ],
             dtype=torch.float32,
             device=device,
         )
         self.robot.write_root_pose_to_sim_index(root_pose=pose)
         self.robot.write_root_velocity_to_sim_index(root_velocity=torch.zeros(1, 6, device=device))
-        self.robot.write_joint_position_to_sim_index(position=self.robot.data.default_joint_pos.torch.clone())
-        self.robot.write_joint_velocity_to_sim_index(velocity=self.robot.data.default_joint_vel.torch.clone())
+        self.robot.write_joint_position_to_sim_index(
+            position=self.robot.data.default_joint_pos.torch.clone()
+        )
+        self.robot.write_joint_velocity_to_sim_index(
+            velocity=self.robot.data.default_joint_vel.torch.clone()
+        )
         self.robot.reset()
 
     def _advance(self):
@@ -111,7 +125,10 @@ class Driver:
         never stood on. A target the robot is already at has no useful
         direction to steer by.
         """
-        if torch.linalg.norm(self.target[0, :2] - self.robot.data.root_pos_w.torch[0, :2]) < LOOKAHEAD:
+        if (
+            torch.linalg.norm(self.target[0, :2] - self.robot.data.root_pos_w.torch[0, :2])
+            < LOOKAHEAD
+        ):
             self.index = (self.index + 1) % len(self.waypoints)
 
     def _recover(self):
@@ -121,7 +138,9 @@ class Driver:
         a run that ends on its side is a run that stops reporting anything.
         """
         if self.robot.data.projected_gravity_b.torch[0, 2] > FALLEN:
-            print(f"[INFO]: Robot fell over at waypoint {self.index}/{len(self.waypoints)}, resetting...")
+            print(
+                f"[INFO]: Robot fell over at waypoint {self.index}/{len(self.waypoints)}, resetting..."
+            )
             self.place()
             self.action.zero_()
 

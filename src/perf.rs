@@ -125,15 +125,9 @@ pub fn plugin(app: &mut App) {
                 mark("author:planting")
                     .after(planting::plant)
                     .before(pole::build),
-                mark("author:pole")
-                    .after(pole::build)
-                    .before(vine::build),
-                mark("author:vine")
-                    .after(vine::build)
-                    .before(shoot::build),
-                mark("author:shoot")
-                    .after(shoot::build)
-                    .before(leaf::build),
+                mark("author:pole").after(pole::build).before(vine::build),
+                mark("author:vine").after(vine::build).before(shoot::build),
+                mark("author:shoot").after(shoot::build).before(leaf::build),
                 mark("author:leaf").after(leaf::build),
             ),
         )
@@ -272,6 +266,10 @@ mod bench {
         // Each of these is a slider a user would drag. They are deliberately
         // spread across the dependency graph: a leaf param re-authors
         // everything downstream of it, while a planting param re-places only.
+        #[expect(
+            clippy::type_complexity,
+            reason = "a list of named closures, read once"
+        )]
         let nudges: Vec<(&str, fn(&mut World))> = vec![
             ("leaf.detail", |w| {
                 w.resource_mut::<leaf::LeafParams>().detail += 1;

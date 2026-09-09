@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A superseded run on the same ref has nothing to say; a Bevy build is too
+# expensive to leave one queued behind another.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # One job, not one per language: the Python tests import the compiled
+  # extension, so both halves need the same `target/` directory. Splitting them
+  # would build Bevy twice and keep two multi-gigabyte caches for it.
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # alsa-sys, libudev-sys and wayland-sys resolve their libraries through
+      # pkg-config at build time. The X11 backend needs nothing here: x11-dl
+      # and xkbcommon-dl dlopen theirs at run time instead. python3-dev is for
+      # the clippy step below.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev python3-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all -- --check
+
+      # `--features python` is what pulls in src/python.rs; unlike
+      # `extension-module` it still links libpython, so it works outside a wheel
+      # build. `--all-targets` reaches the test modules and the viewer binary.
+      - run: cargo clippy --all-targets --features python -- -D warnings
+
+      - run: cargo test
+
+      - uses: astral-sh/setup-uv@v7
+
+      # Builds the extension through maturin, the way a consumer installs it,
+      # and brings in the dev group's tools.
+      - run: uv sync
+
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+      # Isaac Lab is not installed here, so tests/test_isaaclab_cfg.py skips
+      # itself. That suite runs locally, from the demo venv.
+      - run: uv run pytest tests -q
