@@ -24,9 +24,14 @@ class FakeArray:
         self.values = np.asarray(values, dtype=np.float32)
 
 
-@pytest.fixture
-def solver(monkeypatch):
-    """A two-world solver whose middle geom is a height field, 0.5 m up."""
+@pytest.fixture(params=["direct", "coupled"])
+def solver(request, monkeypatch):
+    """A two-world solver whose middle geom is a height field, 0.5 m up.
+
+    Once as the solver itself and once as an entry of a coupled solver, which
+    is what `NewtonManager._solver` holds when the shoots bend: every rule
+    below has to survive being nested.
+    """
     mujoco = pytest.importorskip("mujoco")
     solver = types.SimpleNamespace(
         mj_model=types.SimpleNamespace(
@@ -42,7 +47,14 @@ def solver(monkeypatch):
         mjw_model=types.SimpleNamespace(geom_pos=FakeArray(np.zeros((2, 3, 3)))),
         mjw_data=types.SimpleNamespace(geom_xpos=FakeArray(np.zeros((2, 3, 3)))),
     )
-    manager = types.SimpleNamespace(NewtonManager=types.SimpleNamespace(_solver=solver))
+    stepping = solver
+    if request.param == "coupled":
+        # The VBD half owns no MuJoCo model, so it also covers the guard.
+        entries = {"rigid": solver, "shoots": types.SimpleNamespace()}
+        stepping = types.SimpleNamespace(
+            entry_names=lambda: tuple(entries), solver=entries.__getitem__
+        )
+    manager = types.SimpleNamespace(NewtonManager=types.SimpleNamespace(_solver=stepping))
     monkeypatch.setitem(sys.modules, "isaaclab_newton.physics", manager)
     return solver
 
