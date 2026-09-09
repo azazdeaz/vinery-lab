@@ -446,17 +446,21 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     What holds the curve in place is ``physics:masses``; see
     `_cable_point_masses`.
     """
-    points = [tuple(p) for p in cable["points"]]
+    points = Vt.Vec3fArray([tuple(p) for p in cable["points"]])
+    widths = Vt.FloatArray([float(w) for w in cable["widths"]])
     thickness = float(cable["thickness"])
     for name, value_type, value in (
-        ("points", Sdf.ValueTypeNames.Point3fArray, Vt.Vec3fArray(points)),
+        ("points", Sdf.ValueTypeNames.Point3fArray, points),
         # One curve per prim: the importer builds a rod per curve, and a
         # multi-curve prim would weld into a single articulation.
         ("curveVertexCounts", Sdf.ValueTypeNames.IntArray, Vt.IntArray([len(points)])),
+        # A curve is drawn as a tube around its centerline, so the box has to
+        # clear the widths as well as the points -- which is what
+        # `ComputeExtent` adds and a box around the points alone does not.
         (
             "extent",
             Sdf.ValueTypeNames.Float3Array,
-            Vt.Vec3fArray(list(_extent(points) or ())),
+            UsdGeom.BasisCurves.ComputeExtent(points, widths),
         ),
     ):
         Sdf.AttributeSpec(spec, name, value_type).default = value
@@ -465,9 +469,9 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     # *metadata* on the attribute; a sibling `widths:interpolation` attribute is
     # ignored, and the default happens to be `vertex` anyway, so a mistake here
     # is invisible until the count disagrees.
-    widths = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
-    widths.default = Vt.FloatArray([float(w) for w in cable["widths"]])
-    widths.SetInfo("interpolation", UsdGeom.Tokens.vertex)
+    taper = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
+    taper.default = widths
+    taper.SetInfo("interpolation", UsdGeom.Tokens.vertex)
 
     # One colour for the whole curve. Same channel and same reasoning as a
     # part's, and the physics material bound below is not a preview one, so it

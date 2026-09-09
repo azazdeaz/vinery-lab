@@ -280,6 +280,19 @@ def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
     assert curves.GetWidthsInterpolation() == UsdGeom.Tokens.vertex
 
 
+def test_a_cable_bounds_the_tube_it_is_drawn_as(stage: Usd.Stage):
+    """A curve is drawn as a tube around its centerline, so the box has to clear
+    the widths as well as the points. Kit RTX measures an animated curve's box
+    once and never refreshes it, so one that is too tight stays too tight."""
+    curves = UsdGeom.BasisCurves(stage.GetPrimAtPath(CABLE))
+    lo, hi = curves.GetExtentAttr().Get()
+    reach = max(curves.GetWidthsAttr().Get()) / 2.0
+    points = curves.GetPointsAttr().Get()
+    for axis in range(3):
+        assert lo[axis] == pytest.approx(min(p[axis] for p in points) - reach)
+        assert hi[axis] == pytest.approx(max(p[axis] for p in points) + reach)
+
+
 def test_a_flexible_organ_binds_the_material_it_bends_by(stage: Usd.Stage):
     """The importer reads stiffness off the *bound* material. Without the
     binding it silently substitutes its own defaults, which are stiff enough
