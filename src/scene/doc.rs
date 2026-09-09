@@ -22,14 +22,16 @@
 //!   has **no children** of its own — see [`Node::instanceable`].
 //! - Colliders are **static**: nothing here is a rigid body, so the builder
 //!   authors collision without mass, and the ground may be an exact triangle
-//!   mesh, which a dynamic collider could not be.
+//!   mesh, which a dynamic collider could not be. A [`Cable`] is the one thing
+//!   that moves, and it is not a collider — a solver builds its own bodies
+//!   from the curve.
 
 use serde::{Deserialize, Serialize};
 
 /// Bumped when the shape of this document changes incompatibly. The builder
 /// refuses anything it does not recognise, so a stale cached scene fails
 /// loudly instead of composing into something subtly wrong.
-pub const FORMAT: u32 = 2;
+pub const FORMAT: u32 = 3;
 
 /// One generated scene, ready to be turned into a USD stage.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -105,6 +107,11 @@ pub struct Node {
     pub xform: Option<Xform>,
     /// The [`PartEntry`] this prim draws, by name. A prim with a reference is
     /// a leaf of the tree.
+    ///
+    /// One of the three payloads — this, [`collider`](Self::collider),
+    /// [`cable`](Self::cable) — at most, and `type_name` says which:
+    /// `"Capsule"` carries a collider, `"BasisCurves"` a cable, and a prim
+    /// with a reference is left typeless for the part to supply the type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
     /// Whether USD may treat this prim as an instance of what it references.
@@ -126,6 +133,11 @@ pub struct Node {
     /// carry it instead of a `reference`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collider: Option<Capsule>,
+    /// A deformable curve simulated in place of a mesh. Present only on prims
+    /// whose `type_name` is `"BasisCurves"`, which carry it instead of a
+    /// `reference`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cable: Option<Cable>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
 }
@@ -154,6 +166,24 @@ pub struct Capsule {
     pub height: f32,
 }
 
+/// A flexible organ, simulated as a deformable curve rather than drawn as a
+/// mesh.
+///
+/// A backend that reads one builds a chain of capsules joined by spring joints
+/// and pins the first point to the prim's parent; a backend that does not is
+/// left with an inert curve, which is what every non-VBD solver sees.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Cable {
+    /// Centerline control points in the prim's own frame, **anchored end
+    /// first**. `n` points become `n - 1` segments, so at least three.
+    ///
+    /// Evenly spaced, because one stiffness is derived from the mean segment
+    /// length: an uneven run leaves its outliers mistuned.
+    pub points: Vec<[f32; 3]>,
+    /// Full thickness — the diameter, not the radius — in meters.
+    pub thickness: f32,
+}
+
 fn is_false(b: &bool) -> bool {
     !*b
 }
@@ -168,6 +198,7 @@ impl Node {
             reference: None,
             instanceable: false,
             collider: None,
+            cable: None,
             children: Vec::new(),
         }
     }
@@ -193,9 +224,16 @@ mod tests {
             height: 1.72,
         });
 
+        let mut cane = Node::group("Cable", "BasisCurves");
+        cane.cable = Some(Cable {
+            points: vec![[0.0; 3], [0.0, 0.0, 0.1], [0.0, 0.0, 0.2]],
+            thickness: 0.009,
+        });
+
         let mut root = Node::group("Vineyard", "Xform");
         root.children.push(leaf);
         root.children.push(collider);
+        root.children.push(cane);
 
         SceneDoc {
             format: FORMAT,
@@ -233,6 +271,10 @@ mod tests {
                 height: 1.72
             })
         );
+        assert_eq!(
+            back.root.children[2].cable.as_ref().map(|c| c.points.len()),
+            Some(3)
+        );
     }
 
     /// At tens of thousands of prims the defaults are most of the bytes, so
@@ -245,6 +287,7 @@ mod tests {
         assert!(!json.contains("\"uvs\""), "got:\n{json}");
         assert!(!json.contains("\"collision\""), "got:\n{json}");
         assert_eq!(json.matches("\"collider\"").count(), 1, "got:\n{json}");
+        assert_eq!(json.matches("\"cable\"").count(), 1, "got:\n{json}");
         // The root has no transform, no reference and is not instanceable;
         // the leaf has all three, so each key appears exactly once.
         assert_eq!(json.matches("\"xform\"").count(), 1, "got:\n{json}");

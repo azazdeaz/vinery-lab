@@ -34,8 +34,12 @@
 //! Only what it has to: the ground, the posts and the trunks. The ground
 //! collides as its own mesh ([`Library::collide`]) because the shape *is* the
 //! terrain; everything else gets a [`capsule`] proxy, which needs no cooking
-//! and is the only round shape PhysX has natively. Nothing is a rigid body —
-//! a vineyard is scenery that stands still.
+//! and is the only round shape PhysX has natively. None of it is a rigid body
+//! — a vineyard is scenery that stands still.
+//!
+//! Except where it does not: a [`cable`] is a flexible organ, which a solver
+//! that understands one turns into bodies of its own. It replaces the mesh
+//! rather than standing in for it, so it is geometry and collider at once.
 
 pub mod doc;
 pub mod export;
@@ -146,6 +150,29 @@ pub fn capsule(radius: f32, z0: f32, z1: f32) -> impl Bundle + Copy {
             height: (z1 - z0 - 2.0 * radius).max(0.0),
         }),
         Transform::from_translation(Vec3::Z * (z0 + z1) / 2.0),
+    )
+}
+
+/// The prim name a deformable curve takes, under the organ it stands in for.
+///
+/// One name for every element, so a consumer selecting the flexible parts of
+/// the scene has a single rule.
+pub const CABLE: &str = "Cable";
+
+/// A deformable curve — geometry a physics engine bends, in place of the mesh
+/// it replaces. See [`cable`], which is the only way one is built.
+#[derive(Component, Clone, Debug)]
+pub struct Cable(pub doc::Cable);
+
+/// The prim a flexible organ becomes: its type, and the centerline a solver
+/// bends. `points` are in the organ's own frame, anchored end first.
+///
+/// No transform of its own — the points are already where the organ put them,
+/// and the anchor is read off the parent prim.
+pub fn cable(points: Vec<[f32; 3]>, thickness: f32) -> impl Bundle {
+    (
+        UsdType("BasisCurves"),
+        Cable(doc::Cable { points, thickness }),
     )
 }
 

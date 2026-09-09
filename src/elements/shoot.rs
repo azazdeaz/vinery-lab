@@ -67,7 +67,7 @@ use super::util::material;
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
-use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
+use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -137,6 +137,26 @@ const STEM_STREAM: u64 = 0x589A_B41E_A1D2_F35B;
 /// reshapes the shoot underneath it — the same split [`vine`](super::vine)
 /// keeps between its wood and its shoots.
 const LEAF_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// The same again, splitting *which* shoots came out flexible off both, so
+/// that moving [`ShootParams::flexible`] never redraws a canopy or reshuffles
+/// the shoots that stayed rigid.
+const FLEX_STREAM: u64 = 0xD1B5_4A32_D192_ED03;
+
+/// How many segments off the anchored end the clamp holds rigid.
+///
+/// Mirrors the two anchor sites `_author_cable` authors in
+/// `python/vinerylab/usd/build.py`. Also the shortest cable worth building: a
+/// rod is a chain, and a chain of one is a capsule.
+const CLAMPED_SEGMENTS: usize = 2;
+
+/// Length of one segment of a flexible shoot's centerline, in meters.
+///
+/// A segment becomes a capsule body and a spring joint, so this is the whole
+/// cost of a flexible shoot: a cane of the default length buys nine of each.
+/// Coarser than the mesh, which needs ring density the physics does not — a
+/// bending rod is a chain of straight links either way.
+const CABLE_SEGMENT: f64 = 0.09;
 
 /// Below this the station loop would never terminate, so a shoot this closely
 /// noded carries no leaves at all. That is also how the canopy gets turned off.
@@ -305,6 +325,17 @@ pub struct ShootParams {
     /// hang at about this and the small ones at the tip stand nearly straight
     /// out — which is what a petiole holding a tenth of the weight does.
     pub leaf_droop: f32,
+    /// The fraction of shoots exported as a deformable curve rather than as a
+    /// mesh, in `0..=1`.
+    ///
+    /// A flexible shoot is a **bare cane**: it carries no stem mesh and no
+    /// leaves, because a blade placed on a static frame would hang in mid-air
+    /// the moment the cane bent away from it.
+    ///
+    /// Every one of them is a chain of rigid bodies in the simulation, so this
+    /// is the most expensive knob in the scene — see [`CABLE_SEGMENT`] for
+    /// what one costs.
+    pub flexible: f32,
 }
 
 impl Default for ShootParams {
@@ -318,6 +349,7 @@ impl Default for ShootParams {
             detail: 40,
             internode: 0.07,
             leaf_droop: 0.35,
+            flexible: 0.0,
         }
     }
 }
@@ -560,12 +592,62 @@ fn leaf_nodes(config: &ShootConfig, axis: &ShootAxis, seed: u64) -> Vec<LeafNode
     nodes
 }
 
+// ─── Cable ──────────────────────────────────────────────────────────
+
+/// The centerline a flexible shoot bends along: the same axis the mesh is
+/// skinned onto, resampled at [`CABLE_SEGMENT`] from the bud outward.
+///
+/// Sampled by **arc length** rather than by height, so the run up the rise
+/// comes out even — a solver derives one stiffness from the mean segment
+/// length and mistunes whatever is not.
+///
+/// The two segments off the bud do *not*: a chord across [`BEND_RADIUS`] is
+/// shorter than the arc it cuts, by a seventh at this spacing. They are the
+/// two the anchor clamps, which is what makes it harmless — see
+/// `_author_cable` in `python/vinerylab/usd/build.py`. It holds because the
+/// step is always longer than half the bend, so the bend never reaches a third
+/// segment.
+///
+/// Starts at the bud rather than behind it: the first point is the one pinned
+/// to the wood, and pinning it inside the spur would leave the anchor
+/// somewhere no reader can see.
+fn cable_points(axis: &ShootAxis) -> Vec<[f32; 3]> {
+    // `MIN_LENGTH` keeps the axis longer than the bend, so the floor is only
+    // ever reached by the shortest shoots.
+    let count = (axis.length() / CABLE_SEGMENT)
+        .round()
+        .max(CLAMPED_SEGMENTS as f64);
+    let step = axis.length() / count;
+    (0..=count as usize)
+        .map(|i| {
+            let p = axis.at(i as f64 * step);
+            [p.x as f32, p.y as f32, p.z as f32]
+        })
+        .collect()
+}
+
+/// The one thickness a cable is authored at, in meters.
+///
+/// A rod has a single radius where the mesh tapers to [`TIP_TAPER`], so this
+/// splits the difference: the diameter at the taper's midpoint, too thin at
+/// the bud and too thick at the tip by the same amount.
+fn cable_thickness(config: &ShootConfig) -> f32 {
+    config.radius * (1.0 + TIP_TAPER as f32)
+}
+
+/// Whether the shoot authored at `order` is one of the flexible ones.
+fn is_flexible(params: &ShootParams, seed: u64, order: Order) -> bool {
+    Rng::new(seed ^ FLEX_STREAM ^ salt(order.0)).unit() < params.flexible as f64
+}
+
 // ─── Building ───────────────────────────────────────────────────────
 
-/// One representative shoot: its stem, and the nodes its leaves hang on.
+/// One representative shoot: its stem, the nodes its leaves hang on, and the
+/// centerline it bends along if it came out flexible.
 struct ShootBuild {
     stem: Mesh,
     nodes: Vec<LeafNode>,
+    cable: Vec<[f32; 3]>,
 }
 
 fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
@@ -573,6 +655,7 @@ fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
     Ok(ShootBuild {
         stem: strand_mesh(&shoot_strand(&axis, config))?.to_mesh(),
         nodes: leaf_nodes(config, &axis, seed),
+        cable: cable_points(&axis),
     })
 }
 
@@ -608,20 +691,30 @@ pub(crate) fn build(
         &ShootMetric,
     );
 
-    let mut built: Vec<(Vec<LeafNode>, Geometry)> = Vec::with_capacity(book.len());
+    let mut built: Vec<(Vec<LeafNode>, Vec<[f32; 3]>, Geometry)> = Vec::with_capacity(book.len());
     for (index, config) in book.representatives.iter().enumerate() {
         let seed = scene.seed ^ STEM_STREAM ^ salt(index as u64);
-        let ShootBuild { stem, nodes } = build_shoot(config, seed)?;
-        built.push((nodes, library.part(PART, index, stem, surface(seed))));
+        let ShootBuild { stem, nodes, cable } = build_shoot(config, seed)?;
+        built.push((nodes, cable, library.part(PART, index, stem, surface(seed))));
     }
 
     let mut leaf_order = 0u64;
     for ((order, entity, config), drew) in grown.iter().zip(&book.assignment) {
-        let (nodes, geometry) = &built[*drew as usize];
+        let (nodes, centerline, geometry) = &built[*drew as usize];
         let mut shoot = commands.entity(*entity);
         // The layer owns everything below a shoot, and a rebuild may hang a
         // different number of leaves than the last one did.
         shoot.despawn_children();
+
+        if is_flexible(&params, scene.seed, *order) {
+            // A bare cane: no stem mesh and no leaves, because a blade placed
+            // on this frame would stay behind the moment the cane bent away.
+            shoot.with_child((
+                Name::new(CABLE),
+                cable(centerline.clone(), cable_thickness(config)),
+            ));
+            continue;
+        }
         shoot.with_child((Name::new(STEM), geometry.clone()));
 
         let mut rng = Rng::new(scene.seed ^ LEAF_STREAM ^ salt(order.0));
@@ -710,6 +803,16 @@ pub fn ui() -> impl Scene {
                     params.lean = change.value;
                 })
             ),
+            label_small("Flexible shoots"),
+            (
+                @FeathersSlider { @min: 0.0, @max: 0.05, @value: 0.0 }
+                SliderStep(0.005)
+                SliderPrecision(3)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                    params.flexible = change.value.clamp(0.0, 1.0);
+                })
+            ),
             label_small("Leaf spacing"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.25, @value: 0.07 }
@@ -791,6 +894,95 @@ mod tests {
 
     fn axis(config: &ShootConfig, seed: u64) -> ShootAxis {
         ShootAxis::new(config, &mut Rng::new(seed))
+    }
+
+    // ─── Flexible shoots ────────────────────────────────────────────
+
+    /// The points a solver bends are the points the mesh is skinned onto: a
+    /// cable that wandered off would leave the collider somewhere the shoot
+    /// visibly is not.
+    #[test]
+    fn a_cables_points_sit_on_the_shoots_own_axis() {
+        let config = config();
+        let axis = axis(&config, 3);
+        let points = cable_points(&axis);
+
+        let step = axis.length() / (points.len() - 1) as f64;
+        for (index, point) in points.iter().enumerate() {
+            let on_axis = axis.at(index as f64 * step);
+            let off = (point[0] as f64 - on_axis.x).hypot(point[2] as f64 - on_axis.z);
+            assert!(off < 1e-5, "point {index} is {off} off the axis");
+        }
+    }
+
+    /// One stiffness is derived from the mean segment length, so a run that is
+    /// not even leaves its outliers mistuned. The two segments the anchor
+    /// clamps are exempt: they cut across the bend, where a chord is shorter
+    /// than its arc.
+    #[test]
+    fn a_cables_free_segments_are_evenly_spaced() {
+        for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
+            let config = config_with(|p| p.length = length);
+            let points = cable_points(&axis(&config, 1));
+            // A rod is a chain: two segments at the very least, and both of
+            // those are clamped.
+            assert!(points.len() >= 3, "{length} m gave {} points", points.len());
+
+            let spans: Vec<f32> = points
+                .windows(2)
+                .map(|pair| {
+                    let [a, b] = [pair[0], pair[1]];
+                    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+                })
+                .collect();
+            let free = &spans[CLAMPED_SEGMENTS.min(spans.len())..];
+            let mean = free.iter().sum::<f32>() / free.len().max(1) as f32;
+            for span in free {
+                // Not exact: the rise is sampled along its arc and measured
+                // across its chord, and `lean` gives it a little curvature.
+                assert!(
+                    (span - mean).abs() < 0.05 * mean,
+                    "{length} m: a {span} m segment among a mean of {mean}"
+                );
+            }
+        }
+    }
+
+    /// What makes the uneven segments above harmless. The step is longer than
+    /// half the bend at every length, so the bend never reaches past the two
+    /// segments the anchor holds.
+    #[test]
+    fn the_bend_stays_inside_the_clamped_segments() {
+        for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
+            let axis = axis(&config_with(|p| p.length = length), 1);
+            let count = (axis.length() / CABLE_SEGMENT).round().max(2.0);
+            let step = axis.length() / count;
+            assert!(
+                CLAMPED_SEGMENTS as f64 * step >= BEND_ARC,
+                "{length} m: {CLAMPED_SEGMENTS} steps of {step} m fall short of the {BEND_ARC} m bend"
+            );
+        }
+    }
+
+    /// The slider is a rate, so it has to land near the fraction it names --
+    /// and a stream sharing a constant with `salt` would not.
+    #[test]
+    fn the_flexible_share_matches_the_rate_it_was_asked_for() {
+        let params = params();
+        for rate in [0.0, 0.03, 0.2] {
+            let params = ShootParams {
+                flexible: rate,
+                ..params.clone()
+            };
+            let flexible = (0..4000)
+                .filter(|order| is_flexible(&params, 7, Order(*order)))
+                .count();
+            let share = flexible as f32 / 4000.0;
+            assert!(
+                (share - rate).abs() < 0.015,
+                "asked for {rate}, got {share}"
+            );
+        }
     }
 
     fn mesh(config: &ShootConfig, seed: u64) -> MeshData {

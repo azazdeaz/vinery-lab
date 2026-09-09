@@ -10,8 +10,8 @@ use bevy::mesh::{PrimitiveTopology, VertexAttributeValues};
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-use super::doc::{Capsule, FORMAT, Node, PartEntry, SceneDoc, Xform};
-use super::{Collider, Part, Prototypes, UsdReference, UsdRoot, UsdType};
+use super::doc::{self, Capsule, FORMAT, Node, PartEntry, SceneDoc, Xform};
+use super::{Cable, Collider, Part, Prototypes, UsdReference, UsdRoot, UsdType};
 
 /// The scene's coordinate convention. Authored natively rather than corrected
 /// downstream: `upAxis` and `metersPerUnit` are root-layer-only stage metadata
@@ -150,6 +150,7 @@ struct Prim {
     xform: Option<Xform>,
     reference: Option<String>,
     collider: Option<Capsule>,
+    cable: Option<doc::Cable>,
     children: Vec<Entity>,
 }
 
@@ -161,19 +162,21 @@ fn collect_prims(world: &mut World) -> HashMap<Entity, Prim> {
         Option<&UsdType>,
         Option<&UsdReference>,
         Option<&Collider>,
+        Option<&Cable>,
         Option<&Children>,
     )>();
 
     query
         .iter(world)
         .map(
-            |(entity, name, transform, prim_type, reference, collider, children)| {
+            |(entity, name, transform, prim_type, reference, collider, cable, children)| {
                 let prim = Prim {
                     name: name.as_str().to_string(),
                     type_name: prim_type.map_or("Xform", |t| t.0).to_string(),
                     xform: transform.and_then(xform_of),
                     reference: reference.map(|r| r.0.clone()),
                     collider: collider.map(|c| c.0),
+                    cable: cable.map(|c| c.0.clone()),
                     children: children.map(|c| c.to_vec()).unwrap_or_default(),
                 };
                 (entity, prim)
@@ -243,6 +246,7 @@ fn build_node(
             .is_some_and(|name| !solid.contains(name)),
         reference: prim.reference.clone(),
         collider: prim.collider,
+        cable: prim.cable.clone(),
         children,
     }))
 }
