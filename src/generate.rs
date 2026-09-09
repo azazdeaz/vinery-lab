@@ -51,6 +51,7 @@ fn grow(params: &VineyardParams) -> anyhow::Result<App> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elements::leaf;
     use crate::scene::doc::{FORMAT, Node};
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -118,6 +119,11 @@ mod tests {
     /// elements landing on the same colour is a palette choice, while two
     /// meshes of one element landing on it is a jitter stream wired to a
     /// constant seed, which every other check here would pass.
+    ///
+    /// The canopy is the one exception, and a deliberate one: a blade is
+    /// shaded off the drawing it was cut from rather than off which mesh it
+    /// came out as, so a budget spent on curls of one drawing shares that
+    /// drawing's green — see [`leaf::surface`](crate::elements::leaf).
     #[test]
     fn every_part_is_tinted_and_no_layer_repeats_a_shade() {
         let doc = scene();
@@ -142,9 +148,14 @@ mod tests {
                     part.display_color.map(|c| c.to_bits())
                 })
                 .collect();
+            let expected = if *layer == leaf::PART {
+                names.len().min(leaf::SHAPES)
+            } else {
+                names.len()
+            };
             assert_eq!(
                 shades.len(),
-                names.len(),
+                expected,
                 "{layer}: two of {names:?} came out the same shade"
             );
         }

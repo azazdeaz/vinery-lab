@@ -138,6 +138,7 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     let d = LeafParams::default();
     out.int("variations", p.variations as u64, d.variations as u64);
     out.int("detail", p.detail as u64, d.detail as u64);
+    out.float("curl", p.curl, d.curl);
 }
 
 /// The eight fragments, as the attribute name and cfg class the snippet uses.

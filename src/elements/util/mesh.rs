@@ -11,6 +11,7 @@
 use std::f32::consts::TAU;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::math::DVec3;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 
 /// A polygonal mesh, as the geometry kernels produce it.
@@ -60,6 +61,32 @@ impl MeshData {
         .with_inserted_indices(Indices::U32(indices))
         // Use area-weighted normals because the angle-weighted normals become zero for small edges
         .with_computed_area_weighted_normals()
+    }
+
+    /// The area of the surface, as the triangles [`to_mesh`](Self::to_mesh)
+    /// draws it.
+    ///
+    /// Fan-triangulated the same way, so this is the area of the mesh that
+    /// gets drawn rather than of the polygons it is written as. The area of
+    /// the *sheet*, note, not of the shadow it casts: a curved surface has
+    /// more of it than its footprint.
+    pub fn surface_area(&self) -> f64 {
+        let mut area = 0.0;
+        let mut cursor = 0usize;
+        for count in &self.face_vertex_counts {
+            let face = &self.face_vertex_indices[cursor..cursor + *count as usize];
+            cursor += face.len();
+            let corner = |i: usize| {
+                let p = self.points[face[i] as usize];
+                DVec3::new(p[0] as f64, p[1] as f64, p[2] as f64)
+            };
+            for i in 1..face.len().saturating_sub(1) {
+                // The cross product of two edges is twice the triangle's area.
+                let (a, b, c) = (corner(0), corner(i), corner(i + 1));
+                area += (b - a).cross(c - a).length() / 2.0;
+            }
+        }
+        area
     }
 }
 

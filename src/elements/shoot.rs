@@ -824,14 +824,15 @@ pub(crate) fn build(
         let bearing = rng.unit() * TAU;
 
         for node in nodes {
-            // Five draws per node: the bearing's wander, the droop, the twist
+            // Six draws per node: the bearing's wander, the droop, the twist
             // about the blade's own long axis, its vigour, then which blade it
-            // drew.
+            // drew and how far that blade curls.
             let turn = rng.range(-LEAF_SPREAD, LEAF_SPREAD);
             let sag = rng.range(1.0 - LEAF_DROOP_JITTER, 1.0 + LEAF_DROOP_JITTER);
             let roll = rng.range(-LEAF_ROLL, LEAF_ROLL);
             let vigour = rng.range(1.0 - LEAF_VIGOUR, 1.0 + LEAF_VIGOUR);
             let outline = (rng.unit() * leaf::OUTLINES.len() as f64) as usize;
+            let curl = rng.unit();
 
             leaf_order += 1;
             let placement = placed(
@@ -863,7 +864,7 @@ pub(crate) fn build(
                 Name::new(node.name.clone()),
                 placement,
                 Visibility::default(),
-                leaf::LeafConfig::new(&leaf_params, outline),
+                leaf::LeafConfig::new(&leaf_params, outline, curl),
                 Order(leaf_order),
             ));
         }
