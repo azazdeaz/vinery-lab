@@ -90,6 +90,24 @@ Colliders are authored where physics can reach them
     ``Capsule`` prim of its own -- the only round shape PhysX has natively,
     needing no cooking -- marked ``purpose = "guide"`` so no renderer draws it.
 
+A flexible organ is a curve, a material and an attachment
+    A ``BasisCurves`` carrying ``PhysicsCurvesDeformableSimAPI`` is imported as a
+    rod: one capsule body per segment, joined by spring joints. All three prims
+    are load-bearing.
+
+    * The curve must be **linear** and **non-periodic**; anything else is
+      skipped with a warning rather than refused.
+    * Stiffness and density are read off a *bound* ``PhysicsCurvesDeformableMaterialAPI``
+      material. Without the binding the importer falls back to defaults stiff
+      enough that nothing visibly bends.
+    * A rod floats free. The ``PhysicsAttachment`` is what pins its first point,
+      and it is lowered into a hard ball joint to ``physics:src1``. That target
+      is the *parent prim* rather than the world, so the anchor is computed from
+      the parent's composed transform and survives being cloned into an env.
+
+    Only Newton's VBD solver simulates one; every other backend leaves an inert
+    curve, which draws correctly and does nothing.
+
 ``xformOp:orient`` rather than ``xformOp:rotateXYZ``
     USD's ``rotateXYZ`` and Bevy's Euler conventions disagree about intrinsic
     versus extrinsic composition, and a mismatch produces a scene that is
@@ -120,7 +138,7 @@ from typing import Any
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
-FORMAT = 2
+FORMAT = 3
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -149,6 +167,46 @@ _UP_AXIS_TOKENS = {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y, "Z": UsdGeom.To
 _COLLISION_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCollisionAPI"])
 """What `UsdPhysics.CollisionAPI.Apply` writes, for the prims authored through
 `Sdf` -- which enforces no schema and so has no `Apply` of its own."""
+
+_CABLE_API = Sdf.TokenListOp.Create(
+    prependedItems=[
+        "PhysicsCurvesDeformableSimAPI",
+        "PhysicsCollisionAPI",
+        # Declared, not just authored: USD warns about a binding on a prim that
+        # does not apply this.
+        "MaterialBindingAPI",
+    ]
+)
+"""Schemas that make a `BasisCurves` a simulated, collidable cable."""
+
+_CABLE_MATERIAL_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCurvesDeformableMaterialAPI"])
+
+CABLE_MATERIAL = "PhysicsMaterial"
+"""Name of the material prim authored under every cable."""
+
+CABLE_ANCHOR = "Anchor"
+"""Name of the attachment prim that clamps a cable's anchored end to its parent."""
+
+_CABLE_ANCHOR_SITES = (0, 2)
+"""Control points the anchor pins. See `_author_cable` for why these two."""
+
+CABLE_MATERIAL_ATTRS: dict[str, float] = {
+    # Young's modulus of a green cane, in Pa. The importer derives all four rod
+    # stiffnesses -- stretch, shear, bend, twist -- from this, Poisson's ratio
+    # and the cross-section, so it is the one knob that says how stiff a
+    # flexible organ is. At a shoot's radius it leaves a cane that stands up
+    # under its own weight and folds out of a robot's way.
+    "youngsModulus": 1.0e9,
+    "poissonsRatio": 0.3,
+    # Fresh cane is mostly water.
+    "density": 800.0,
+}
+"""Cable material, in SI. Not on the scene document: these are tuning, and the
+document carries scene facts.
+
+Authored under the current AOUSD names. The unprefixed ones (`stretchStiffness`
+and friends) are a deprecated revision that the importer reads as *structural*
+values and warns about."""
 
 
 def build_usd(doc: Mapping[str, Any], path: str) -> None:
@@ -302,6 +360,9 @@ def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
     if collider := node.get("collider"):
         _author_collider(spec, collider)
 
+    if cable := node.get("cable"):
+        _author_cable(spec, cable)
+
     for child in node.get("children", ()):
         _author_node(layer, f"{path}/{child['name']}", child)
 
@@ -372,3 +433,88 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
     ).default = UsdGeom.Tokens.guide
 
     spec.SetInfo("apiSchemas", _COLLISION_API)
+
+
+def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
+    """A deformable curve, the material it bends by, and the anchor holding it.
+
+    The curve is drawn as well as simulated -- ``widths`` is the same thickness
+    the material declares -- so a flexible organ needs no mesh beside it.
+    """
+    points = [tuple(p) for p in cable["points"]]
+    thickness = float(cable["thickness"])
+    for name, value_type, value in (
+        ("points", Sdf.ValueTypeNames.Point3fArray, Vt.Vec3fArray(points)),
+        # One curve per prim: the importer builds a rod per curve, and a
+        # multi-curve prim would weld into a single articulation.
+        ("curveVertexCounts", Sdf.ValueTypeNames.IntArray, Vt.IntArray([len(points)])),
+        (
+            "extent",
+            Sdf.ValueTypeNames.Float3Array,
+            Vt.Vec3fArray(list(_extent(points) or ())),
+        ),
+    ):
+        Sdf.AttributeSpec(spec, name, value_type).default = value
+
+    # One width for the whole curve rather than one per point, which is what
+    # `interpolation` says. It is *metadata* on the attribute; a sibling
+    # `widths:interpolation` attribute is ignored and leaves the default,
+    # `vertex`, disagreeing with the single value authored here.
+    widths = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
+    widths.default = Vt.FloatArray([thickness])
+    widths.SetInfo("interpolation", UsdGeom.Tokens.constant)
+
+    # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
+    # non-periodic curve imports as a cable; anything else is skipped.
+    for name, value in (
+        ("type", UsdGeom.Tokens.linear),
+        ("wrap", UsdGeom.Tokens.nonperiodic),
+    ):
+        Sdf.AttributeSpec(
+            spec, name, Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform
+        ).default = value
+
+    spec.SetInfo("apiSchemas", _CABLE_API)
+    Sdf.AttributeSpec(spec, "physics:collisionEnabled", Sdf.ValueTypeNames.Bool).default = True
+
+    material = Sdf.PrimSpec(spec, CABLE_MATERIAL, Sdf.SpecifierDef, "Material")
+    material.SetInfo("apiSchemas", _CABLE_MATERIAL_API)
+    # The thickness here, not the `widths` above, is what sizes the capsules and
+    # their inertia; without it the importer assumes a millimeter and says so.
+    for name, value in (("curvesThickness", thickness), *CABLE_MATERIAL_ATTRS.items()):
+        Sdf.AttributeSpec(material, f"physics:{name}", Sdf.ValueTypeNames.Float).default = value
+    # Bound rather than merely authored: the importer reads the stiffnesses off
+    # the *bound* material and silently uses its own defaults without this.
+    Sdf.RelationshipSpec(spec, "material:binding:physics").targetPathList.explicitItems = [
+        material.path
+    ]
+
+    anchor = Sdf.PrimSpec(spec, CABLE_ANCHOR, Sdf.SpecifierDef, "PhysicsAttachment")
+    for name, value_type, value in (
+        # Two points, each lowered into its own ball joint. One alone pins a
+        # position and leaves the curve free to pivot about it -- an inverted
+        # pendulum, for anything that stands up -- so a second fixes the
+        # direction as well, clamping the curve where it leaves its parent the
+        # way a shoot is clamped where it leaves the wood.
+        #
+        # Point *2*, not point 1: an interior point anchors both of the
+        # segments it joins, so consecutive sites would put two ball joints on
+        # one segment, which Newton warns has undefined semantics.
+        ("physics:type0", Sdf.ValueTypeNames.Token, "point"),
+        ("physics:indices0", Sdf.ValueTypeNames.IntArray, Vt.IntArray(_CABLE_ANCHOR_SITES)),
+        # Held where they were authored, in the parent prim's frame. Anchoring
+        # to the parent rather than to the world keeps the pin correct once the
+        # scene is cloned into an env: the importer resolves the coordinates
+        # through the parent's composed transform.
+        ("physics:type1", Sdf.ValueTypeNames.Token, "xform"),
+        (
+            "physics:coords1",
+            Sdf.ValueTypeNames.Vector3fArray,
+            Vt.Vec3fArray([Gf.Vec3f(*points[site]) for site in _CABLE_ANCHOR_SITES]),
+        ),
+    ):
+        Sdf.AttributeSpec(anchor, name, value_type).default = value
+    Sdf.RelationshipSpec(anchor, "physics:src0").targetPathList.explicitItems = [spec.path]
+    Sdf.RelationshipSpec(anchor, "physics:src1").targetPathList.explicitItems = [
+        spec.path.GetParentPath()
+    ]

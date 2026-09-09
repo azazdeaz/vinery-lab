@@ -16,15 +16,26 @@ import json
 import pathlib
 
 import pytest
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 
 from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
+from vinerylab.usd.build import CABLE_ANCHOR, CABLE_MATERIAL
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
 VINE = f"{ROOT}/Planting/Row_00/Vine_000"
 LEAF = f"{VINE}/Shoot_00/Leaf_00"
+CABLE = f"{VINE}/Shoot_01/Cable"
 TERRAIN = f"{ROOT}/Terrain"
+
+
+def applied_schemas(prim: Usd.Prim) -> list[str]:
+    """Every applied API schema, including the ones USD does not know.
+
+    The deformable-curve schemas are codeless and ship with the solver rather
+    than with USD, so `Usd.Prim.GetAppliedSchemas` filters them out of its
+    answer. This is the query Isaac Lab and Newton make."""
+    return list(prim.GetPrimTypeInfo().GetAppliedAPISchemas())
 
 
 def part_mesh(stage: Usd.Stage, name: str) -> UsdGeom.Mesh:
@@ -237,6 +248,65 @@ def test_a_collision_proxy_is_placed_like_any_other_prim(stage: Usd.Stage):
         stage.GetPrimAtPath(f"{VINE}/Collision")
     ).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
     assert tuple(world.ExtractTranslation()) == pytest.approx((1.0, 2.0, 0.425))
+
+
+# --- flexible organs ------------------------------------------------
+
+
+def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
+    """Only a *linear*, *non-periodic* curve carrying the sim schema imports as
+    a cable; anything else is skipped with a warning and simulates as nothing.
+    One curve per prim, or the importer welds them into one articulation."""
+    prim = stage.GetPrimAtPath(CABLE)
+    curves = UsdGeom.BasisCurves(prim)
+
+    assert prim.GetTypeName() == "BasisCurves"
+    assert "PhysicsCurvesDeformableSimAPI" in applied_schemas(prim)
+    assert prim.HasAPI(UsdPhysics.CollisionAPI)
+    assert curves.GetTypeAttr().Get() == UsdGeom.Tokens.linear
+    assert curves.GetWrapAttr().Get() == UsdGeom.Tokens.nonperiodic
+    assert list(curves.GetCurveVertexCountsAttr().Get()) == [4]
+    assert tuple(curves.GetPointsAttr().Get()[1]) == pytest.approx((0.04, 0.0, 0.02))
+    # One width for the whole curve, matching the material's thickness.
+    assert list(curves.GetWidthsAttr().Get()) == pytest.approx([0.009])
+    assert curves.GetWidthsInterpolation() == UsdGeom.Tokens.constant
+
+
+def test_a_flexible_organ_binds_the_material_it_bends_by(stage: Usd.Stage):
+    """The importer reads stiffness off the *bound* material. Without the
+    binding it silently substitutes its own defaults, which are stiff enough
+    that nothing visibly moves."""
+    prim = stage.GetPrimAtPath(CABLE)
+    material = stage.GetPrimAtPath(f"{CABLE}/{CABLE_MATERIAL}")
+
+    bound = UsdShade.MaterialBindingAPI(prim).GetDirectBinding("physics")
+    assert bound.GetMaterialPath() == material.GetPath()
+    assert "PhysicsCurvesDeformableMaterialAPI" in applied_schemas(material)
+    # Thickness here, not `widths`, is what sizes the capsules and their
+    # inertia; the importer assumes a millimetre without it.
+    assert material.GetAttribute("physics:curvesThickness").Get() == pytest.approx(0.009)
+    assert material.GetAttribute("physics:youngsModulus").Get() > 0.0
+    assert material.GetAttribute("physics:density").Get() > 0.0
+
+
+def test_a_flexible_organ_is_clamped_to_the_prim_it_grew_from(stage: Usd.Stage):
+    """A cable floats free without this. Two sites rather than one: a single
+    anchor pins a position and leaves the curve pivoting about it. They skip a
+    point because an interior site anchors both segments it joins, and two
+    sites on one segment are parallel joints."""
+    anchor = stage.GetPrimAtPath(f"{CABLE}/{CABLE_ANCHOR}")
+
+    assert anchor.GetTypeName() == "PhysicsAttachment"
+    assert anchor.GetAttribute("physics:type0").Get() == "point"
+    assert anchor.GetAttribute("physics:type1").Get() == "xform"
+    assert list(anchor.GetAttribute("physics:indices0").Get()) == [0, 2]
+    # Held at the parent prim, not in world space, so the clamp survives being
+    # cloned into an env.
+    assert anchor.GetRelationship("physics:src0").GetTargets() == [Sdf.Path(CABLE)]
+    assert anchor.GetRelationship("physics:src1").GetTargets() == [Sdf.Path(f"{VINE}/Shoot_01")]
+    coords = [tuple(c) for c in anchor.GetAttribute("physics:coords1").Get()]
+    assert coords[0] == pytest.approx((0.0, 0.0, 0.0))
+    assert coords[1] == pytest.approx((0.05, 0.0, 0.06))
 
 
 def test_a_transform_round_trips_through_the_op_stack(stage: Usd.Stage):

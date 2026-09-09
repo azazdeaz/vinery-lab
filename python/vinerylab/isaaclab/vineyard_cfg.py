@@ -142,6 +142,12 @@ class ShootCfg:
     A shoot also carries the canopy, so the two leaf knobs live here rather
     than on `LeafCfg`. `internode` is the spacing between leaf nodes up the
     shoot; setting it to 0 leaves the shoot bare.
+
+    `flexible` is the fraction of shoots authored as deformable curves instead
+    of meshes -- bare canes a robot pushes aside. They simulate **only** under
+    the coupled solver `make_coupled_physics_cfg` builds; every other backend
+    imports them as inert curves. Each one is a chain of rigid bodies, so this
+    is the most expensive knob here: keep it low.
     """
 
     variations: int = 4
@@ -152,6 +158,7 @@ class ShootCfg:
     detail: int = 40
     internode: float = 0.07
     leaf_droop: float = 0.35
+    flexible: float = 0.0
 
 
 @configclass
