@@ -138,7 +138,7 @@ from typing import Any
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
-FORMAT = 3
+FORMAT = 4
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -436,9 +436,14 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
 def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     """A deformable curve and the material it bends by.
 
-    The curve is drawn as well as simulated -- ``widths`` is the same thickness
-    the material declares -- so a flexible organ needs no mesh beside it. What
-    holds it in place is ``physics:masses``; see `_cable_point_masses`.
+    The curve is drawn as well as simulated, so a flexible organ needs no mesh
+    beside it. The two disagree about thickness on purpose: ``widths`` tapers
+    per point and is read only by renderers, while the rod is a chain of equal
+    capsules sized by the material's ``physics:curvesThickness``. Nothing in the
+    import path reads ``widths``.
+
+    What holds the curve in place is ``physics:masses``; see
+    `_cable_point_masses`.
     """
     points = [tuple(p) for p in cable["points"]]
     thickness = float(cable["thickness"])
@@ -455,13 +460,13 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     ):
         Sdf.AttributeSpec(spec, name, value_type).default = value
 
-    # One width for the whole curve rather than one per point, which is what
-    # `interpolation` says. It is *metadata* on the attribute; a sibling
-    # `widths:interpolation` attribute is ignored and leaves the default,
-    # `vertex`, disagreeing with the single value authored here.
+    # One width per point -- the taper -- which is what `vertex` says. It is
+    # *metadata* on the attribute; a sibling `widths:interpolation` attribute is
+    # ignored, and the default happens to be `vertex` anyway, so a mistake here
+    # is invisible until the count disagrees.
     widths = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
-    widths.default = Vt.FloatArray([thickness])
-    widths.SetInfo("interpolation", UsdGeom.Tokens.constant)
+    widths.default = Vt.FloatArray([float(w) for w in cable["widths"]])
+    widths.SetInfo("interpolation", UsdGeom.Tokens.vertex)
 
     # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
     # non-periodic curve imports as a cable; anything else is skipped.

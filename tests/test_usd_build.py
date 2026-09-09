@@ -267,9 +267,10 @@ def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
     assert curves.GetWrapAttr().Get() == UsdGeom.Tokens.nonperiodic
     assert list(curves.GetCurveVertexCountsAttr().Get()) == [4]
     assert tuple(curves.GetPointsAttr().Get()[1]) == pytest.approx((0.04, 0.0, 0.02))
-    # One width for the whole curve, matching the material's thickness.
-    assert list(curves.GetWidthsAttr().Get()) == pytest.approx([0.009])
-    assert curves.GetWidthsInterpolation() == UsdGeom.Tokens.constant
+    # Drawn tapering, one width per point, while the rod stays uniform: no
+    # importer reads `widths`, so the two are free to disagree.
+    assert list(curves.GetWidthsAttr().Get()) == pytest.approx([0.012, 0.011, 0.01, 0.009])
+    assert curves.GetWidthsInterpolation() == UsdGeom.Tokens.vertex
 
 
 def test_a_flexible_organ_binds_the_material_it_bends_by(stage: Usd.Stage):

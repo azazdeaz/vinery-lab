@@ -476,16 +476,7 @@ fn shoot_strand(axis: &ShootAxis, config: &ShootConfig) -> Strand {
         points.push(axis.at_height(z));
     }
 
-    // Tapered by height rather than by point index: the bend's points are
-    // centimeters apart and the rise's are decimeters, so an index taper would
-    // spend the whole taper on the bend.
-    let radii = points
-        .iter()
-        .map(|p| {
-            let t = (p.z / height).clamp(0.0, 1.0);
-            config.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
-        })
-        .collect();
+    let radii = points.iter().map(|p| taper(config, p.z)).collect();
 
     // No bark: a shoot is a smooth green stem, and ridges on a six-millimeter
     // tube read as noise rather than texture.
@@ -615,13 +606,36 @@ fn cable_points(axis: &ShootAxis) -> Vec<[f32; 3]> {
     points
 }
 
-/// The one thickness a cable is authored at, in meters.
+/// Stem radius at height `z` up the shoot, in meters, thinning to
+/// [`TIP_TAPER`] of the base radius at the tip.
 ///
-/// A rod has a single radius where the mesh tapers to [`TIP_TAPER`], so this
-/// splits the difference: the diameter at the taper's midpoint, too thin at
-/// the bud and too thick at the tip by the same amount.
+/// Tapered by height rather than by point index: the bend's points are
+/// centimeters apart and the rise's are decimeters, so an index taper would
+/// spend the whole taper on the bend.
+fn taper(config: &ShootConfig, z: f64) -> f64 {
+    let t = (z / config.length as f64).clamp(0.0, 1.0);
+    config.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
+}
+
+/// The diameter each of `points` is **drawn** at, in meters — the same taper
+/// the stem mesh is built with, so a flexible cane reads as the shoots beside
+/// it.
+///
+/// Nothing sizes a capsule from these; see [`cable_thickness`].
+fn cable_widths(points: &[[f32; 3]], config: &ShootConfig) -> Vec<f32> {
+    points
+        .iter()
+        .map(|p| 2.0 * taper(config, p[2] as f64) as f32)
+        .collect()
+}
+
+/// The one thickness a cable is **simulated** at, in meters.
+///
+/// A rod has a single radius where the mesh tapers, so this splits the
+/// difference: the diameter at the taper's midpoint, too thin at the bud and
+/// too thick at the tip by the same amount.
 fn cable_thickness(config: &ShootConfig) -> f32 {
-    config.radius * (1.0 + TIP_TAPER as f32)
+    2.0 * taper(config, config.length as f64 / 2.0) as f32
 }
 
 /// Whether the shoot authored at `order` is one of the flexible ones.
@@ -700,7 +714,11 @@ pub(crate) fn build(
             // on this frame would stay behind the moment the cane bent away.
             shoot.with_child((
                 Name::new(CABLE),
-                cable(centerline.clone(), cable_thickness(config)),
+                cable(
+                    centerline.clone(),
+                    cable_widths(centerline, config),
+                    cable_thickness(config),
+                ),
             ));
             continue;
         }
@@ -952,6 +970,26 @@ mod tests {
                 "{length} m: the bend ends somewhere other than the first segment"
             );
         }
+    }
+
+    /// A rod is one radius and a shoot is not, so the drawn taper is the whole
+    /// of what makes a flexible cane read as the shoots beside it. It has to
+    /// run bud to tip like the stem mesh, and the rod has to sit inside it.
+    #[test]
+    fn a_cable_is_drawn_tapering_and_simulated_between_its_ends() {
+        let config = config();
+        let points = cable_points(&axis(&config, 3));
+        let widths = cable_widths(&points, &config);
+        let thickness = cable_thickness(&config);
+
+        assert_eq!(widths.len(), points.len(), "one width per point");
+        assert!((widths[0] - 2.0 * config.radius).abs() < 1e-6, "the bud");
+        let tip = widths.last().copied().unwrap();
+        assert!(
+            (tip - 2.0 * config.radius * TIP_TAPER as f32).abs() < 1e-6,
+            "the tip"
+        );
+        assert!(tip < thickness && thickness < widths[0]);
     }
 
     /// The slider is a rate, so it has to land near the fraction it names --

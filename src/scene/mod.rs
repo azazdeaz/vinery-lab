@@ -164,15 +164,21 @@ pub const CABLE: &str = "Cable";
 #[derive(Component, Clone, Debug)]
 pub struct Cable(pub doc::Cable);
 
-/// The prim a flexible organ becomes: its type, and the centerline a solver
-/// bends. `points` are in the organ's own frame, held end first.
+/// The prim a flexible organ becomes: its type, the centerline a solver bends,
+/// and the taper it is drawn with. `points` are in the organ's own frame, held
+/// end first, and `widths` gives the drawn diameter at each of them.
 ///
 /// No transform of its own — the points are already where the organ put them,
 /// and the first segment between them is what gets held.
-pub fn cable(points: Vec<[f32; 3]>, thickness: f32) -> impl Bundle {
+pub fn cable(points: Vec<[f32; 3]>, widths: Vec<f32>, thickness: f32) -> impl Bundle {
+    assert_eq!(points.len(), widths.len(), "one drawn width per point");
     (
         UsdType("BasisCurves"),
-        Cable(doc::Cable { points, thickness }),
+        Cable(doc::Cable {
+            points,
+            widths,
+            thickness,
+        }),
     )
 }
 

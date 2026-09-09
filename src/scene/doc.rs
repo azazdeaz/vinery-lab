@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped when the shape of this document changes incompatibly. The builder
 /// refuses anything it does not recognise, so a stale cached scene fails
 /// loudly instead of composing into something subtly wrong.
-pub const FORMAT: u32 = 3;
+pub const FORMAT: u32 = 4;
 
 /// One generated scene, ready to be turned into a USD stage.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -182,7 +182,11 @@ pub struct Cable {
     /// Evenly spaced, because one stiffness is derived from the mean segment
     /// length: an uneven run leaves its outliers mistuned.
     pub points: Vec<[f32; 3]>,
-    /// Full thickness — the diameter, not the radius — in meters.
+    /// The diameter the curve is **drawn** at, one per point, in meters. An
+    /// organ tapers; a rod cannot, so the two disagree on purpose.
+    pub widths: Vec<f32>,
+    /// The one diameter the curve is **simulated** at, in meters. Sizes every
+    /// capsule and, through the fourth power of the radius, its stiffness.
     pub thickness: f32,
 }
 
@@ -229,6 +233,7 @@ mod tests {
         let mut cane = Node::group("Cable", "BasisCurves");
         cane.cable = Some(Cable {
             points: vec![[0.0; 3], [0.0, 0.0, 0.1], [0.0, 0.0, 0.2]],
+            widths: vec![0.011, 0.010, 0.009],
             thickness: 0.009,
         });
 
