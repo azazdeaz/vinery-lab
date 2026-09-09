@@ -43,7 +43,7 @@ from isaaclab_assets.robots.anymal import ANYMAL_C_CFG  # isort:skip
 VINEYARD_CFG = VineyardCfg(
     # A small field, so a wave to match: roughly 0.8 m of relief across it.
     terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
-    parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
+    parcel=ParcelCfg(orientation=-14.0, row_spacing=1.7),
     # A few canes for the robot to push through. They bend under
     # `--physics newton_flexible` and under nothing else.
     shoot=ShootCfg(flexible=0.05),
@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--physics",
-        default="physx",
+        default=FLEXIBLE,
         help=(
             "Physics backend: physx, isaacsim_physx, newton_mjwarp, newton_vbd, "
             f"ovphysx, or {FLEXIBLE} to bend the vineyard's flexible shoots."

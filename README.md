@@ -43,15 +43,19 @@ cd examples/isaaclab_demo/
 uv run main.py
 ```
 
-The same demo on a Newton backend and in the Newton viewer
+The same demo on the PhysX backend (it doesn't support flexible shoots)
 ```bash
-uv run main.py --physics newton_mjwarp --viz newton
+uv run main.py --physics physx
 ```
 
-With the flexible shoots bending as the robot walks through them
-```bash
-uv run main.py --physics newton_flexible --viz newton
-```
+
+## How it works (main points)
+
+ - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class.
+ - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
+ - When the simulation starts, the meshes and layouts are generated and cached as a USD file.
+ - The cached USD file is then spawned as a regular Isaac Lab USD file asset.
+
 
 ## Workflow
  - Start the parameter editor with `cargo run --release`.
