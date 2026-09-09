@@ -165,10 +165,10 @@ pub const CABLE: &str = "Cable";
 pub struct Cable(pub doc::Cable);
 
 /// The prim a flexible organ becomes: its type, and the centerline a solver
-/// bends. `points` are in the organ's own frame, anchored end first.
+/// bends. `points` are in the organ's own frame, held end first.
 ///
 /// No transform of its own — the points are already where the organ put them,
-/// and the anchor is read off the parent prim.
+/// and the first segment between them is what gets held.
 pub fn cable(points: Vec<[f32; 3]>, thickness: f32) -> impl Bundle {
     (
         UsdType("BasisCurves"),

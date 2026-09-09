@@ -169,13 +169,15 @@ pub struct Capsule {
 /// A flexible organ, simulated as a deformable curve rather than drawn as a
 /// mesh.
 ///
-/// A backend that reads one builds a chain of capsules joined by spring joints
-/// and pins the first point to the prim's parent; a backend that does not is
-/// left with an inert curve, which is what every non-VBD solver sees.
+/// A backend that reads one builds a chain of capsules joined by spring
+/// joints, holding the first of them where it was authored; a backend that
+/// does not is left with an inert curve, which is what every non-VBD solver
+/// sees.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Cable {
-    /// Centerline control points in the prim's own frame, **anchored end
-    /// first**. `n` points become `n - 1` segments, so at least three.
+    /// Centerline control points in the prim's own frame, **held end first**:
+    /// the segment between the first two is the one bolted down, and does not
+    /// move. `n` points become `n - 1` segments, so at least three.
     ///
     /// Evenly spaced, because one stiffness is derived from the mean segment
     /// length: an uneven run leaves its outliers mistuned.

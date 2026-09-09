@@ -90,20 +90,19 @@ Colliders are authored where physics can reach them
     ``Capsule`` prim of its own -- the only round shape PhysX has natively,
     needing no cooking -- marked ``purpose = "guide"`` so no renderer draws it.
 
-A flexible organ is a curve, a material and an attachment
+A flexible organ is a curve and the material it bends by
     A ``BasisCurves`` carrying ``PhysicsCurvesDeformableSimAPI`` is imported as a
-    rod: one capsule body per segment, joined by spring joints. All three prims
-    are load-bearing.
+    rod: one capsule body per segment, joined by spring joints. Three things
+    make that work, and dropping any of them leaves a curve that does nothing.
 
     * The curve must be **linear** and **non-periodic**; anything else is
       skipped with a warning rather than refused.
     * Stiffness and density are read off a *bound* ``PhysicsCurvesDeformableMaterialAPI``
       material. Without the binding the importer falls back to defaults stiff
       enough that nothing visibly bends.
-    * A rod floats free. The ``PhysicsAttachment`` is what pins its first point,
-      and it is lowered into a hard ball joint to ``physics:src1``. That target
-      is the *parent prim* rather than the world, so the anchor is computed from
-      the parent's composed transform and survives being cloned into an env.
+    * A rod floats free. What holds it is ``physics:masses``: a massless
+      segment is a static one, so zeroing the leading points bolts the curve to
+      where it was authored. See `_cable_point_masses`.
 
     Only Newton's VBD solver simulates one; every other backend leaves an inert
     curve, which draws correctly and does nothing.
@@ -133,6 +132,7 @@ The prim tree is authored through ``Sdf``, not the ``Usd`` stage API
 from __future__ import annotations
 
 import functools
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -184,11 +184,9 @@ _CABLE_MATERIAL_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCurvesDefor
 CABLE_MATERIAL = "PhysicsMaterial"
 """Name of the material prim authored under every cable."""
 
-CABLE_ANCHOR = "Anchor"
-"""Name of the attachment prim that clamps a cable's anchored end to its parent."""
-
-_CABLE_ANCHOR_SITES = (0, 2)
-"""Control points the anchor pins. See `_author_cable` for why these two."""
+_BOLTED_POINTS = 2
+"""Leading control points given no mass, which bolts the segment between them
+down. See `_cable_point_masses`."""
 
 CABLE_MATERIAL_ATTRS: dict[str, float] = {
     # Young's modulus of a green cane, in Pa. The importer derives all four rod
@@ -436,10 +434,11 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
 
 
 def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
-    """A deformable curve, the material it bends by, and the anchor holding it.
+    """A deformable curve and the material it bends by.
 
     The curve is drawn as well as simulated -- ``widths`` is the same thickness
-    the material declares -- so a flexible organ needs no mesh beside it.
+    the material declares -- so a flexible organ needs no mesh beside it. What
+    holds it in place is ``physics:masses``; see `_cable_point_masses`.
     """
     points = [tuple(p) for p in cable["points"]]
     thickness = float(cable["thickness"])
@@ -489,32 +488,42 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
         material.path
     ]
 
-    anchor = Sdf.PrimSpec(spec, CABLE_ANCHOR, Sdf.SpecifierDef, "PhysicsAttachment")
-    for name, value_type, value in (
-        # Two points, each lowered into its own ball joint. One alone pins a
-        # position and leaves the curve free to pivot about it -- an inverted
-        # pendulum, for anything that stands up -- so a second fixes the
-        # direction as well, clamping the curve where it leaves its parent the
-        # way a shoot is clamped where it leaves the wood.
-        #
-        # Point *2*, not point 1: an interior point anchors both of the
-        # segments it joins, so consecutive sites would put two ball joints on
-        # one segment, which Newton warns has undefined semantics.
-        ("physics:type0", Sdf.ValueTypeNames.Token, "point"),
-        ("physics:indices0", Sdf.ValueTypeNames.IntArray, Vt.IntArray(_CABLE_ANCHOR_SITES)),
-        # Held where they were authored, in the parent prim's frame. Anchoring
-        # to the parent rather than to the world keeps the pin correct once the
-        # scene is cloned into an env: the importer resolves the coordinates
-        # through the parent's composed transform.
-        ("physics:type1", Sdf.ValueTypeNames.Token, "xform"),
-        (
-            "physics:coords1",
-            Sdf.ValueTypeNames.Vector3fArray,
-            Vt.Vec3fArray([Gf.Vec3f(*points[site]) for site in _CABLE_ANCHOR_SITES]),
-        ),
-    ):
-        Sdf.AttributeSpec(anchor, name, value_type).default = value
-    Sdf.RelationshipSpec(anchor, "physics:src0").targetPathList.explicitItems = [spec.path]
-    Sdf.RelationshipSpec(anchor, "physics:src1").targetPathList.explicitItems = [
-        spec.path.GetParentPath()
+    Sdf.AttributeSpec(
+        spec, "physics:masses", Sdf.ValueTypeNames.FloatArray
+    ).default = Vt.FloatArray(_cable_point_masses(points, thickness))
+
+
+def _cable_point_masses(
+    points: Sequence[tuple[float, float, float]], thickness: float
+) -> list[float]:
+    """Per-point masses that bolt a cable's first segment down and weigh the rest.
+
+    Authoring these is the whole of the anchor. A control point is a junction
+    rather than a body -- the importer lumps ``m[s] + m[s+1]/2`` onto the segment
+    between two of them -- so zeroing the first two leaves the first segment
+    massless, which Newton simulates as **static**: fixed in position *and* in
+    orientation, the way a shoot is held where it leaves the wood.
+
+    The schema's own anchor, a ``PhysicsAttachment``, is the worse tool here. It
+    lowers only to *ball* joints, so one pins a position and leaves the curve
+    pivoting about it, and two are needed to hold a direction. They are also
+    compliant: past roughly 1e10 Pa a stiff rod overpowers them and the base
+    swings free again. A massless body has no such ceiling, and costs no prim.
+
+    Every other point carries the density times half of each segment it joins,
+    which lumps back to the cylinder mass of each. The second segment is the one
+    exception, left at half weight because the point below it is one of the
+    zeroed pair -- an edge effect on the segment next to a rigid one.
+    """
+    volume = math.pi * (thickness / 2.0) ** 2
+    spans = [math.dist(a, b) for a, b in zip(points, points[1:])]
+    density = CABLE_MATERIAL_ATTRS["density"]
+    return [
+        0.0
+        if index < _BOLTED_POINTS
+        else density
+        * volume
+        * 0.5
+        * ((spans[index - 1] if index else 0.0) + (spans[index] if index < len(spans) else 0.0))
+        for index in range(len(points))
     ]

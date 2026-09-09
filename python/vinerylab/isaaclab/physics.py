@@ -42,12 +42,14 @@ collapses instead of settling once the substep is longer than about a
 millisecond. At the 200 Hz a locomotion policy wants, four is the floor.
 """
 
-SHOOT_SUBSTEPS = 4
+SHOOT_SUBSTEPS = 2
 """Substeps the shoots take inside each of those.
 
-They want a shorter step still -- at one substep the canes sway without ever
-settling -- and taking it here rather than by raising `SUBSTEPS` keeps the cost
-off the robot and off the coupling passes between them.
+They want a shorter step still: at one, a settled cane still drifts about a
+centimeter and keeps moving; at two it holds to a few millimeters. Four halves
+that again for twice the cost, which buys nothing anyone can see. Taking the
+extra steps here rather than by raising `SUBSTEPS` keeps them off the robot and
+off the coupling passes between the two.
 """
 
 

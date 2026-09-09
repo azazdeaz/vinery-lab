@@ -143,13 +143,6 @@ const LEAF_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
 /// the shoots that stayed rigid.
 const FLEX_STREAM: u64 = 0xD1B5_4A32_D192_ED03;
 
-/// How many segments off the anchored end the clamp holds rigid.
-///
-/// Mirrors the two anchor sites `_author_cable` authors in
-/// `python/vinerylab/usd/build.py`. Also the shortest cable worth building: a
-/// rod is a chain, and a chain of one is a capsule.
-const CLAMPED_SEGMENTS: usize = 2;
-
 /// Length of one segment of a flexible shoot's centerline, in meters.
 ///
 /// A segment becomes a capsule body and a spring joint, so this is the whole
@@ -594,36 +587,32 @@ fn leaf_nodes(config: &ShootConfig, axis: &ShootAxis, seed: u64) -> Vec<LeafNode
 
 // ─── Cable ──────────────────────────────────────────────────────────
 
-/// The centerline a flexible shoot bends along: the same axis the mesh is
-/// skinned onto, resampled at [`CABLE_SEGMENT`] from the bud outward.
+/// The centerline a flexible shoot bends along: the bud, the top of the bend,
+/// then the rise at [`CABLE_SEGMENT`] steps.
 ///
-/// Sampled by **arc length** rather than by height, so the run up the rise
-/// comes out even — a solver derives one stiffness from the mean segment
-/// length and mistunes whatever is not.
+/// **The whole bend is the first segment**, rather than something the sampling
+/// happens to cut across. That segment is the one bolted down — see
+/// `_cable_point_masses` in `python/vinerylab/usd/build.py` — so its shape is
+/// static and only its endpoints matter, while every segment that does move is
+/// a straight-rise sample of the same length. A solver derives one stiffness
+/// from the mean segment length and mistunes whatever differs from it, so
+/// evenness is worth arranging rather than hoping for.
 ///
-/// The two segments off the bud do *not*: a chord across [`BEND_RADIUS`] is
-/// shorter than the arc it cuts, by a seventh at this spacing. They are the
-/// two the anchor clamps, which is what makes it harmless — see
-/// `_author_cable` in `python/vinerylab/usd/build.py`. It holds because the
-/// step is always longer than half the bend, so the bend never reaches a third
-/// segment.
-///
-/// Starts at the bud rather than behind it: the first point is the one pinned
-/// to the wood, and pinning it inside the spur would leave the anchor
-/// somewhere no reader can see.
+/// Starts at the bud rather than behind it: the first point is where the cane
+/// is held, and holding it inside the spur would put the anchor somewhere no
+/// reader can see.
 fn cable_points(axis: &ShootAxis) -> Vec<[f32; 3]> {
-    // `MIN_LENGTH` keeps the axis longer than the bend, so the floor is only
-    // ever reached by the shortest shoots.
-    let count = (axis.length() / CABLE_SEGMENT)
-        .round()
-        .max(CLAMPED_SEGMENTS as f64);
-    let step = axis.length() / count;
-    (0..=count as usize)
-        .map(|i| {
-            let p = axis.at(i as f64 * step);
-            [p.x as f32, p.y as f32, p.z as f32]
-        })
-        .collect()
+    let rise = axis.height - BEND_RADIUS;
+    // At least one rise segment, so the shortest shoot still makes a chain of
+    // two — a rod of one capsule is not a rod.
+    let count = (rise / CABLE_SEGMENT).round().max(1.0);
+    let step = rise / count;
+    let node = |p: Point3<f64>| [p.x as f32, p.y as f32, p.z as f32];
+
+    let mut points = vec![node(bend_point(0.0))];
+    points
+        .extend((0..=count as usize).map(|i| node(axis.at_height(BEND_RADIUS + i as f64 * step))));
+    points
 }
 
 /// The one thickness a cable is authored at, in meters.
@@ -898,48 +887,51 @@ mod tests {
 
     // ─── Flexible shoots ────────────────────────────────────────────
 
+    /// The span between consecutive control points.
+    fn spans(points: &[[f32; 3]]) -> Vec<f32> {
+        points
+            .windows(2)
+            .map(|pair| {
+                let [a, b] = [pair[0], pair[1]];
+                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+            })
+            .collect()
+    }
+
     /// The points a solver bends are the points the mesh is skinned onto: a
     /// cable that wandered off would leave the collider somewhere the shoot
     /// visibly is not.
     #[test]
     fn a_cables_points_sit_on_the_shoots_own_axis() {
-        let config = config();
-        let axis = axis(&config, 3);
+        let axis = axis(&config(), 3);
         let points = cable_points(&axis);
 
-        let step = axis.length() / (points.len() - 1) as f64;
-        for (index, point) in points.iter().enumerate() {
-            let on_axis = axis.at(index as f64 * step);
-            let off = (point[0] as f64 - on_axis.x).hypot(point[2] as f64 - on_axis.z);
+        assert_eq!(points[0], [0.0, 0.0, 0.0], "the first point is the bud");
+        for (index, point) in points.iter().enumerate().skip(1) {
+            // Every point past the bud is a station up the rise, so its own
+            // height is what puts it back on the axis.
+            let on_axis = axis.at_height(point[2] as f64);
+            let off = (point[0] as f64 - on_axis.x).hypot(point[1] as f64 - on_axis.y);
             assert!(off < 1e-5, "point {index} is {off} off the axis");
         }
     }
 
     /// One stiffness is derived from the mean segment length, so a run that is
-    /// not even leaves its outliers mistuned. The two segments the anchor
-    /// clamps are exempt: they cut across the bend, where a chord is shorter
-    /// than its arc.
+    /// not even leaves its outliers mistuned. The bend is exempt — it is the
+    /// bolted segment, and does not move.
     #[test]
-    fn a_cables_free_segments_are_evenly_spaced() {
+    fn a_cables_moving_segments_are_evenly_spaced() {
         for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
-            let config = config_with(|p| p.length = length);
-            let points = cable_points(&axis(&config, 1));
-            // A rod is a chain: two segments at the very least, and both of
-            // those are clamped.
+            let points = cable_points(&axis(&config_with(|p| p.length = length), 1));
+            // A rod is a chain: the bolted bend, and one rise segment at least.
             assert!(points.len() >= 3, "{length} m gave {} points", points.len());
 
-            let spans: Vec<f32> = points
-                .windows(2)
-                .map(|pair| {
-                    let [a, b] = [pair[0], pair[1]];
-                    ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
-                })
-                .collect();
-            let free = &spans[CLAMPED_SEGMENTS.min(spans.len())..];
-            let mean = free.iter().sum::<f32>() / free.len().max(1) as f32;
-            for span in free {
-                // Not exact: the rise is sampled along its arc and measured
-                // across its chord, and `lean` gives it a little curvature.
+            let spans = spans(&points);
+            let rise = &spans[1..];
+            let mean = rise.iter().sum::<f32>() / rise.len() as f32;
+            for span in rise {
+                // Not exact: the rise is stepped by height and measured across
+                // the chord, and `lean` gives it a little curvature.
                 assert!(
                     (span - mean).abs() < 0.05 * mean,
                     "{length} m: a {span} m segment among a mean of {mean}"
@@ -948,18 +940,16 @@ mod tests {
         }
     }
 
-    /// What makes the uneven segments above harmless. The step is longer than
-    /// half the bend at every length, so the bend never reaches past the two
-    /// segments the anchor holds.
+    /// The bolted segment is the *whole* bend, at every length. Any of it left
+    /// over would be a short second segment among the even ones, mistuned and
+    /// free to move.
     #[test]
-    fn the_bend_stays_inside_the_clamped_segments() {
+    fn the_bend_is_the_first_segment_and_nothing_more() {
         for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
-            let axis = axis(&config_with(|p| p.length = length), 1);
-            let count = (axis.length() / CABLE_SEGMENT).round().max(2.0);
-            let step = axis.length() / count;
-            assert!(
-                CLAMPED_SEGMENTS as f64 * step >= BEND_ARC,
-                "{length} m: {CLAMPED_SEGMENTS} steps of {step} m fall short of the {BEND_ARC} m bend"
+            let points = cable_points(&axis(&config_with(|p| p.length = length), 1));
+            assert_eq!(
+                points[1][2], BEND_RADIUS as f32,
+                "{length} m: the bend ends somewhere other than the first segment"
             );
         }
     }

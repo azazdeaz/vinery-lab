@@ -16,10 +16,10 @@ import json
 import pathlib
 
 import pytest
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
+from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade
 
 from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
-from vinerylab.usd.build import CABLE_ANCHOR, CABLE_MATERIAL
+from vinerylab.usd.build import CABLE_MATERIAL
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
@@ -289,24 +289,20 @@ def test_a_flexible_organ_binds_the_material_it_bends_by(stage: Usd.Stage):
     assert material.GetAttribute("physics:density").Get() > 0.0
 
 
-def test_a_flexible_organ_is_clamped_to_the_prim_it_grew_from(stage: Usd.Stage):
-    """A cable floats free without this. Two sites rather than one: a single
-    anchor pins a position and leaves the curve pivoting about it. They skip a
-    point because an interior site anchors both segments it joins, and two
-    sites on one segment are parallel joints."""
-    anchor = stage.GetPrimAtPath(f"{CABLE}/{CABLE_ANCHOR}")
+def test_a_flexible_organ_is_bolted_down_by_its_leading_masses(stage: Usd.Stage):
+    """A rod floats free otherwise. A point is a junction, not a body -- the
+    importer lumps `m[s] + m[s+1]/2` onto the segment between two of them -- so
+    the two zeroes make the first segment massless, which Newton simulates as
+    static in position and orientation both."""
+    masses = list(stage.GetPrimAtPath(CABLE).GetAttribute("physics:masses").Get())
 
-    assert anchor.GetTypeName() == "PhysicsAttachment"
-    assert anchor.GetAttribute("physics:type0").Get() == "point"
-    assert anchor.GetAttribute("physics:type1").Get() == "xform"
-    assert list(anchor.GetAttribute("physics:indices0").Get()) == [0, 2]
-    # Held at the parent prim, not in world space, so the clamp survives being
-    # cloned into an env.
-    assert anchor.GetRelationship("physics:src0").GetTargets() == [Sdf.Path(CABLE)]
-    assert anchor.GetRelationship("physics:src1").GetTargets() == [Sdf.Path(f"{VINE}/Shoot_01")]
-    coords = [tuple(c) for c in anchor.GetAttribute("physics:coords1").Get()]
-    assert coords[0] == pytest.approx((0.0, 0.0, 0.0))
-    assert coords[1] == pytest.approx((0.05, 0.0, 0.06))
+    # One per control point, or the importer ignores the array outright.
+    assert len(masses) == 4
+    assert masses[:2] == [0.0, 0.0]
+    assert all(mass > 0.0 for mass in masses[2:])
+    # Half of each segment the point joins: an end point borders one segment
+    # and an interior point two, so an end point carries less.
+    assert masses[3] < masses[2]
 
 
 def test_a_transform_round_trips_through_the_op_stack(stage: Usd.Stage):

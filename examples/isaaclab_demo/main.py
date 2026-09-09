@@ -46,7 +46,7 @@ VINEYARD_CFG = VineyardCfg(
     parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
     # A few canes for the robot to push through. They bend under
     # `--physics newton_flexible` and under nothing else.
-    shoot=ShootCfg(flexible=0.03),
+    shoot=ShootCfg(flexible=0.05),
 )
 VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
