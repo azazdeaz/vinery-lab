@@ -15,10 +15,14 @@ import os
 
 import pytest
 
-isaaclab_cfg = pytest.importorskip(
-    "vinerylab.isaaclab.vineyard_cfg", reason="Isaac Lab is not installed"
-)
-vineyard = pytest.importorskip("vinerylab.isaaclab.vineyard")
+# Not `pytest.importorskip`: `vinerylab.isaaclab` re-raises a missing Isaac Lab
+# under its own message, and pytest skips only when the error names the module
+# it was asked to import.
+try:
+    from vinerylab.isaaclab import vineyard
+    from vinerylab.isaaclab import vineyard_cfg as isaaclab_cfg
+except ImportError:
+    pytest.skip("Isaac Lab is not installed", allow_module_level=True)
 
 
 FRAGMENTS = isaaclab_cfg.FRAGMENTS
