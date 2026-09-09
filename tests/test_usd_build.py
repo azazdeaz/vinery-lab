@@ -112,11 +112,18 @@ def test_a_part_bounds_its_own_points(stage: Usd.Stage):
     assert tuple(hi) == pytest.approx((0.02, 0.0, 0.9))
 
 
-def test_every_part_carries_a_constant_display_color(stage: Usd.Stage):
-    """Nothing binds a material, so this is the only channel a renderer reads;
-    at the wrong interpolation it falls through to white."""
-    for name, expected in [("Leaf_1", (0.24, 0.42, 0.16)), ("Vine_0", (0.31, 0.24, 0.18))]:
-        primvar = part_mesh(stage, name).GetDisplayColorPrimvar()
+def test_every_drawn_prim_carries_a_constant_display_color(stage: Usd.Stage):
+    """Nothing binds a preview material, so this is the only channel a renderer
+    reads; at the wrong interpolation it falls through to white. The curve is
+    held to the same rule: a flexible organ is drawn by it and by nothing else,
+    and untinted it stands out white among the meshes it replaces."""
+    drawn = [
+        (part_mesh(stage, "Leaf_1"), (0.24, 0.42, 0.16)),
+        (part_mesh(stage, "Vine_0"), (0.31, 0.24, 0.18)),
+        (UsdGeom.BasisCurves(stage.GetPrimAtPath(CABLE)), (0.18, 0.44, 0.12)),
+    ]
+    for gprim, expected in drawn:
+        primvar = gprim.GetDisplayColorPrimvar()
         assert primvar.GetInterpolation() == UsdGeom.Tokens.constant
         assert tuple(primvar.Get()[0]) == pytest.approx(expected)
 

@@ -165,12 +165,21 @@ pub const CABLE: &str = "Cable";
 pub struct Cable(pub doc::Cable);
 
 /// The prim a flexible organ becomes: its type, the centerline a solver bends,
-/// and the taper it is drawn with. `points` are in the organ's own frame, held
-/// end first, and `widths` gives the drawn diameter at each of them.
+/// the taper it is drawn with, and the colour it is drawn in. `points` are in
+/// the organ's own frame, held end first, and `widths` gives the drawn diameter
+/// at each of them.
+///
+/// `display_color` is the [`Surface`] colour of the mesh this curve stands in
+/// for, so a flexible organ and a rigid one of the same kind draw alike.
 ///
 /// No transform of its own — the points are already where the organ put them,
 /// and the first segment between them is what gets held.
-pub fn cable(points: Vec<[f32; 3]>, widths: Vec<f32>, thickness: f32) -> impl Bundle {
+pub fn cable(
+    points: Vec<[f32; 3]>,
+    widths: Vec<f32>,
+    thickness: f32,
+    display_color: [f32; 3],
+) -> impl Bundle {
     assert_eq!(points.len(), widths.len(), "one drawn width per point");
     (
         UsdType("BasisCurves"),
@@ -178,6 +187,7 @@ pub fn cable(points: Vec<[f32; 3]>, widths: Vec<f32>, thickness: f32) -> impl Bu
             points,
             widths,
             thickness,
+            display_color,
         }),
     )
 }

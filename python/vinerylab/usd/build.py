@@ -138,7 +138,7 @@ from typing import Any
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
-FORMAT = 4
+FORMAT = 5
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -437,10 +437,11 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     """A deformable curve and the material it bends by.
 
     The curve is drawn as well as simulated, so a flexible organ needs no mesh
-    beside it. The two disagree about thickness on purpose: ``widths`` tapers
-    per point and is read only by renderers, while the rod is a chain of equal
-    capsules sized by the material's ``physics:curvesThickness``. Nothing in the
-    import path reads ``widths``.
+    beside it -- and carries the taper and the colour that make it read as the
+    organ it replaces. The two disagree about thickness on purpose: ``widths``
+    tapers per point and is read only by renderers, while the rod is a chain of
+    equal capsules sized by the material's ``physics:curvesThickness``. Nothing
+    in the import path reads ``widths`` or ``displayColor``.
 
     What holds the curve in place is ``physics:masses``; see
     `_cable_point_masses`.
@@ -467,6 +468,13 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     widths = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
     widths.default = Vt.FloatArray([float(w) for w in cable["widths"]])
     widths.SetInfo("interpolation", UsdGeom.Tokens.vertex)
+
+    # One colour for the whole curve. Same channel and same reasoning as a
+    # part's, and the physics material bound below is not a preview one, so it
+    # does not take `displayColor` out of the renderer's hands.
+    color = Sdf.AttributeSpec(spec, "primvars:displayColor", Sdf.ValueTypeNames.Color3fArray)
+    color.default = Vt.Vec3fArray([tuple(cable["display_color"])])
+    color.SetInfo("interpolation", UsdGeom.Tokens.constant)
 
     # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
     # non-periodic curve imports as a cable; anything else is skipped.

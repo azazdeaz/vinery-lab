@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped when the shape of this document changes incompatibly. The builder
 /// refuses anything it does not recognise, so a stale cached scene fails
 /// loudly instead of composing into something subtly wrong.
-pub const FORMAT: u32 = 4;
+pub const FORMAT: u32 = 5;
 
 /// One generated scene, ready to be turned into a USD stage.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -188,6 +188,10 @@ pub struct Cable {
     /// The one diameter the curve is **simulated** at, in meters. Sizes every
     /// capsule and, through the fourth power of the radius, its stiffness.
     pub thickness: f32,
+    /// Linear RGB, authored as a constant-interpolation `displayColor` — the
+    /// same channel a [`PartEntry`] carries, since a curve is drawn beside the
+    /// meshes and has to agree with them.
+    pub display_color: [f32; 3],
 }
 
 fn is_false(b: &bool) -> bool {
@@ -235,6 +239,7 @@ mod tests {
             points: vec![[0.0; 3], [0.0, 0.0, 0.1], [0.0, 0.0, 0.2]],
             widths: vec![0.011, 0.010, 0.009],
             thickness: 0.009,
+            display_color: [0.2, 0.5, 0.1],
         });
 
         let mut root = Node::group("Vineyard", "Xform");
