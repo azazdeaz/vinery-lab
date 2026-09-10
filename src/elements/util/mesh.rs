@@ -143,14 +143,15 @@ pub fn box_mesh(size: f32) -> MeshData {
 /// as round rather than as a prism. The caps carry their own copy of each
 /// ring, so that averaging stops at the rim instead of bevelling it.
 ///
-/// Straight, untapered and unjittered: the variety a vineyard's posts show is
-/// in how they were driven rather than in their shape, which is per placement
-/// and needs no geometry of its own. Anything that bends wants
-/// [`strand`](super::strand) instead — this is the cheap case, one ring at
-/// each end and no curve to fit.
-pub fn cylinder_mesh(radius: f32, height: f32, sides: usize) -> MeshData {
+/// Tapers linearly from `base` to `top`; pass the same radius twice for a
+/// plain cylinder. Straight and unjittered either way: the variety a
+/// vineyard's posts show is in how they were driven rather than in their
+/// shape, which is per placement and needs no geometry of its own. Anything
+/// that *bends* wants [`strand`](super::strand) instead — this is the cheap
+/// case, one ring at each end and no curve to fit.
+pub fn cylinder_mesh(base: f32, top_radius: f32, height: f32, sides: usize) -> MeshData {
     let sides = sides.max(3);
-    let ring = |z: f32| -> Vec<[f32; 3]> {
+    let ring = |radius: f32, z: f32| -> Vec<[f32; 3]> {
         (0..sides)
             .map(|i| {
                 let angle = TAU * i as f32 / sides as f32;
@@ -159,7 +160,7 @@ pub fn cylinder_mesh(radius: f32, height: f32, sides: usize) -> MeshData {
             .collect()
     };
     // Barrel rings first, then a private copy of each for its cap.
-    let (bottom, top) = (ring(0.0), ring(height));
+    let (bottom, top) = (ring(base, 0.0), ring(top_radius, height));
     let points = [bottom.clone(), top.clone(), bottom, top].concat();
 
     let n = sides as i32;
@@ -227,7 +228,7 @@ mod tests {
     #[test]
     fn cylinder_mesh_is_a_closed_tube_wound_outward() {
         let (radius, height, sides) = (0.05, 1.8, 8);
-        let m = cylinder_mesh(radius, height, sides);
+        let m = cylinder_mesh(radius, radius, height, sides);
 
         assert_eq!(m.points.len(), sides * 4, "a ring each for barrel and cap");
         assert_eq!(
@@ -272,7 +273,7 @@ mod tests {
     /// be two coincident quads and both caps degenerate.
     #[test]
     fn a_cylinder_is_never_asked_for_fewer_than_three_sides() {
-        assert_eq!(cylinder_mesh(0.05, 1.0, 1).points.len(), 3 * 4);
+        assert_eq!(cylinder_mesh(0.05, 0.05, 1.0, 1).points.len(), 3 * 4);
     }
 
     /// The triangles a fan produces, as position triples.
@@ -294,7 +295,7 @@ mod tests {
         assert_eq!(triangles(&box_mesh(2.0)).len(), 12);
 
         // Eight barrel quads plus two eight-sided caps: 8*2 + 2*6.
-        assert_eq!(triangles(&cylinder_mesh(0.05, 1.0, 8)).len(), 28);
+        assert_eq!(triangles(&cylinder_mesh(0.05, 0.05, 1.0, 8)).len(), 28);
 
         assert_eq!(
             box_mesh(2.0).to_mesh().count_vertices(),
@@ -308,7 +309,7 @@ mod tests {
     /// hole rather than an obviously wrong shape.
     #[test]
     fn to_mesh_preserves_outward_winding() {
-        for mesh in [box_mesh(2.0), cylinder_mesh(0.4, 1.0, 8)] {
+        for mesh in [box_mesh(2.0), cylinder_mesh(0.4, 0.4, 1.0, 8)] {
             // Both shapes enclose the average of their own points, so
             // "outward" is "away from that" for the caps as well as the sides.
             let center = mesh
@@ -342,7 +343,7 @@ mod tests {
             assert_eq!(n.abs().to_array().iter().filter(|c| **c > 0.9).count(), 1);
         }
 
-        let barrel = cylinder_mesh(0.4, 1.0, 8).to_mesh();
+        let barrel = cylinder_mesh(0.4, 0.4, 1.0, 8).to_mesh();
         let normals = barrel
             .attribute(Mesh::ATTRIBUTE_NORMAL)
             .and_then(VertexAttributeValues::as_float3)

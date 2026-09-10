@@ -43,16 +43,23 @@
 //!   Leaf_01           ...
 //! ```
 //!
-//! A flexible one is a curve where the others are a mesh, and hangs its leaves
-//! on the rod segments a solver builds from that curve rather than on itself:
+//! A flexible one carries a curve for the solver to bend, and hangs both its
+//! geometry and its leaves on the rod segments that solver builds from the
+//! curve rather than on itself:
 //!
 //! ```text
 //! Shoot_00_0
-//!   Cable             the centerline, simulated and drawn
-//!   Cable_edge_body_1 the rest frame of one rod segment
+//!   Cable             the centerline, simulated; `guide`, so never drawn
+//!   Cable_edge_body_1 one rod segment, its transform driven by the solver
+//!     Stem            the tube this segment is drawn with
 //!     Leaf_00         rebased into that segment's frame
 //!   Cable_edge_body_2 ...
 //! ```
+//!
+//! The curve is not drawn because a `BasisCurves` whose points change every
+//! frame renders with a visible glitch under Kit's RTX delegate, where a mesh
+//! on a moving transform does not. One shared tube per segment also instances,
+//! which a curve deformed per shoot cannot.
 //!
 //! Same split as one level up: where the nodes are comes from the
 //! **representative**, because a leaf has to sit on the stem that actually got
@@ -73,6 +80,7 @@ use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_upd
 use nalgebra::Point3;
 
 use super::leaf;
+use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
@@ -83,9 +91,20 @@ use crate::ui::Staged;
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
 
+/// The mesh-library prefix a flexible shoot's per-segment tubes go under.
+///
+/// A layer of its own, because there is one tube per *segment* of every
+/// representative where there is one stem per representative, and
+/// [`Library::clear`] drops a whole prefix at a time.
+pub const CANE: &str = "Cane";
+
 /// The prim a shoot's stem takes, below the shoot itself. A child rather than
 /// the shoot prim itself, because a shoot has leaves hanging off it and
 /// geometry prims carry no children.
+///
+/// A flexible shoot uses the same name once per rod segment — see
+/// [`segment_tubes`] — so a consumer looking for a shoot's geometry has one
+/// rule whichever way it was drawn.
 pub const STEM: &str = "Stem";
 
 // ─── Shape constants ────────────────────────────────────────────────
@@ -708,6 +727,31 @@ fn segment_frames(points: &[[f32; 3]]) -> Vec<Transform> {
         .collect()
 }
 
+/// One tube per segment of `points`, each in that segment's own frame — the
+/// geometry a flexible shoot is drawn with, in place of its curve.
+///
+/// Drawn from the same [`taper`] as the stem mesh, so a cane and a rigid shoot
+/// off the same representative still read alike. Each tube is centered on the
+/// segment midpoint to match [`segment_frames`], and overruns both of its ends
+/// by its own radius there: the tubes are butt-jointed and turn about 45° at
+/// the bend, where flush ends would leave a wedge of daylight.
+fn segment_tubes(points: &[[f32; 3]], config: &ShootConfig) -> Vec<MeshData> {
+    points
+        .windows(2)
+        .map(|pair| {
+            let (from, to) = (Vec3::from(pair[0]), Vec3::from(pair[1]));
+            let length = (to - from).length();
+            let base = taper(config, from.z as f64) as f32;
+            let top = taper(config, to.z as f64) as f32;
+            let mut tube = cylinder_mesh(base, top, length + base + top, config.sides as usize);
+            for point in &mut tube.points {
+                point[2] -= length / 2.0 + base;
+            }
+            tube
+        })
+        .collect()
+}
+
 /// Which segment of `points` carries whatever sits at height `z`.
 ///
 /// By height, which a centerline climbs monotonically. Segment 0 is the bend
@@ -758,9 +802,16 @@ fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
 }
 
 /// One representative, built once: the leaf nodes hanging off it, the
-/// centerline a cane bends along, how it looks, and the mesh a rigid shoot
-/// draws with. Every shoot assigned to it clones the lot.
-type Built = (Vec<LeafNode>, Vec<[f32; 3]>, Surface, Geometry);
+/// centerline a cane bends along, how it looks, the mesh a rigid shoot draws
+/// with, and the tube each of a cane's segments draws with. Every shoot
+/// assigned to it clones the lot.
+type Built = (
+    Vec<LeafNode>,
+    Vec<[f32; 3]>,
+    Surface,
+    Geometry,
+    Vec<Geometry>,
+);
 
 /// Builds one mesh per distinct shoot, and hangs a leaf on every node.
 ///
@@ -779,6 +830,7 @@ pub(crate) fn build(
     shoots: Query<(Entity, &Order, &ShootConfig)>,
 ) -> Result<()> {
     library.clear(PART);
+    library.clear(CANE);
 
     let mut grown: Vec<(Order, Entity, ShootConfig)> = shoots
         .iter()
@@ -801,24 +853,56 @@ pub(crate) fn build(
         build_shoot(config, stem_seed(index))
     });
 
+    // Which representatives a cane actually drew. Only those need tubes, and
+    // at the default rate of zero that is none of them — built anyway, they
+    // would be authored into the scene and never referenced.
+    let mut bendable = vec![false; book.representatives.len()];
+    for ((order, ..), drew) in grown.iter().zip(&book.assignment) {
+        if is_flexible(&params, scene.seed, *order) {
+            bendable[*drew as usize] = true;
+        }
+    }
+
     let mut built: Vec<Built> = Vec::with_capacity(book.len());
-    for (index, grown) in stems.into_iter().enumerate() {
+    // Tube parts are numbered across the whole layer, because how many a
+    // representative needs depends on how long its cane came out.
+    let mut tubes_built = 0usize;
+    for (index, (grown, config)) in stems.into_iter().zip(&book.representatives).enumerate() {
         let ShootBuild { stem, nodes, cable } = grown?;
         // The curve draws in the mesh's colour, so a cane and a rigid shoot of
         // the same representative look alike.
         let skin = surface(stem_seed(index));
-        built.push((nodes, cable, skin, library.part(PART, index, stem, skin)));
+        let tubes: Vec<Geometry> = if bendable[index] {
+            segment_tubes(&cable, config)
+                .into_iter()
+                .enumerate()
+                .map(|(segment, tube)| {
+                    library.part(CANE, tubes_built + segment, tube.to_mesh(), skin)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        tubes_built += tubes.len();
+        built.push((
+            nodes,
+            cable,
+            skin,
+            library.part(PART, index, stem, skin),
+            tubes,
+        ));
     }
 
     let mut leaf_order = 0u64;
     for ((order, entity, config), drew) in grown.iter().zip(&book.assignment) {
-        let (nodes, centerline, skin, geometry) = &built[*drew as usize];
+        let (nodes, centerline, skin, geometry, tubes) = &built[*drew as usize];
         let mut shoot = commands.entity(*entity);
         // The layer owns everything below a shoot, and a rebuild may hang a
         // different number of leaves than the last one did.
         shoot.despawn_children();
 
-        // A cane is drawn by its curve alone, where a rigid shoot is a mesh.
+        // A cane is one mesh per rod segment over a curve that is simulated
+        // and not drawn; a rigid shoot is a single mesh.
         let flexible = is_flexible(&params, scene.seed, *order);
         let frames = if flexible {
             shoot.with_child((
@@ -847,6 +931,11 @@ pub(crate) fn build(
                         *frame,
                         Visibility::default(),
                     ))
+                    // The tube rides the segment rather than the segment prim
+                    // carrying the mesh itself, because the solver drives that
+                    // prim and a prim holding a reference can have no children
+                    // — the leaves are already down here.
+                    .with_child((Name::new(STEM), tubes[index].clone()))
                     .id()
             }));
         });
@@ -1128,6 +1217,41 @@ mod tests {
             "the tip"
         );
         assert!(tip < thickness && thickness < widths[0]);
+    }
+
+    /// A cane is drawn by these rather than by its curve, so each tube has to
+    /// stand where its segment's frame puts it — centered on the midpoint, +Z
+    /// along the segment — reach past *both* ends of it, and carry the same
+    /// taper the curve is drawn at.
+    ///
+    /// The overreach is the point: neighbouring tubes are butt-jointed and turn
+    /// about 45° at the bend, where two that merely met would open a wedge.
+    #[test]
+    fn a_canes_tubes_cover_the_segments_they_stand_on() {
+        let config = config();
+        let points = cable_points(&axis(&config, 3));
+        let widths = cable_widths(&points, &config);
+        let tubes = segment_tubes(&points, &config);
+
+        assert_eq!(
+            tubes.len(),
+            segment_frames(&points).len(),
+            "one per segment"
+        );
+
+        for (index, (tube, span)) in tubes.iter().zip(spans(&points)).enumerate() {
+            let (low, high) = bounds(tube, 2);
+            assert!(
+                low < -span / 2.0 && high > span / 2.0,
+                "tube {index} stops inside its own segment",
+            );
+            // Widest at the base, which is the taper the curve carries there.
+            let (_, radius) = bounds(tube, 0);
+            assert!(
+                (2.0 * radius - widths[index]).abs() < 1e-6,
+                "tube {index} is not drawn at the cable's width",
+            );
+        }
     }
 
     /// A leaf on a cane rides the rod segment that carries it, so all three of
@@ -1507,6 +1631,12 @@ mod tests {
         for part in by_part.keys() {
             assert!(library.get(part).is_some(), "{part} is not in the library");
         }
+        // Nothing bends at the default rate, and a tube built anyway is
+        // authored into the scene and referenced by nothing.
+        assert!(
+            library.iter().all(|(name, _)| !name.starts_with(CANE)),
+            "a shoot that never bends built a cane tube"
+        );
 
         let shared = by_part
             .values()
@@ -1532,6 +1662,66 @@ mod tests {
                 (a.translation - b.translation).length() < 1e-6,
                 "a node is where the stem put it, on both shoots"
             );
+        }
+    }
+
+    /// The other end of the same contract: a flexible shoot draws nothing
+    /// itself, and hangs a tube on every rod segment the solver drives instead.
+    ///
+    /// The curve is simulated and never drawn, so a segment left bare is a
+    /// stretch of invisible cane — and one indexed off by one is a cane drawn
+    /// at the wrong taper. Both compose to a scene that loads.
+    #[test]
+    fn a_flexible_shoot_draws_a_tube_on_every_segment() {
+        let mut app = testing::grown(VineyardParams {
+            shoot: ShootParams {
+                flexible: 1.0,
+                ..default()
+            },
+            ..default()
+        });
+
+        let shoots = organs::<ShootConfig>(app.world_mut());
+        assert!(shoots.len() > 100, "the fixture grew shoots");
+
+        let mut drawn: Vec<String> = Vec::new();
+        for shoot in &shoots {
+            let entity = testing::prim(app.world_mut(), &shoot.path.split('/').collect::<Vec<_>>())
+                .expect("the shoot is on the scene graph");
+            let children = named_children(app.world_mut(), entity);
+            assert!(
+                !children.iter().any(|(name, _)| name == STEM),
+                "{}: a cane draws by its segments, not by a stem of its own",
+                shoot.path
+            );
+
+            let segments: Vec<(String, Entity)> = children
+                .into_iter()
+                .filter(|(name, _)| name.contains("_edge_body_"))
+                .collect();
+            assert!(!segments.is_empty(), "{}: no rod segments", shoot.path);
+
+            for (name, segment) in segments {
+                let tubes: Vec<Entity> = named_children(app.world_mut(), segment)
+                    .into_iter()
+                    .filter(|(child, _)| child == STEM)
+                    .map(|(_, entity)| entity)
+                    .collect();
+                assert_eq!(tubes.len(), 1, "{}/{name} draws one tube", shoot.path);
+                drawn.push(
+                    app.world()
+                        .entity(tubes[0])
+                        .get::<UsdReference>()
+                        .expect("the tube references a library part")
+                        .0
+                        .clone(),
+                );
+            }
+        }
+
+        let library = app.world().resource::<Prototypes>();
+        for part in &drawn {
+            assert!(library.get(part).is_some(), "{part} is not in the library");
         }
     }
 

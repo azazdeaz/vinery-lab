@@ -124,8 +124,9 @@ A flexible organ is a curve and the material it bends by
       segment is a static one, so zeroing the leading points bolts the curve to
       where it was authored. See `_cable_point_masses`.
 
-    Only Newton's VBD solver simulates one; every other backend leaves an inert
-    curve, which draws correctly and does nothing.
+    Only Newton's VBD solver simulates one. Under every other backend nothing
+    drives the segment prims, so a flexible organ draws correctly at its rest
+    shape and never moves.
 
 ``xformOp:orient`` rather than ``xformOp:rotateXYZ``
     USD's ``rotateXYZ`` and Bevy's Euler conventions disagree about intrinsic
@@ -563,12 +564,16 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
 def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     """A deformable curve and the material it bends by.
 
-    The curve is drawn as well as simulated, so a flexible organ needs no mesh
-    beside it -- and carries the taper and the colour that make it read as the
-    organ it replaces. The two disagree about thickness on purpose: ``widths``
-    tapers per point and is read only by renderers, while the rod is a chain of
-    equal capsules sized by the material's ``physics:curvesThickness``. Nothing
-    in the import path reads ``widths`` or ``displayColor``.
+    Simulated but never drawn: ``purpose = "guide"`` keeps it out of a render
+    the same way it keeps a collision capsule out of one. A ``BasisCurves``
+    whose points move every frame renders with a visible glitch under Kit's RTX
+    delegate, so a flexible organ is drawn by a mesh on each of the rod segments
+    the importer drives instead -- see `src/elements/shoot.rs`.
+
+    ``widths`` and ``displayColor`` are authored anyway, so the curve reads as
+    the organ it stands for when guides are turned on. Nothing in the import
+    path reads either, and neither sizes the rod: that is a chain of equal
+    capsules sized by the material's ``physics:curvesThickness``.
 
     What holds the curve in place is ``physics:masses``; see
     `_cable_point_masses`.
@@ -609,10 +614,13 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     _author_material(spec, cable)
 
     # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
-    # non-periodic curve imports as a cable; anything else is skipped.
+    # non-periodic curve imports as a cable; anything else is skipped. The
+    # `guide` purpose is uniform for the same reason it is on a collider: what
+    # a prim is for does not vary over time.
     for name, value in (
         ("type", UsdGeom.Tokens.linear),
         ("wrap", UsdGeom.Tokens.nonperiodic),
+        ("purpose", UsdGeom.Tokens.guide),
     ):
         Sdf.AttributeSpec(
             spec, name, Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform
