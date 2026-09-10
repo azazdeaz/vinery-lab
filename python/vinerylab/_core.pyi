@@ -160,6 +160,9 @@ class ShootParams:
     shoot; setting it to 0 leaves the shoot bare. Leaf *size* is not set
     anywhere: it comes out of each leaf's age, as a scale on a prototype of
     fixed area.
+
+    `flexible` is the fraction of shoots exported as a deformable curve rather
+    than a mesh -- bare canes, without leaves, that a physics engine bends.
     """
 
     variations: int
@@ -170,6 +173,7 @@ class ShootParams:
     detail: int
     internode: float
     leaf_droop: float
+    flexible: float
 
     def __init__(
         self,
@@ -181,6 +185,7 @@ class ShootParams:
         detail: int = 40,
         internode: float = 0.07,
         leaf_droop: float = 0.35,
+        flexible: float = 0.0,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

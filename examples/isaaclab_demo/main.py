@@ -6,6 +6,8 @@ is doing from `markers`.
 
 The physics backend and the viewer are command-line choices, e.g.
 `--physics newton_mjwarp --viz newton`; `--help` lists the full launcher set.
+`--physics newton_flexible` adds the coupled solver that bends the vineyard's
+flexible shoots -- see `vinerylab.isaaclab.physics`.
 """
 
 import argparse
@@ -17,7 +19,13 @@ from isaaclab.app import add_launcher_args, launch_simulation, make_physics_cfg
 from isaaclab.assets import Articulation
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-from vinerylab.isaaclab import ParcelCfg, TerrainCfg, VineyardCfg
+from vinerylab.isaaclab import (
+    ParcelCfg,
+    ShootCfg,
+    TerrainCfg,
+    VineyardCfg,
+    make_coupled_physics_cfg,
+)
 
 from driver import DECIMATION, SIM_DT, Driver
 from markers import DebugMarkers
@@ -35,10 +43,21 @@ from isaaclab_assets.robots.anymal import ANYMAL_C_CFG  # isort:skip
 VINEYARD_CFG = VineyardCfg(
     # A small field, so a wave to match: roughly 0.8 m of relief across it.
     terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
-    parcel=ParcelCfg(orientation=-14.0, row_spacing=2.0),
+    parcel=ParcelCfg(orientation=-14.0, row_spacing=1.7),
+    # A few canes for the robot to push through. They bend under
+    # `--physics newton_flexible` and under nothing else.
+    shoot=ShootCfg(flexible=0.05),
 )
 VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
+
+# The parts of the robot a shoot may bend. Legs only: nothing else on an ANYmal
+# reaches into the canopy, and every body named here costs a proxy in the
+# solver that bends them.
+ROBOT_CONTACT = [rf"{ROBOT_PATH}/.*_(THIGH|SHANK|FOOT)"]
+
+FLEXIBLE = "newton_flexible"
+"""The one backend that bends the flexible shoots. See `physics_cfg`."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -48,8 +67,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--physics",
-        default="physx",
-        help="Physics backend: physx, isaacsim_physx, newton_mjwarp, newton_vbd or ovphysx.",
+        default=FLEXIBLE,
+        help=(
+            "Physics backend: physx, isaacsim_physx, newton_mjwarp, newton_vbd, "
+            f"ovphysx, or {FLEXIBLE} to bend the vineyard's flexible shoots."
+        ),
     )
     # Adds --device, --visualizer/--viz, --livestream and the rest; it wants the
     # script's own arguments registered first.
@@ -62,6 +84,13 @@ def parse_args() -> argparse.Namespace:
     if not getattr(args, "device_explicit", False):
         args.device = "cpu" if "physx" in args.physics else "cuda:0"
     return args
+
+
+def physics_cfg(name: str):
+    """The physics config for a backend name, including our own."""
+    if name == FLEXIBLE:
+        return make_coupled_physics_cfg(VINEYARD_PATH, ROBOT_PATH, ROBOT_CONTACT)
+    return make_physics_cfg(name)
 
 
 def design_scene() -> Articulation:
@@ -100,8 +129,11 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: 
 def main():
     args_cli = parse_args()
     sim_cfg = sim_utils.SimulationCfg(
-        dt=SIM_DT, device=args_cli.device, physics=make_physics_cfg(args_cli.physics)
+        dt=SIM_DT, device=args_cli.device, physics=physics_cfg(args_cli.physics)
     )
+    # The launcher rebuilds the physics config from this argument, and knows
+    # only Isaac Lab's own backend names; cleared, it keeps the one built above.
+    args_cli.physics = None
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it on exit.
     with launch_simulation(sim_cfg, args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)

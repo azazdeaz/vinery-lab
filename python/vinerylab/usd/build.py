@@ -90,6 +90,23 @@ Colliders are authored where physics can reach them
     ``Capsule`` prim of its own -- the only round shape PhysX has natively,
     needing no cooking -- marked ``purpose = "guide"`` so no renderer draws it.
 
+A flexible organ is a curve and the material it bends by
+    A ``BasisCurves`` carrying ``PhysicsCurvesDeformableSimAPI`` is imported as a
+    rod: one capsule body per segment, joined by spring joints. Three things
+    make that work, and dropping any of them leaves a curve that does nothing.
+
+    * The curve must be **linear** and **non-periodic**; anything else is
+      skipped with a warning rather than refused.
+    * Stiffness and density are read off a *bound* ``PhysicsCurvesDeformableMaterialAPI``
+      material. Without the binding the importer falls back to defaults stiff
+      enough that nothing visibly bends.
+    * A rod floats free. What holds it is ``physics:masses``: a massless
+      segment is a static one, so zeroing the leading points bolts the curve to
+      where it was authored. See `_cable_point_masses`.
+
+    Only Newton's VBD solver simulates one; every other backend leaves an inert
+    curve, which draws correctly and does nothing.
+
 ``xformOp:orient`` rather than ``xformOp:rotateXYZ``
     USD's ``rotateXYZ`` and Bevy's Euler conventions disagree about intrinsic
     versus extrinsic composition, and a mismatch produces a scene that is
@@ -115,12 +132,13 @@ The prim tree is authored through ``Sdf``, not the ``Usd`` stage API
 from __future__ import annotations
 
 import functools
+import math
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
 
-FORMAT = 2
+FORMAT = 5
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -149,6 +167,44 @@ _UP_AXIS_TOKENS = {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y, "Z": UsdGeom.To
 _COLLISION_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCollisionAPI"])
 """What `UsdPhysics.CollisionAPI.Apply` writes, for the prims authored through
 `Sdf` -- which enforces no schema and so has no `Apply` of its own."""
+
+_CABLE_API = Sdf.TokenListOp.Create(
+    prependedItems=[
+        "PhysicsCurvesDeformableSimAPI",
+        "PhysicsCollisionAPI",
+        # Declared, not just authored: USD warns about a binding on a prim that
+        # does not apply this.
+        "MaterialBindingAPI",
+    ]
+)
+"""Schemas that make a `BasisCurves` a simulated, collidable cable."""
+
+_CABLE_MATERIAL_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCurvesDeformableMaterialAPI"])
+
+CABLE_MATERIAL = "PhysicsMaterial"
+"""Name of the material prim authored under every cable."""
+
+_BOLTED_POINTS = 2
+"""Leading control points given no mass, which bolts the segment between them
+down. See `_cable_point_masses`."""
+
+CABLE_MATERIAL_ATTRS: dict[str, float] = {
+    # Young's modulus of a green cane, in Pa. The importer derives all four rod
+    # stiffnesses -- stretch, shear, bend, twist -- from this, Poisson's ratio
+    # and the cross-section, so it is the one knob that says how stiff a
+    # flexible organ is. At a shoot's radius it leaves a cane that stands up
+    # under its own weight and folds out of a robot's way.
+    "youngsModulus": 1.0e9,
+    "poissonsRatio": 0.3,
+    # Fresh cane is mostly water.
+    "density": 800.0,
+}
+"""Cable material, in SI. Not on the scene document: these are tuning, and the
+document carries scene facts.
+
+Authored under the current AOUSD names. The unprefixed ones (`stretchStiffness`
+and friends) are a deprecated revision that the importer reads as *structural*
+values and warns about."""
 
 
 def build_usd(doc: Mapping[str, Any], path: str) -> None:
@@ -302,6 +358,9 @@ def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
     if collider := node.get("collider"):
         _author_collider(spec, collider)
 
+    if cable := node.get("cable"):
+        _author_cable(spec, cable)
+
     for child in node.get("children", ()):
         _author_node(layer, f"{path}/{child['name']}", child)
 
@@ -372,3 +431,116 @@ def _author_collider(spec: Sdf.PrimSpec, collider: Mapping[str, Any]) -> None:
     ).default = UsdGeom.Tokens.guide
 
     spec.SetInfo("apiSchemas", _COLLISION_API)
+
+
+def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
+    """A deformable curve and the material it bends by.
+
+    The curve is drawn as well as simulated, so a flexible organ needs no mesh
+    beside it -- and carries the taper and the colour that make it read as the
+    organ it replaces. The two disagree about thickness on purpose: ``widths``
+    tapers per point and is read only by renderers, while the rod is a chain of
+    equal capsules sized by the material's ``physics:curvesThickness``. Nothing
+    in the import path reads ``widths`` or ``displayColor``.
+
+    What holds the curve in place is ``physics:masses``; see
+    `_cable_point_masses`.
+    """
+    points = Vt.Vec3fArray([tuple(p) for p in cable["points"]])
+    widths = Vt.FloatArray([float(w) for w in cable["widths"]])
+    thickness = float(cable["thickness"])
+    for name, value_type, value in (
+        ("points", Sdf.ValueTypeNames.Point3fArray, points),
+        # One curve per prim: the importer builds a rod per curve, and a
+        # multi-curve prim would weld into a single articulation.
+        ("curveVertexCounts", Sdf.ValueTypeNames.IntArray, Vt.IntArray([len(points)])),
+        # A curve is drawn as a tube around its centerline, so the box has to
+        # clear the widths as well as the points -- which is what
+        # `ComputeExtent` adds and a box around the points alone does not.
+        (
+            "extent",
+            Sdf.ValueTypeNames.Float3Array,
+            UsdGeom.BasisCurves.ComputeExtent(points, widths),
+        ),
+    ):
+        Sdf.AttributeSpec(spec, name, value_type).default = value
+
+    # One width per point -- the taper -- which is what `vertex` says. It is
+    # *metadata* on the attribute; a sibling `widths:interpolation` attribute is
+    # ignored, and the default happens to be `vertex` anyway, so a mistake here
+    # is invisible until the count disagrees.
+    taper = Sdf.AttributeSpec(spec, "widths", Sdf.ValueTypeNames.FloatArray)
+    taper.default = widths
+    taper.SetInfo("interpolation", UsdGeom.Tokens.vertex)
+
+    # One colour for the whole curve. Same channel and same reasoning as a
+    # part's, and the physics material bound below is not a preview one, so it
+    # does not take `displayColor` out of the renderer's hands.
+    color = Sdf.AttributeSpec(spec, "primvars:displayColor", Sdf.ValueTypeNames.Color3fArray)
+    color.default = Vt.Vec3fArray([tuple(cable["display_color"])])
+    color.SetInfo("interpolation", UsdGeom.Tokens.constant)
+
+    # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
+    # non-periodic curve imports as a cable; anything else is skipped.
+    for name, value in (
+        ("type", UsdGeom.Tokens.linear),
+        ("wrap", UsdGeom.Tokens.nonperiodic),
+    ):
+        Sdf.AttributeSpec(
+            spec, name, Sdf.ValueTypeNames.Token, Sdf.VariabilityUniform
+        ).default = value
+
+    spec.SetInfo("apiSchemas", _CABLE_API)
+    Sdf.AttributeSpec(spec, "physics:collisionEnabled", Sdf.ValueTypeNames.Bool).default = True
+
+    material = Sdf.PrimSpec(spec, CABLE_MATERIAL, Sdf.SpecifierDef, "Material")
+    material.SetInfo("apiSchemas", _CABLE_MATERIAL_API)
+    # The thickness here, not the `widths` above, is what sizes the capsules and
+    # their inertia; without it the importer assumes a millimeter and says so.
+    for name, value in (("curvesThickness", thickness), *CABLE_MATERIAL_ATTRS.items()):
+        Sdf.AttributeSpec(material, f"physics:{name}", Sdf.ValueTypeNames.Float).default = value
+    # Bound rather than merely authored: the importer reads the stiffnesses off
+    # the *bound* material and silently uses its own defaults without this.
+    Sdf.RelationshipSpec(spec, "material:binding:physics").targetPathList.explicitItems = [
+        material.path
+    ]
+
+    Sdf.AttributeSpec(
+        spec, "physics:masses", Sdf.ValueTypeNames.FloatArray
+    ).default = Vt.FloatArray(_cable_point_masses(points, thickness))
+
+
+def _cable_point_masses(
+    points: Sequence[tuple[float, float, float]], thickness: float
+) -> list[float]:
+    """Per-point masses that bolt a cable's first segment down and weigh the rest.
+
+    Authoring these is the whole of the anchor. A control point is a junction
+    rather than a body -- the importer lumps ``m[s] + m[s+1]/2`` onto the segment
+    between two of them -- so zeroing the first two leaves the first segment
+    massless, which Newton simulates as **static**: fixed in position *and* in
+    orientation, the way a shoot is held where it leaves the wood.
+
+    The schema's own anchor, a ``PhysicsAttachment``, is the worse tool here. It
+    lowers only to *ball* joints, so one pins a position and leaves the curve
+    pivoting about it, and two are needed to hold a direction. They are also
+    compliant: past roughly 1e10 Pa a stiff rod overpowers them and the base
+    swings free again. A massless body has no such ceiling, and costs no prim.
+
+    Every other point carries the density times half of each segment it joins,
+    which lumps back to the cylinder mass of each. The second segment is the one
+    exception, left at half weight because the point below it is one of the
+    zeroed pair -- an edge effect on the segment next to a rigid one.
+    """
+    volume = math.pi * (thickness / 2.0) ** 2
+    spans = [math.dist(a, b) for a, b in zip(points, points[1:])]
+    density = CABLE_MATERIAL_ATTRS["density"]
+    return [
+        0.0
+        if index < _BOLTED_POINTS
+        else density
+        * volume
+        * 0.5
+        * ((spans[index - 1] if index else 0.0) + (spans[index] if index < len(spans) else 0.0))
+        for index in range(len(points))
+    ]

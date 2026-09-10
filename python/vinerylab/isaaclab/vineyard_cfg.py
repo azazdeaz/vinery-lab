@@ -142,6 +142,12 @@ class ShootCfg:
     A shoot also carries the canopy, so the two leaf knobs live here rather
     than on `LeafCfg`. `internode` is the spacing between leaf nodes up the
     shoot; setting it to 0 leaves the shoot bare.
+
+    `flexible` is the fraction of shoots authored as deformable curves instead
+    of meshes -- bare canes a robot pushes aside. They simulate **only** under
+    the coupled solver `make_coupled_physics_cfg` builds; every other backend
+    imports them as inert curves. Each one is a chain of rigid bodies, so this
+    is the most expensive knob here: keep it low.
     """
 
     variations: int = 4
@@ -152,6 +158,7 @@ class ShootCfg:
     detail: int = 40
     internode: float = 0.07
     leaf_droop: float = 0.35
+    flexible: float = 0.0
 
 
 @configclass
@@ -159,16 +166,23 @@ class LeafCfg:
     """One blade of the canopy.
 
     The blade shapes are drawn rather than generated -- one SVG outline each,
-    embedded at build time -- so `variations` has a natural ceiling here: at 5
-    every drawing gets a mesh, and above that it buys nothing. Size is not a
+    embedded at build time -- so the first 5 of `variations` go on giving every
+    drawing a mesh of its own, and the rest buys curls of them. Size is not a
     parameter: every blade is built at the same area, and a leaf's size comes
     from the scale it is placed at.
 
-    `detail` is how many triangles the blade's interior is cut into.
+    `detail` is how many triangles the blade's interior is cut into, and the
+    floor on how fine a curl those triangles can hold.
+
+    `curl` is how far a blade bends out of the flat shape it was drawn as: a
+    trough down the midrib, a droop along it and a ruffled margin, all scaled
+    together. It is the middle of a spread -- every leaf draws its own share of
+    it, and some curl the other way. Zero leaves the drawing flat.
     """
 
-    variations: int = 5
+    variations: int = 40
     detail: int = 120
+    curl: float = 1.0
 
 
 @configclass

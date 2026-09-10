@@ -23,8 +23,27 @@ def fix_heightfield_offsets() -> None:
     Call once the solver exists, i.e. after `SimulationContext.reset()`.
     """
     physics = sys.modules.get("isaaclab_newton.physics")  # unimported unless Newton is in play
-    solver = physics.NewtonManager._solver if physics is not None else None
-    if (model := getattr(solver, "mjw_model", None)) is None:
+    if physics is None:
+        return
+    for solver in _mujoco_solvers(physics.NewtonManager._solver):
+        _lift_height_fields(solver)
+
+
+def _mujoco_solvers(solver):
+    """Every MuJoCo solver stepping part of the scene.
+
+    One, normally. Under a coupled solver the MuJoCo one is an *entry* of it
+    and the global handle is the coupler, so it has to be asked for its
+    sub-solvers by name -- without this the fix quietly does nothing and the
+    robot sinks again.
+    """
+    if (names := getattr(solver, "entry_names", None)) is not None:
+        return [solver.solver(name) for name in names()]
+    return [solver]
+
+
+def _lift_height_fields(solver) -> None:
+    if getattr(solver, "mjw_model", None) is None:
         return
 
     import mujoco
@@ -34,7 +53,7 @@ def fix_heightfield_offsets() -> None:
         return
     # The derived pose too: mujoco_warp leaves world-body geoms out of forward
     # kinematics, so nothing recomputes it from the position we just wrote.
-    for array in (model.geom_pos, solver.mjw_data.geom_xpos):
+    for array in (solver.mjw_model.geom_pos, solver.mjw_data.geom_xpos):
         values = array.numpy()
         values[:, fields] = solver.mj_model.geom_pos[fields]
         array.assign(values)

@@ -206,6 +206,7 @@ impl ShootParams {
         detail=40,
         internode=0.07,
         leaf_droop=0.35,
+        flexible=0.0,
     ))]
     fn py_new(
         variations: u32,
@@ -216,6 +217,7 @@ impl ShootParams {
         detail: u32,
         internode: f32,
         leaf_droop: f32,
+        flexible: f32,
     ) -> Self {
         Self {
             variations,
@@ -226,6 +228,7 @@ impl ShootParams {
             detail,
             internode,
             leaf_droop,
+            flexible,
         }
     }
 
@@ -237,9 +240,13 @@ impl ShootParams {
 #[pymethods]
 impl LeafParams {
     #[new]
-    #[pyo3(signature = (variations=5, detail=120))]
-    fn py_new(variations: u32, detail: u32) -> Self {
-        Self { variations, detail }
+    #[pyo3(signature = (variations=40, detail=120, curl=1.0))]
+    fn py_new(variations: u32, detail: u32, curl: f32) -> Self {
+        Self {
+            variations,
+            detail,
+            curl,
+        }
     }
 
     fn __repr__(&self) -> String {

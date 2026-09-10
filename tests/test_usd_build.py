@@ -16,15 +16,26 @@ import json
 import pathlib
 
 import pytest
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade
 
 from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
+from vinerylab.usd.build import CABLE_MATERIAL
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
 VINE = f"{ROOT}/Planting/Row_00/Vine_000"
 LEAF = f"{VINE}/Shoot_00/Leaf_00"
+CABLE = f"{VINE}/Shoot_01/Cable"
 TERRAIN = f"{ROOT}/Terrain"
+
+
+def applied_schemas(prim: Usd.Prim) -> list[str]:
+    """Every applied API schema, including the ones USD does not know.
+
+    The deformable-curve schemas are codeless and ship with the solver rather
+    than with USD, so `Usd.Prim.GetAppliedSchemas` filters them out of its
+    answer. This is the query Isaac Lab and Newton make."""
+    return list(prim.GetPrimTypeInfo().GetAppliedAPISchemas())
 
 
 def part_mesh(stage: Usd.Stage, name: str) -> UsdGeom.Mesh:
@@ -101,11 +112,18 @@ def test_a_part_bounds_its_own_points(stage: Usd.Stage):
     assert tuple(hi) == pytest.approx((0.02, 0.0, 0.9))
 
 
-def test_every_part_carries_a_constant_display_color(stage: Usd.Stage):
-    """Nothing binds a material, so this is the only channel a renderer reads;
-    at the wrong interpolation it falls through to white."""
-    for name, expected in [("Leaf_1", (0.24, 0.42, 0.16)), ("Vine_0", (0.31, 0.24, 0.18))]:
-        primvar = part_mesh(stage, name).GetDisplayColorPrimvar()
+def test_every_drawn_prim_carries_a_constant_display_color(stage: Usd.Stage):
+    """Nothing binds a preview material, so this is the only channel a renderer
+    reads; at the wrong interpolation it falls through to white. The curve is
+    held to the same rule: a flexible organ is drawn by it and by nothing else,
+    and untinted it stands out white among the meshes it replaces."""
+    drawn = [
+        (part_mesh(stage, "Leaf_1"), (0.24, 0.42, 0.16)),
+        (part_mesh(stage, "Vine_0"), (0.31, 0.24, 0.18)),
+        (UsdGeom.BasisCurves(stage.GetPrimAtPath(CABLE)), (0.18, 0.44, 0.12)),
+    ]
+    for gprim, expected in drawn:
+        primvar = gprim.GetDisplayColorPrimvar()
         assert primvar.GetInterpolation() == UsdGeom.Tokens.constant
         assert tuple(primvar.Get()[0]) == pytest.approx(expected)
 
@@ -237,6 +255,75 @@ def test_a_collision_proxy_is_placed_like_any_other_prim(stage: Usd.Stage):
         stage.GetPrimAtPath(f"{VINE}/Collision")
     ).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
     assert tuple(world.ExtractTranslation()) == pytest.approx((1.0, 2.0, 0.425))
+
+
+# --- flexible organs ------------------------------------------------
+
+
+def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
+    """Only a *linear*, *non-periodic* curve carrying the sim schema imports as
+    a cable; anything else is skipped with a warning and simulates as nothing.
+    One curve per prim, or the importer welds them into one articulation."""
+    prim = stage.GetPrimAtPath(CABLE)
+    curves = UsdGeom.BasisCurves(prim)
+
+    assert prim.GetTypeName() == "BasisCurves"
+    assert "PhysicsCurvesDeformableSimAPI" in applied_schemas(prim)
+    assert prim.HasAPI(UsdPhysics.CollisionAPI)
+    assert curves.GetTypeAttr().Get() == UsdGeom.Tokens.linear
+    assert curves.GetWrapAttr().Get() == UsdGeom.Tokens.nonperiodic
+    assert list(curves.GetCurveVertexCountsAttr().Get()) == [4]
+    assert tuple(curves.GetPointsAttr().Get()[1]) == pytest.approx((0.04, 0.0, 0.02))
+    # Drawn tapering, one width per point, while the rod stays uniform: no
+    # importer reads `widths`, so the two are free to disagree.
+    assert list(curves.GetWidthsAttr().Get()) == pytest.approx([0.012, 0.011, 0.01, 0.009])
+    assert curves.GetWidthsInterpolation() == UsdGeom.Tokens.vertex
+
+
+def test_a_cable_bounds_the_tube_it_is_drawn_as(stage: Usd.Stage):
+    """A curve is drawn as a tube around its centerline, so the box has to clear
+    the widths as well as the points. Kit RTX measures an animated curve's box
+    once and never refreshes it, so one that is too tight stays too tight."""
+    curves = UsdGeom.BasisCurves(stage.GetPrimAtPath(CABLE))
+    lo, hi = curves.GetExtentAttr().Get()
+    reach = max(curves.GetWidthsAttr().Get()) / 2.0
+    points = curves.GetPointsAttr().Get()
+    for axis in range(3):
+        assert lo[axis] == pytest.approx(min(p[axis] for p in points) - reach)
+        assert hi[axis] == pytest.approx(max(p[axis] for p in points) + reach)
+
+
+def test_a_flexible_organ_binds_the_material_it_bends_by(stage: Usd.Stage):
+    """The importer reads stiffness off the *bound* material. Without the
+    binding it silently substitutes its own defaults, which are stiff enough
+    that nothing visibly moves."""
+    prim = stage.GetPrimAtPath(CABLE)
+    material = stage.GetPrimAtPath(f"{CABLE}/{CABLE_MATERIAL}")
+
+    bound = UsdShade.MaterialBindingAPI(prim).GetDirectBinding("physics")
+    assert bound.GetMaterialPath() == material.GetPath()
+    assert "PhysicsCurvesDeformableMaterialAPI" in applied_schemas(material)
+    # Thickness here, not `widths`, is what sizes the capsules and their
+    # inertia; the importer assumes a millimetre without it.
+    assert material.GetAttribute("physics:curvesThickness").Get() == pytest.approx(0.009)
+    assert material.GetAttribute("physics:youngsModulus").Get() > 0.0
+    assert material.GetAttribute("physics:density").Get() > 0.0
+
+
+def test_a_flexible_organ_is_bolted_down_by_its_leading_masses(stage: Usd.Stage):
+    """A rod floats free otherwise. A point is a junction, not a body -- the
+    importer lumps `m[s] + m[s+1]/2` onto the segment between two of them -- so
+    the two zeroes make the first segment massless, which Newton simulates as
+    static in position and orientation both."""
+    masses = list(stage.GetPrimAtPath(CABLE).GetAttribute("physics:masses").Get())
+
+    # One per control point, or the importer ignores the array outright.
+    assert len(masses) == 4
+    assert masses[:2] == [0.0, 0.0]
+    assert all(mass > 0.0 for mass in masses[2:])
+    # Half of each segment the point joins: an end point borders one segment
+    # and an interior point two, so an end point carries less.
+    assert masses[3] < masses[2]
 
 
 def test_a_transform_round_trips_through_the_op_stack(stage: Usd.Stage):

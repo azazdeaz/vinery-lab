@@ -43,6 +43,17 @@
 //!   Leaf_01           ...
 //! ```
 //!
+//! A flexible one is a curve where the others are a mesh, and hangs its leaves
+//! on the rod segments a solver builds from that curve rather than on itself:
+//!
+//! ```text
+//! Shoot_00_0
+//!   Cable             the centerline, simulated and drawn
+//!   Cable_edge_body_1 the rest frame of one rod segment
+//!     Leaf_00         rebased into that segment's frame
+//!   Cable_edge_body_2 ...
+//! ```
+//!
 //! Same split as one level up: where the nodes are comes from the
 //! **representative**, because a leaf has to sit on the stem that actually got
 //! built, while each leaf's bearing, droop, twist, size and blade are drawn per
@@ -67,7 +78,7 @@ use super::util::material;
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
-use crate::scene::{Geometry, Library, Order, Surface, configs_changed, placed};
+use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -137,6 +148,19 @@ const STEM_STREAM: u64 = 0x589A_B41E_A1D2_F35B;
 /// reshapes the shoot underneath it — the same split [`vine`](super::vine)
 /// keeps between its wood and its shoots.
 const LEAF_STREAM: u64 = 0x2545_F491_4F6C_DD1D;
+
+/// The same again, splitting *which* shoots came out flexible off both, so
+/// that moving [`ShootParams::flexible`] never redraws a canopy or reshuffles
+/// the shoots that stayed rigid.
+const FLEX_STREAM: u64 = 0xD1B5_4A32_D192_ED03;
+
+/// Length of one segment of a flexible shoot's centerline, in meters.
+///
+/// A segment becomes a capsule body and a spring joint, so this is the whole
+/// cost of a flexible shoot: a cane of the default length buys nine of each.
+/// Coarser than the mesh, which needs ring density the physics does not — a
+/// bending rod is a chain of straight links either way.
+const CABLE_SEGMENT: f64 = 0.09;
 
 /// Below this the station loop would never terminate, so a shoot this closely
 /// noded carries no leaves at all. That is also how the canopy gets turned off.
@@ -305,6 +329,17 @@ pub struct ShootParams {
     /// hang at about this and the small ones at the tip stand nearly straight
     /// out — which is what a petiole holding a tenth of the weight does.
     pub leaf_droop: f32,
+    /// The fraction of shoots exported as a deformable curve rather than as a
+    /// mesh, in `0..=1`.
+    ///
+    /// A flexible shoot carries no stem mesh — its curve is drawn as well as
+    /// simulated — and hangs its leaves off the rod segments, so a blade
+    /// travels with the cane instead of staying where it used to be.
+    ///
+    /// Every one of them is a chain of rigid bodies in the simulation, so this
+    /// is the most expensive knob in the scene — see [`CABLE_SEGMENT`] for
+    /// what one costs.
+    pub flexible: f32,
 }
 
 impl Default for ShootParams {
@@ -318,6 +353,7 @@ impl Default for ShootParams {
             detail: 40,
             internode: 0.07,
             leaf_droop: 0.35,
+            flexible: 0.0,
         }
     }
 }
@@ -451,16 +487,7 @@ fn shoot_strand(axis: &ShootAxis, config: &ShootConfig) -> Strand {
         points.push(axis.at_height(z));
     }
 
-    // Tapered by height rather than by point index: the bend's points are
-    // centimeters apart and the rise's are decimeters, so an index taper would
-    // spend the whole taper on the bend.
-    let radii = points
-        .iter()
-        .map(|p| {
-            let t = (p.z / height).clamp(0.0, 1.0);
-            config.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
-        })
-        .collect();
+    let radii = points.iter().map(|p| taper(config, p.z)).collect();
 
     // No bark: a shoot is a smooth green stem, and ridges on a six-millimeter
     // tube read as noise rather than texture.
@@ -560,12 +587,139 @@ fn leaf_nodes(config: &ShootConfig, axis: &ShootAxis, seed: u64) -> Vec<LeafNode
     nodes
 }
 
+// ─── Cable ──────────────────────────────────────────────────────────
+
+/// The centerline a flexible shoot bends along: the bud, the top of the bend,
+/// then the rise at [`CABLE_SEGMENT`] steps.
+///
+/// **The whole bend is the first segment**, rather than something the sampling
+/// happens to cut across. That segment is the one bolted down — see
+/// `_cable_point_masses` in `python/vinerylab/usd/build.py` — so its shape is
+/// static and only its endpoints matter, while every segment that does move is
+/// a straight-rise sample of the same length. A solver derives one stiffness
+/// from the mean segment length and mistunes whatever differs from it, so
+/// evenness is worth arranging rather than hoping for.
+///
+/// Starts at the bud rather than behind it: the first point is where the cane
+/// is held, and holding it inside the spur would put the anchor somewhere no
+/// reader can see.
+fn cable_points(axis: &ShootAxis) -> Vec<[f32; 3]> {
+    let rise = axis.height - BEND_RADIUS;
+    // At least one rise segment, so the shortest shoot still makes a chain of
+    // two — a rod of one capsule is not a rod.
+    let count = (rise / CABLE_SEGMENT).round().max(1.0);
+    let step = rise / count;
+    let node = |p: Point3<f64>| [p.x as f32, p.y as f32, p.z as f32];
+
+    let mut points = vec![node(bend_point(0.0))];
+    points
+        .extend((0..=count as usize).map(|i| node(axis.at_height(BEND_RADIUS + i as f64 * step))));
+    points
+}
+
+/// Stem radius at height `z` up the shoot, in meters, thinning to
+/// [`TIP_TAPER`] of the base radius at the tip.
+///
+/// Tapered by height rather than by point index: the bend's points are
+/// centimeters apart and the rise's are decimeters, so an index taper would
+/// spend the whole taper on the bend.
+fn taper(config: &ShootConfig, z: f64) -> f64 {
+    let t = (z / config.length as f64).clamp(0.0, 1.0);
+    config.radius as f64 * (1.0 + (TIP_TAPER - 1.0) * t)
+}
+
+/// The diameter each of `points` is **drawn** at, in meters — the same taper
+/// the stem mesh is built with, so a flexible cane reads as the shoots beside
+/// it.
+///
+/// Nothing sizes a capsule from these; see [`cable_thickness`].
+fn cable_widths(points: &[[f32; 3]], config: &ShootConfig) -> Vec<f32> {
+    points
+        .iter()
+        .map(|p| 2.0 * taper(config, p[2] as f64) as f32)
+        .collect()
+}
+
+/// The one thickness a cable is **simulated** at, in meters.
+///
+/// A rod has a single radius where the mesh tapers, so this splits the
+/// difference: the diameter at the taper's midpoint, too thin at the bud and
+/// too thick at the tip by the same amount.
+fn cable_thickness(config: &ShootConfig) -> f32 {
+    2.0 * taper(config, config.length as f64 / 2.0) as f32
+}
+
+/// The prim name Newton gives the rigid body it builds for segment `index` of
+/// this shoot's cable.
+///
+/// A **sibling** of the curve rather than a child: the label is the curve's own
+/// prim path with this suffix. Authoring the prim ourselves is the whole of how
+/// a leaf gets attached — the importer adopts a prim already sitting at the
+/// path, keeps its children, and drives its transform from then on.
+///
+/// Get the name wrong and nothing fails loudly: the importer defines its own
+/// prim beside ours, and the leaves stay at the cane's rest shape.
+fn segment_name(index: usize) -> String {
+    format!("{CABLE}_edge_body_{index}")
+}
+
+/// The rest frame of every segment `points` becomes, in the shoot's own frame:
+/// origin at the segment's midpoint, local +Z along it.
+///
+/// That is Newton's frame for the capsule body, so a prim authored here starts
+/// exactly where the solver will go on keeping it.
+fn segment_frames(points: &[[f32; 3]]) -> Vec<Transform> {
+    points
+        .windows(2)
+        .map(|pair| {
+            let (from, to) = (Vec3::from(pair[0]), Vec3::from(pair[1]));
+            Transform {
+                translation: (from + to) * 0.5,
+                rotation: Quat::from_rotation_arc(Vec3::Z, (to - from).normalize()),
+                scale: Vec3::ONE,
+            }
+        })
+        .collect()
+}
+
+/// Which segment of `points` carries whatever sits at height `z`.
+///
+/// By height, which a centerline climbs monotonically. Segment 0 is the bend
+/// and is the one bolted down; no leaf lands there, because the nodes start
+/// above it.
+fn segment_of(points: &[[f32; 3]], z: f32) -> usize {
+    points
+        .iter()
+        .rposition(|point| point[2] <= z)
+        .unwrap_or(0)
+        .min(points.len() - 2)
+}
+
+/// `placement` expressed in `frame`, so that a prim under `frame` still lands
+/// where `placement` put it. A frame is a rotation and a translation only,
+/// which is what makes the inverse this short.
+fn rebase(frame: &Transform, placement: &Transform) -> Transform {
+    let turn = frame.rotation.inverse();
+    Transform {
+        translation: turn * (placement.translation - frame.translation),
+        rotation: turn * placement.rotation,
+        scale: placement.scale,
+    }
+}
+
+/// Whether the shoot authored at `order` is one of the flexible ones.
+fn is_flexible(params: &ShootParams, seed: u64, order: Order) -> bool {
+    Rng::new(seed ^ FLEX_STREAM ^ salt(order.0)).unit() < params.flexible as f64
+}
+
 // ─── Building ───────────────────────────────────────────────────────
 
-/// One representative shoot: its stem, and the nodes its leaves hang on.
+/// One representative shoot: its stem, the nodes its leaves hang on, and the
+/// centerline it bends along if it came out flexible.
 struct ShootBuild {
     stem: Mesh,
     nodes: Vec<LeafNode>,
+    cable: Vec<[f32; 3]>,
 }
 
 fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
@@ -573,8 +727,14 @@ fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
     Ok(ShootBuild {
         stem: strand_mesh(&shoot_strand(&axis, config))?.to_mesh(),
         nodes: leaf_nodes(config, &axis, seed),
+        cable: cable_points(&axis),
     })
 }
+
+/// One representative, built once: the leaf nodes hanging off it, the
+/// centerline a cane bends along, how it looks, and the mesh a rigid shoot
+/// draws with. Every shoot assigned to it clones the lot.
+type Built = (Vec<LeafNode>, Vec<[f32; 3]>, Surface, Geometry);
 
 /// Builds one mesh per distinct shoot, and hangs a leaf on every node.
 ///
@@ -608,57 +768,103 @@ pub(crate) fn build(
         &ShootMetric,
     );
 
-    let mut built: Vec<(Vec<LeafNode>, Geometry)> = Vec::with_capacity(book.len());
+    let mut built: Vec<Built> = Vec::with_capacity(book.len());
     for (index, config) in book.representatives.iter().enumerate() {
         let seed = scene.seed ^ STEM_STREAM ^ salt(index as u64);
-        let ShootBuild { stem, nodes } = build_shoot(config, seed)?;
-        built.push((nodes, library.part(PART, index, stem, surface(seed))));
+        let ShootBuild { stem, nodes, cable } = build_shoot(config, seed)?;
+        // The curve draws in the mesh's colour, so a cane and a rigid shoot of
+        // the same representative look alike.
+        let skin = surface(seed);
+        built.push((nodes, cable, skin, library.part(PART, index, stem, skin)));
     }
 
     let mut leaf_order = 0u64;
     for ((order, entity, config), drew) in grown.iter().zip(&book.assignment) {
-        let (nodes, geometry) = &built[*drew as usize];
+        let (nodes, centerline, skin, geometry) = &built[*drew as usize];
         let mut shoot = commands.entity(*entity);
         // The layer owns everything below a shoot, and a rebuild may hang a
         // different number of leaves than the last one did.
         shoot.despawn_children();
-        shoot.with_child((Name::new(STEM), geometry.clone()));
+
+        // A cane is drawn by its curve alone, where a rigid shoot is a mesh.
+        let flexible = is_flexible(&params, scene.seed, *order);
+        let frames = if flexible {
+            shoot.with_child((
+                Name::new(CABLE),
+                cable(
+                    centerline.clone(),
+                    cable_widths(centerline, config),
+                    cable_thickness(config),
+                    skin.color,
+                ),
+            ));
+            segment_frames(centerline)
+        } else {
+            shoot.with_child((Name::new(STEM), geometry.clone()));
+            Vec::new()
+        };
+
+        // Every segment up front rather than the ones that turn out to carry a
+        // leaf, so an index into `frames` is an index into these.
+        let mut segments = Vec::with_capacity(frames.len());
+        shoot.with_children(|shoot| {
+            segments.extend(frames.iter().enumerate().map(|(index, frame)| {
+                shoot
+                    .spawn((
+                        Name::new(segment_name(index)),
+                        *frame,
+                        Visibility::default(),
+                    ))
+                    .id()
+            }));
+        });
 
         let mut rng = Rng::new(scene.seed ^ LEAF_STREAM ^ salt(order.0));
         // Drawn once, so the two ranks are not lined up with the shoot's lean.
         let bearing = rng.unit() * TAU;
 
         for node in nodes {
-            // Five draws per node: the bearing's wander, the droop, the twist
+            // Six draws per node: the bearing's wander, the droop, the twist
             // about the blade's own long axis, its vigour, then which blade it
-            // drew.
+            // drew and how far that blade curls.
             let turn = rng.range(-LEAF_SPREAD, LEAF_SPREAD);
             let sag = rng.range(1.0 - LEAF_DROOP_JITTER, 1.0 + LEAF_DROOP_JITTER);
             let roll = rng.range(-LEAF_ROLL, LEAF_ROLL);
             let vigour = rng.range(1.0 - LEAF_VIGOUR, 1.0 + LEAF_VIGOUR);
             let outline = (rng.unit() * leaf::OUTLINES.len() as f64) as usize;
+            let curl = rng.unit();
 
             leaf_order += 1;
-            shoot.with_child((
-                Name::new(node.name.clone()),
-                placed(
-                    node.position,
-                    // Wrapped, because the rank angle runs past a full turn by
-                    // the fourth node.
-                    (bearing + node.yaw as f64 + turn).rem_euclid(TAU) as f32,
-                    // A leaf is drawn flat along +X with its face toward +Z, so
-                    // the tilt is the whole of its posture: X twists the blade
-                    // about its own long axis, Y pitches its tip down.
-                    Vec2::new(
-                        roll as f32,
-                        (config.leaf_droop as f64 * node.maturity as f64 * sag) as f32,
-                    ),
-                    // `leaf::AREA` is the same for every blade, so a scale is a
-                    // size in meters whichever one this node drew.
-                    node.maturity * vigour as f32,
+            let placement = placed(
+                node.position,
+                // Wrapped, because the rank angle runs past a full turn by the
+                // fourth node.
+                (bearing + node.yaw as f64 + turn).rem_euclid(TAU) as f32,
+                // A leaf is drawn flat along +X with its face toward +Z, so the
+                // tilt is the whole of its posture: X twists the blade about
+                // its own long axis, Y pitches its tip down.
+                Vec2::new(
+                    roll as f32,
+                    (config.leaf_droop as f64 * node.maturity as f64 * sag) as f32,
                 ),
+                // `leaf::AREA` is the same for every blade, so a scale is a
+                // size in meters whichever one this node drew.
+                node.maturity * vigour as f32,
+            );
+            // On a cane the leaf hangs off the segment that carries it, which
+            // is a frame of its own; on a rigid shoot, off the shoot.
+            let (host, placement) = if flexible {
+                let index = segment_of(centerline, node.position.z);
+                (segments[index], rebase(&frames[index], &placement))
+            } else {
+                (*entity, placement)
+            };
+
+            commands.entity(host).with_child((
+                Name::new(node.name.clone()),
+                placement,
                 Visibility::default(),
-                leaf::LeafConfig::new(&leaf_params, outline),
+                leaf::LeafConfig::new(&leaf_params, outline, curl),
                 Order(leaf_order),
             ));
         }
@@ -708,6 +914,16 @@ pub fn ui() -> impl Scene {
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
                     params.lean = change.value;
+                })
+            ),
+            label_small("Flexible shoots"),
+            (
+                @FeathersSlider { @min: 0.0, @max: 0.05, @value: 0.0 }
+                SliderStep(0.005)
+                SliderPrecision(3)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                    params.flexible = change.value.clamp(0.0, 1.0);
                 })
             ),
             label_small("Leaf spacing"),
@@ -791,6 +1007,160 @@ mod tests {
 
     fn axis(config: &ShootConfig, seed: u64) -> ShootAxis {
         ShootAxis::new(config, &mut Rng::new(seed))
+    }
+
+    // ─── Flexible shoots ────────────────────────────────────────────
+
+    /// The span between consecutive control points.
+    fn spans(points: &[[f32; 3]]) -> Vec<f32> {
+        points
+            .windows(2)
+            .map(|pair| {
+                let [a, b] = [pair[0], pair[1]];
+                ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+            })
+            .collect()
+    }
+
+    /// The points a solver bends are the points the mesh is skinned onto: a
+    /// cable that wandered off would leave the collider somewhere the shoot
+    /// visibly is not.
+    #[test]
+    fn a_cables_points_sit_on_the_shoots_own_axis() {
+        let axis = axis(&config(), 3);
+        let points = cable_points(&axis);
+
+        assert_eq!(points[0], [0.0, 0.0, 0.0], "the first point is the bud");
+        for (index, point) in points.iter().enumerate().skip(1) {
+            // Every point past the bud is a station up the rise, so its own
+            // height is what puts it back on the axis.
+            let on_axis = axis.at_height(point[2] as f64);
+            let off = (point[0] as f64 - on_axis.x).hypot(point[1] as f64 - on_axis.y);
+            assert!(off < 1e-5, "point {index} is {off} off the axis");
+        }
+    }
+
+    /// One stiffness is derived from the mean segment length, so a run that is
+    /// not even leaves its outliers mistuned. The bend is exempt — it is the
+    /// bolted segment, and does not move.
+    #[test]
+    fn a_cables_moving_segments_are_evenly_spaced() {
+        for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
+            let points = cable_points(&axis(&config_with(|p| p.length = length), 1));
+            // A rod is a chain: the bolted bend, and one rise segment at least.
+            assert!(points.len() >= 3, "{length} m gave {} points", points.len());
+
+            let spans = spans(&points);
+            let rise = &spans[1..];
+            let mean = rise.iter().sum::<f32>() / rise.len() as f32;
+            for span in rise {
+                // Not exact: the rise is stepped by height and measured across
+                // the chord, and `lean` gives it a little curvature.
+                assert!(
+                    (span - mean).abs() < 0.05 * mean,
+                    "{length} m: a {span} m segment among a mean of {mean}"
+                );
+            }
+        }
+    }
+
+    /// The bolted segment is the *whole* bend, at every length. Any of it left
+    /// over would be a short second segment among the even ones, mistuned and
+    /// free to move.
+    #[test]
+    fn the_bend_is_the_first_segment_and_nothing_more() {
+        for length in [MIN_LENGTH, 0.4, 0.75, 1.6] {
+            let points = cable_points(&axis(&config_with(|p| p.length = length), 1));
+            assert_eq!(
+                points[1][2], BEND_RADIUS as f32,
+                "{length} m: the bend ends somewhere other than the first segment"
+            );
+        }
+    }
+
+    /// A rod is one radius and a shoot is not, so the drawn taper is the whole
+    /// of what makes a flexible cane read as the shoots beside it. It has to
+    /// run bud to tip like the stem mesh, and the rod has to sit inside it.
+    #[test]
+    fn a_cable_is_drawn_tapering_and_simulated_between_its_ends() {
+        let config = config();
+        let points = cable_points(&axis(&config, 3));
+        let widths = cable_widths(&points, &config);
+        let thickness = cable_thickness(&config);
+
+        assert_eq!(widths.len(), points.len(), "one width per point");
+        assert!((widths[0] - 2.0 * config.radius).abs() < 1e-6, "the bud");
+        let tip = widths.last().copied().unwrap();
+        assert!(
+            (tip - 2.0 * config.radius * TIP_TAPER as f32).abs() < 1e-6,
+            "the tip"
+        );
+        assert!(tip < thickness && thickness < widths[0]);
+    }
+
+    /// A leaf on a cane rides the rod segment that carries it, so all three of
+    /// these have to hold: the prim is named what Newton names that body, its
+    /// frame is the one Newton builds, and rebasing a placement into it puts
+    /// the leaf back where it was. The bolted first segment stays bare.
+    #[test]
+    fn a_leaf_on_a_cane_rides_the_segment_that_carries_it() {
+        let config = config();
+        let (axis, leaves) = nodes(&config, 3);
+        let points = cable_points(&axis);
+        let frames = segment_frames(&points);
+
+        assert_eq!(segment_name(2), "Cable_edge_body_2");
+        assert_eq!(frames.len(), points.len() - 1, "one frame per segment");
+
+        for (index, frame) in frames.iter().enumerate() {
+            let (from, to) = (Vec3::from(points[index]), Vec3::from(points[index + 1]));
+            let along = frame.rotation * Vec3::Z;
+            assert!(frame.translation.abs_diff_eq((from + to) * 0.5, 1e-6));
+            assert!(
+                along.abs_diff_eq((to - from).normalize(), 1e-6),
+                "+Z runs along the segment"
+            );
+        }
+
+        assert!(!leaves.is_empty(), "a cane with no leaves proves nothing");
+        for leaf in &leaves {
+            let index = segment_of(&points, leaf.position.z);
+            assert!(index > 0, "nothing hangs on the bolted first segment");
+            assert!(
+                (points[index][2]..=points[index + 1][2]).contains(&leaf.position.z),
+                "{} sits outside segment {index}",
+                leaf.name
+            );
+
+            let placement = placed(leaf.position, leaf.yaw, Vec2::ZERO, 1.0);
+            let hung = frames[index] * rebase(&frames[index], &placement);
+            assert!(
+                hung.translation.abs_diff_eq(placement.translation, 1e-6)
+                    && hung.rotation.abs_diff_eq(placement.rotation, 1e-6),
+                "rebasing into a segment and back is the identity"
+            );
+        }
+    }
+
+    /// The slider is a rate, so it has to land near the fraction it names --
+    /// and a stream sharing a constant with `salt` would not.
+    #[test]
+    fn the_flexible_share_matches_the_rate_it_was_asked_for() {
+        let params = params();
+        for rate in [0.0, 0.03, 0.2] {
+            let params = ShootParams {
+                flexible: rate,
+                ..params.clone()
+            };
+            let flexible = (0..4000)
+                .filter(|order| is_flexible(&params, 7, Order(*order)))
+                .count();
+            let share = flexible as f32 / 4000.0;
+            assert!(
+                (share - rate).abs() < 0.015,
+                "asked for {rate}, got {share}"
+            );
+        }
     }
 
     fn mesh(config: &ShootConfig, seed: u64) -> MeshData {

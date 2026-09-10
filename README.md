@@ -16,11 +16,12 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
  - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
+ - A share of the shoots can be exported as deformable curves — bare canes a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
 
 ## Upcoming features
  - Cover crops and weeds
  - Optinally use PointInstancer to spawn organs without a unique prim path
- - Flexible shoot simulation with newton-physics
+ - Leaves on the flexible shoots, and shoots aimed into the alley rather than drawn at random
  - Simulate human workers and other safety critical scenarios
 
 ## Planned features
@@ -42,10 +43,19 @@ cd examples/isaaclab_demo/
 uv run main.py
 ```
 
-The same demo on a Newton backend and in the Newton viewer
+The same demo on the PhysX backend (it doesn't support flexible shoots)
 ```bash
-uv run main.py --physics newton_mjwarp --viz newton
+uv run main.py --physics physx
 ```
+
+
+## How it works (main points)
+
+ - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class.
+ - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
+ - When the simulation starts, the meshes and layouts are generated and cached as a USD file.
+ - The cached USD file is then spawned as a regular Isaac Lab USD file asset.
+
 
 ## Workflow
  - Start the parameter editor with `cargo run --release`.
