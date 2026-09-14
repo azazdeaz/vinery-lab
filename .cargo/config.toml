@@ -1,0 +1,4 @@
+# getrandom's wasm_js backend needs this cfg as well as the feature enabled in
+# Cargo.toml; the feature alone still fails to select a backend.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

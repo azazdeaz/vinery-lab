@@ -71,6 +71,28 @@ Press `S` to write the scene out as `scene.json`, and build it with:
 `VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
 rebuilt something — see `src/perf.rs`.
 
+### Web build
+
+The same viewer, compiled to wasm and published by the manually triggered
+`.github/workflows/playground.yml`. To reproduce what it does locally:
+
+    rustup target add wasm32-unknown-unknown
+    cargo install wasm-bindgen-cli --version 0.2.127   # must match Cargo.lock
+    cargo build --profile wasm-release --target wasm32-unknown-unknown --bin vinerylab
+    mkdir -p site && cp web/index.html site/
+    wasm-bindgen --target web --no-typescript --out-dir site \
+      target/wasm32-unknown-unknown/wasm-release/vinerylab.wasm
+    python3 -m http.server -d site 8000
+
+Serve it rather than opening the file: the module is fetched, and `localhost`
+is a secure context, which both WebGPU and the clipboard require.
+
+Two things differ from the native build. The renderer is WebGPU — the `webgpu`
+feature in `Cargo.toml` is target-gated, and WebGL2 would lose compute shaders,
+which this many meshes need. And the `S` key is compiled out, since there is no
+filesystem to write `scene.json` to; **Copy Isaac Lab cfg** is the whole export
+path on the web.
+
 ## Architecture
 
 The scene is built in Bevy as ordinary meshes and transforms, exported as a

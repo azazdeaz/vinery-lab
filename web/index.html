@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vinery Lab — parameter playground</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden;
+        background: #1b1b1b; color: #ddd; font: 14px/1.5 system-ui, sans-serif; }
+      #viewer { display: block; width: 100vw; height: 100vh; }
+      #status { position: absolute; inset: 0; display: grid;
+        place-content: center; text-align: center; padding: 2rem; }
+      a { color: #9c9; }
+    </style>
+  </head>
+  <body>
+    <div id="status">Loading — about 12 MB, cached after the first visit.</div>
+    <!-- Named for `Window::canvas` in src/viewer.rs. -->
+    <canvas id="viewer"></canvas>
+    <script type="module">
+      // Relative, because project pages are served from a subpath.
+      import init from './vinerylab.js';
+
+      const status = document.getElementById('status');
+
+      // The build targets WebGPU only. Ask for an adapter rather than just
+      // testing for `navigator.gpu`: a browser can expose the API and still
+      // have no usable one (blocklisted driver, no hardware), and Bevy's
+      // renderer panics on that rather than degrading.
+      const adapter = navigator.gpu && (await navigator.gpu.requestAdapter().catch(() => null));
+      if (!adapter) {
+        status.innerHTML =
+          'This playground needs <b>WebGPU</b>: Chrome, Edge, a recent Firefox, or Safari 26+.<br>' +
+          'The editor also runs natively — see <a href="https://github.com/azazdeaz/vinery-lab">the repository</a>.';
+      } else {
+        init().then(
+          () => status.remove(),
+          (e) => {
+            // winit leaves the web event loop by throwing. Not a failure.
+            if (`${e}`.includes('Using exceptions for control flow')) status.remove();
+            else status.textContent = `Could not start: ${e}`;
+          },
+        );
+      }
+    </script>
+  </body>
+</html>

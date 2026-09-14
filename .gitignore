@@ -13,3 +13,6 @@ __pycache__/
 /scene.usd
 /scene.usda
 /scene.usdc
+
+# What the local web build writes; the workflow builds it from scratch.
+/site
