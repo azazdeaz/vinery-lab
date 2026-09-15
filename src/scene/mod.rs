@@ -169,8 +169,8 @@ pub struct Cable(pub doc::Cable);
 /// the organ's own frame, held end first, and `widths` gives the drawn diameter
 /// at each of them.
 ///
-/// `display_color` is the [`Surface`] colour of the mesh this curve stands in
-/// for, so a flexible organ and a rigid one of the same kind draw alike.
+/// `skin` is the [`Surface`] of the mesh this curve stands in for, so a
+/// flexible organ and a rigid one of the same kind draw alike.
 ///
 /// No transform of its own — the points are already where the organ put them,
 /// and the first segment between them is what gets held.
@@ -178,7 +178,7 @@ pub fn cable(
     points: Vec<[f32; 3]>,
     widths: Vec<f32>,
     thickness: f32,
-    display_color: [f32; 3],
+    skin: Surface,
 ) -> impl Bundle {
     assert_eq!(points.len(), widths.len(), "one drawn width per point");
     (
@@ -187,7 +187,9 @@ pub fn cable(
             points,
             widths,
             thickness,
-            display_color,
+            display_color: skin.color,
+            roughness: skin.roughness,
+            reflectance: skin.reflectance,
         }),
     )
 }
@@ -204,9 +206,15 @@ pub struct Part {
     pub color: [f32; 3],
     /// Microfacet roughness. 0 is a mirror, 1 is chalk.
     pub roughness: f32,
-    /// Index of refraction, which sets how bright the specular highlight is at
-    /// a glancing angle.
-    pub ior: f32,
+    /// Specular intensity. See
+    /// [`material`](crate::elements::util::material).
+    pub reflectance: f32,
+    /// How much light passes through rather than reflecting off — a leaf
+    /// blade's stand-in for subsurface scattering.
+    pub translucency: f32,
+    /// Thickness in meters of the volume behind the surface, which only a
+    /// translucent one has.
+    pub thickness: f32,
     /// A surface with no inside — a leaf blade — which has to be lit and drawn
     /// from behind as well, since a canopy is looked up into as often as down
     /// onto.
@@ -230,7 +238,14 @@ impl Part {
         let mut material = StandardMaterial {
             base_color: Color::linear_rgb(red, green, blue),
             perceptual_roughness: self.roughness,
-            ior: self.ior,
+            reflectance: self.reflectance,
+            // A second, flipped diffuse lobe: what light this surface passes
+            // takes the base colour with it, so a backlit leaf reads green
+            // rather than black. Energy conserving — Bevy scales the reflected
+            // lobe by `1 - translucency` — so it redistributes light rather
+            // than adding any.
+            diffuse_transmission: self.translucency,
+            thickness: self.thickness,
             metallic: 0.0,
             ..default()
         };
@@ -281,9 +296,14 @@ pub struct Surface {
     pub color: [f32; 3],
     /// Microfacet roughness. 0 is a mirror, 1 is chalk.
     pub roughness: f32,
-    /// Index of refraction. See
+    /// Specular intensity. See
     /// [`material`](crate::elements::util::material).
-    pub ior: f32,
+    pub reflectance: f32,
+    /// How much light passes through rather than reflecting off. See
+    /// [`Response::blade`](crate::elements::util::material::Response::blade).
+    pub translucency: f32,
+    /// Thickness in meters of the volume behind the surface.
+    pub thickness: f32,
     pub double_sided: bool,
 }
 
@@ -319,7 +339,9 @@ impl Library<'_> {
             mesh: self.meshes.add(mesh),
             color: surface.color,
             roughness: surface.roughness,
-            ior: surface.ior,
+            reflectance: surface.reflectance,
+            translucency: surface.translucency,
+            thickness: surface.thickness,
             double_sided: surface.double_sided,
             collision: None,
             heightfield_resolution: None,
@@ -414,7 +436,9 @@ mod tests {
             mesh: Handle::default(),
             color: [0.5, 0.5, 0.5],
             roughness: 0.8,
-            ior: 1.5,
+            reflectance: 0.5,
+            translucency: 0.0,
+            thickness: 0.0,
             double_sided: false,
             collision: None,
             heightfield_resolution: None,

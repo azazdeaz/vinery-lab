@@ -827,7 +827,7 @@ pub(crate) fn build(
                     centerline.clone(),
                     cable_widths(centerline, config),
                     cable_thickness(config),
-                    skin.color,
+                    *skin,
                 ),
             ));
             segment_frames(centerline)

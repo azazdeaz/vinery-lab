@@ -9,8 +9,14 @@
 //! [`scene::z_up_to_y_up`](crate::scene)), so the camera below works in Bevy's
 //! ordinary Y-up world.
 
+use bevy::camera::Exposure;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::input::common_conditions::input_just_pressed;
+use bevy::light::{
+    Atmosphere, AtmosphereEnvironmentMapLight, CascadeShadowConfigBuilder, GlobalAmbientLight,
+    atmosphere::ScatteringMedium, light_consts::lux,
+};
+use bevy::pbr::AtmosphereSettings;
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
@@ -23,6 +29,12 @@ const SCENE_PATH: &str = "scene.json";
 
 pub fn run() {
     let mut app = App::new();
+    // The sky is the scene's ambient light (see `setup`), so the flat
+    // hemisphere-wide term `LightPlugin` inserts would only wash it out. Left
+    // in, it also adds a uniform specular lobe to every surface at every angle,
+    // which is what makes an unlit scene look like it is all made of one shiny
+    // material.
+    app.insert_resource(GlobalAmbientLight::NONE);
     app.add_plugins((
         DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -65,21 +77,58 @@ pub fn run() {
     app.run();
 }
 
-fn setup(mut commands: Commands) {
+/// How far from the camera shadows are still drawn, in meters. Past the engine
+/// default of 150, which the framing below overruns: the camera starts 114 m
+/// out and the far corner of an 80x50 m parcel is another 50 beyond that, so at
+/// the default the row furthest from the camera would sit unshadowed. The
+/// cascade splits are left alone — they stay fine-grained near the camera,
+/// which is what orbiting in to inspect a single vine wants.
+const SHADOW_DISTANCE: f32 = 200.0;
+
+fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) {
+    // A physically scattered sky, which is both the backdrop and — through
+    // `AtmosphereEnvironmentMapLight` below — the scene's ambient light. It
+    // places itself one earth radius under the origin on its own, so the
+    // parcel sits on the planet's surface with no transform to author.
+    commands.spawn(Atmosphere::earth(
+        mediums.add(ScatteringMedium::earth(256, 256)),
+    ));
+
     // Framed for `TerrainParams::default()`'s 80x50m extent, not the 4x4m
     // placeholder scale the defaults used before rows landed.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(70.0, 55.0, 70.0).looking_at(Vec3::ZERO, Vec3::Y),
         PanOrbitCamera::default(),
-        AmbientLight {
-            brightness: 220.0,
-            ..default()
-        },
+        AtmosphereSettings::default(),
+        // Lights the scene off the sky instead of off a constant: blue from
+        // above, warm bounce from the ground, and a reflection whose spread
+        // follows each surface's roughness. Without it every material's
+        // roughness is invisible, because a constant ambient term looks the
+        // same however wide the lobe sampling it is.
+        AtmosphereEnvironmentMapLight::default(),
+        // Raw sunlight is orders of magnitude past what a display covers, so
+        // the camera stops down to meet it. Tied to the light's illuminance
+        // below: raise one and this has to follow.
+        Exposure { ev100: 13.0 },
     ));
     commands.spawn((
-        DirectionalLight::default(),
+        DirectionalLight {
+            // Off by default, and the single biggest thing between this scene
+            // and a lit one: with nothing casting, a canopy has no form.
+            shadow_maps_enabled: true,
+            // Sunlight *before* the atmosphere filters it, which is what the
+            // atmosphere above wants as input. The other `lux` constants
+            // already have scattering baked in and would be counted twice.
+            illuminance: lux::RAW_SUNLIGHT,
+            ..default()
+        },
         Transform::from_xyz(40.0, 80.0, 40.0).looking_at(Vec3::ZERO, Vec3::Y),
+        CascadeShadowConfigBuilder {
+            maximum_distance: SHADOW_DISTANCE,
+            ..default()
+        }
+        .build(),
     ));
 }
 
