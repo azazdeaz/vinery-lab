@@ -45,13 +45,33 @@ The parts library lives *inside* the default prim
     point of every prim to find one, and we already hold the points.
 
 ``displayColor`` at ``constant`` interpolation
-    The one channel every consumer reads. Nothing here binds a material, and
-    that is deliberate: ``UsdPreviewSurface``'s ``diffuseColor`` defaults to
-    grey and ``displayColor`` is consulted *only* for prims with no bound
-    material, so binding one without also wiring the colour through a primvar
-    reader turns the scene grey. When materials do arrive they belong inside
-    ``/Vineyard/parts/<name>`` -- inside the subtree that gets referenced --
-    for the namespace-mapping reason above.
+    The fallback channel, for a consumer that resolves no material -- Hydra
+    Storm and usdview, which read no MDL. Still authored on every drawn prim,
+    and still the colour the materials below are built from, so the two cannot
+    drift apart.
+
+Every drawn prim binds an MDL material of its own
+    Unbound, Kit shades the whole scene with one default surface tinted by
+    ``displayColor``: a single roughness and a single specular level for bark,
+    foliage and soil alike. The document carries a surface response per part,
+    and this module turns each into a material.
+
+    The target is Kit/Omniverse, so the shaders are MDL and the universal
+    ``outputs:surface`` is left unauthored -- a renderer that reads no MDL
+    resolves no surface for its context and falls back to ``displayColor``,
+    which is authored above.
+
+    A material is authored as a **child of the prim it shades**, which is what
+    keeps it inside the subtree a reference maps: a binding whose target lands
+    outside the referenced prim cannot be namespace-mapped and is dropped, so
+    a material in a scope of its own would silently unbind on every instance.
+
+    ``OmniPBR`` for an opaque surface. A translucent one -- a leaf blade --
+    needs ``OmniSurface``, the only stock Kit material with a subsurface term,
+    and pairs it with ``thin_walled``: a blade has no interior, and thin-walled
+    turns the subsurface term into a second, flipped diffuse lobe rather than a
+    volume, which is both what a backlit leaf looks like and far cheaper than
+    volumetric scattering at a canopy's instance count.
 
 A part is an ``Xform`` *wrapping* its mesh, not a bare ``Mesh``
     This is what makes ``instanceable`` do anything at all. A USD instance
@@ -136,9 +156,9 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
-from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt
 
-FORMAT = 5
+FORMAT = 6
 """Document version this builder understands. See `src/scene/doc.rs`."""
 
 ROOT = "/Vineyard"
@@ -182,7 +202,19 @@ _CABLE_API = Sdf.TokenListOp.Create(
 _CABLE_MATERIAL_API = Sdf.TokenListOp.Create(prependedItems=["PhysicsCurvesDeformableMaterialAPI"])
 
 CABLE_MATERIAL = "PhysicsMaterial"
-"""Name of the material prim authored under every cable."""
+"""Name of the physics material prim authored under every cable."""
+
+MATERIAL = "Material"
+"""Name of the visual material prim authored under every drawn prim."""
+
+SHADER = "Shader"
+"""Name of the `Shader` inside it."""
+
+MDL_OPAQUE = ("OmniPBR.mdl", "OmniPBR")
+MDL_TRANSLUCENT = ("OmniSurface.mdl", "OmniSurface")
+"""The MDL module and sub-identifier behind an opaque and a translucent
+surface. Named by bare relative path, which Kit resolves against its own MDL
+search path -- an absolute one would pin the stage to one install."""
 
 _BOLTED_POINTS = 2
 """Leading control points given no mass, which bolts the segment between them
@@ -303,6 +335,10 @@ def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
     color = mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant)
     color.Set(Vt.Vec3fArray([tuple(part["display_color"])]))
 
+    # Inside the part, so the binding composes in through every reference to it.
+    UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim())
+    _author_material(stage.GetRootLayer().GetPrimAtPath(mesh.GetPath()), part)
+
     if approximation := part.get("collision"):
         # The mesh is its own collider. Authored inside the part so it composes
         # in through the reference -- which the generator keeps
@@ -329,6 +365,97 @@ def _extent(
     lo = [min(p[axis] for p in points) for axis in range(3)]
     hi = [max(p[axis] for p in points) for axis in range(3)]
     return Gf.Vec3f(*lo), Gf.Vec3f(*hi)
+
+
+# --- materials ------------------------------------------------------
+
+
+def _author_material(spec: Sdf.PrimSpec, surface: Mapping[str, Any]) -> None:
+    """Author an MDL material describing `surface` beneath `spec`, and bind it.
+
+    Beneath rather than beside: a binding target outside the referenced prim
+    is dropped by namespace mapping, so a material that does not travel with
+    the prim it shades unbinds on every instance.
+
+    The caller declares `MaterialBindingAPI` -- `Sdf` enforces no schema, and
+    USD warns about a binding on a prim that does not apply it.
+    """
+    module, identifier, inputs = _mdl_shader(surface)
+
+    material = Sdf.PrimSpec(spec, MATERIAL, Sdf.SpecifierDef, "Material")
+    shader = Sdf.PrimSpec(material, SHADER, Sdf.SpecifierDef, "Shader")
+    for name, value_type, value in (
+        ("info:implementationSource", Sdf.ValueTypeNames.Token, "sourceAsset"),
+        ("info:mdl:sourceAsset", Sdf.ValueTypeNames.Asset, Sdf.AssetPath(module)),
+        ("info:mdl:sourceAsset:subIdentifier", Sdf.ValueTypeNames.Token, identifier),
+    ):
+        Sdf.AttributeSpec(shader, name, value_type, Sdf.VariabilityUniform).default = value
+    for name, value_type, value in inputs:
+        Sdf.AttributeSpec(shader, f"inputs:{name}", value_type).default = value
+
+    # The MDL render context only. A renderer that does not speak MDL resolves
+    # no surface here and falls back to `displayColor`; authoring the universal
+    # `outputs:surface` as well would take that fallback away.
+    out = Sdf.AttributeSpec(shader, "outputs:out", Sdf.ValueTypeNames.Token)
+    terminal = Sdf.AttributeSpec(material, "outputs:mdl:surface", Sdf.ValueTypeNames.Token)
+    terminal.connectionPathList.explicitItems = [out.path]
+
+    # Not custom: `MaterialBindingAPI` declares the relationship, and `Sdf`
+    # defaults the other way because it checks no schema.
+    binding = Sdf.RelationshipSpec(spec, "material:binding", custom=False)
+    binding.targetPathList.explicitItems = [material.path]
+
+
+def _mdl_shader(
+    surface: Mapping[str, Any],
+) -> tuple[str, str, list[tuple[str, Sdf.ValueTypeName, Any]]]:
+    """The MDL module, sub-identifier and shader inputs for one surface.
+
+    `roughness` and `reflectance` mean what they do in the document: perceptual
+    roughness, and a specular level where 0.5 is the 4% an ordinary dielectric
+    reflects. OmniPBR's `specular_level` is that scale exactly. OmniSurface
+    instead weights a Fresnel lobe at its own IOR, so the level is doubled onto
+    that weight -- same anchor, one lobe at 0.5 -- and saturates above it.
+    """
+    color = Gf.Vec3f(*(float(c) for c in surface["display_color"]))
+    roughness = float(surface["roughness"])
+    reflectance = float(surface["reflectance"])
+    translucency = float(surface.get("translucency", 0.0))
+
+    if not translucency:
+        return (
+            *MDL_OPAQUE,
+            [
+                ("diffuse_color_constant", Sdf.ValueTypeNames.Color3f, color),
+                ("reflection_roughness_constant", Sdf.ValueTypeNames.Float, roughness),
+                ("specular_level", Sdf.ValueTypeNames.Float, reflectance),
+                # Nothing in a vineyard is a conductor, and OmniPBR's default
+                # is already 0 -- authored so the value is on the prim rather
+                # than in the reader's memory of the MDL.
+                ("metallic_constant", Sdf.ValueTypeNames.Float, 0.0),
+            ],
+        )
+
+    return (
+        *MDL_TRANSLUCENT,
+        [
+            ("diffuse_reflection_color", Sdf.ValueTypeNames.Color3f, color),
+            # OmniSurface dims the base to 0.8 by default; the document's
+            # colour is the colour, as it is for an opaque part.
+            ("diffuse_reflection_weight", Sdf.ValueTypeNames.Float, 1.0),
+            ("specular_reflection_roughness", Sdf.ValueTypeNames.Float, roughness),
+            ("specular_reflection_weight", Sdf.ValueTypeNames.Float, min(1.0, 2.0 * reflectance)),
+            # A blade has no interior. Thin-walled makes the subsurface term a
+            # flipped diffuse lobe instead of a volume -- what a leaf lit from
+            # behind looks like, at a fraction of the cost.
+            ("thin_walled", Sdf.ValueTypeNames.Bool, True),
+            ("enable_diffuse_transmission", Sdf.ValueTypeNames.Bool, True),
+            ("subsurface_weight", Sdf.ValueTypeNames.Float, translucency),
+            # What the transmitted light is tinted by, which is why a backlit
+            # leaf reads green rather than black.
+            ("subsurface_transmission_color", Sdf.ValueTypeNames.Color3f, color),
+        ],
+    )
 
 
 # --- the prim tree --------------------------------------------------
@@ -473,12 +600,13 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     taper.default = widths
     taper.SetInfo("interpolation", UsdGeom.Tokens.vertex)
 
-    # One colour for the whole curve. Same channel and same reasoning as a
-    # part's, and the physics material bound below is not a preview one, so it
-    # does not take `displayColor` out of the renderer's hands.
+    # One colour for the whole curve, and one material, both carrying the
+    # surface of the mesh this curve stands in for -- a cane drawn beside a
+    # rigid shoot of the same kind must not shade differently from it.
     color = Sdf.AttributeSpec(spec, "primvars:displayColor", Sdf.ValueTypeNames.Color3fArray)
     color.default = Vt.Vec3fArray([tuple(cable["display_color"])])
     color.SetInfo("interpolation", UsdGeom.Tokens.constant)
+    _author_material(spec, cable)
 
     # Uniform, as `UsdGeom.BasisCurves` declares them. Only a linear,
     # non-periodic curve imports as a cable; anything else is skipped.
@@ -501,9 +629,9 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
         Sdf.AttributeSpec(material, f"physics:{name}", Sdf.ValueTypeNames.Float).default = value
     # Bound rather than merely authored: the importer reads the stiffnesses off
     # the *bound* material and silently uses its own defaults without this.
-    Sdf.RelationshipSpec(spec, "material:binding:physics").targetPathList.explicitItems = [
-        material.path
-    ]
+    Sdf.RelationshipSpec(
+        spec, "material:binding:physics", custom=False
+    ).targetPathList.explicitItems = [material.path]
 
     Sdf.AttributeSpec(
         spec, "physics:masses", Sdf.ValueTypeNames.FloatArray

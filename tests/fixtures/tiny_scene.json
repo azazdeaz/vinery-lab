@@ -1,5 +1,5 @@
 {
-  "format": 5,
+  "format": 6,
   "up_axis": "Z",
   "meters_per_unit": 1.0,
   "parts": [
@@ -9,6 +9,9 @@
       "indices": [0, 1, 2],
       "uvs": [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
       "display_color": [0.24, 0.42, 0.16],
+      "roughness": 0.5,
+      "reflectance": 0.55,
+      "translucency": 0.45,
       "double_sided": true
     },
     {
@@ -16,6 +19,8 @@
       "points": [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.5]],
       "indices": [0, 1, 2],
       "display_color": [0.35, 0.28, 0.2],
+      "roughness": 0.95,
+      "reflectance": 0.2,
       "double_sided": false,
       "collision": "none",
       "heightfield_resolution": 0.5
@@ -26,6 +31,8 @@
       "indices": [0, 1, 2],
       "normals": [[0.0, -1.0, 0.0], [0.0, -1.0, 0.0], [0.0, -1.0, 0.0]],
       "display_color": [0.31, 0.24, 0.18],
+      "roughness": 0.85,
+      "reflectance": 0.25,
       "double_sided": false
     }
   ],
@@ -114,7 +121,9 @@
                           ],
                           "widths": [0.012, 0.011, 0.01, 0.009],
                           "thickness": 0.009,
-                          "display_color": [0.18, 0.44, 0.12]
+                          "display_color": [0.18, 0.44, 0.12],
+                          "roughness": 0.85,
+                          "reflectance": 0.25
                         }
                       }
                     ]

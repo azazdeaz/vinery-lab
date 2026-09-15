@@ -461,7 +461,7 @@ pub(crate) fn build(
 /// representative it happens to be, so one shape is one green however the
 /// budget is spent.
 fn surface(outline: u32) -> Surface {
-    material::FOLIAGE.double_sided(color::shade(
+    material::FOLIAGE.blade(color::shade(
         color::srgb(color::LEAF),
         &mut Rng::new(color::COLOR_STREAM ^ outline as u64),
     ))

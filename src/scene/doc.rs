@@ -20,6 +20,10 @@
 //!   wrong.
 //! - A [`Node`] with a `reference` draws the [`PartEntry`] of that name and
 //!   has **no children** of its own — see [`Node::instanceable`].
+//! - A part's and a cable's surface response — `roughness`, `reflectance`,
+//!   `translucency` — is authored as a bound material, one per part. A
+//!   translucent surface gets a different shader from an opaque one; see
+//!   `build.py`.
 //! - Colliders are **static**: nothing here is a rigid body, so the builder
 //!   authors collision without mass, and the ground may be an exact triangle
 //!   mesh, which a dynamic collider could not be. A [`Cable`] is the one thing
@@ -31,7 +35,7 @@ use serde::{Deserialize, Serialize};
 /// Bumped when the shape of this document changes incompatibly. The builder
 /// refuses anything it does not recognise, so a stale cached scene fails
 /// loudly instead of composing into something subtly wrong.
-pub const FORMAT: u32 = 5;
+pub const FORMAT: u32 = 6;
 
 /// One generated scene, ready to be turned into a USD stage.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -65,8 +69,20 @@ pub struct PartEntry {
     pub normals: Option<Vec<[f32; 3]>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uvs: Option<Vec<[f32; 2]>>,
-    /// Linear RGB, authored as a constant-interpolation `displayColor`.
+    /// Linear RGB. Authored both as a constant-interpolation `displayColor`
+    /// and as the bound material's diffuse colour — the first for a consumer
+    /// that shades nothing, the second for one that does.
     pub display_color: [f32; 3],
+    /// Microfacet roughness. 0 is a mirror, 1 is chalk.
+    pub roughness: f32,
+    /// Specular intensity, on a linear 0..1 scale where 0.5 is the 4% every
+    /// ordinary dielectric reflects.
+    pub reflectance: f32,
+    /// How much light passes through the surface rather than reflecting off
+    /// it. Non-zero only on a blade, and what makes the builder reach for a
+    /// subsurface-capable material instead of the plain one.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub translucency: f32,
     /// A surface with no inside — a leaf blade — which has to be lit and drawn
     /// from behind as well, since a canopy is looked up into as often as down
     /// onto.
@@ -188,14 +204,21 @@ pub struct Cable {
     /// The one diameter the curve is **simulated** at, in meters. Sizes every
     /// capsule and, through the fourth power of the radius, its stiffness.
     pub thickness: f32,
-    /// Linear RGB, authored as a constant-interpolation `displayColor` — the
-    /// same channel a [`PartEntry`] carries, since a curve is drawn beside the
-    /// meshes and has to agree with them.
+    /// Linear RGB — the same channel a [`PartEntry`] carries, since a curve is
+    /// drawn beside the meshes and has to agree with them.
     pub display_color: [f32; 3],
+    /// Microfacet roughness. See [`PartEntry::roughness`].
+    pub roughness: f32,
+    /// Specular intensity. See [`PartEntry::reflectance`].
+    pub reflectance: f32,
 }
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+fn is_zero(f: &f32) -> bool {
+    *f == 0.0
 }
 
 impl Node {
@@ -240,6 +263,8 @@ mod tests {
             widths: vec![0.011, 0.010, 0.009],
             thickness: 0.009,
             display_color: [0.2, 0.5, 0.1],
+            roughness: 0.85,
+            reflectance: 0.25,
         });
 
         let mut root = Node::group("Vineyard", "Xform");
@@ -258,6 +283,9 @@ mod tests {
                 normals: None,
                 uvs: None,
                 display_color: [0.2, 0.5, 0.1],
+                roughness: 0.5,
+                reflectance: 0.55,
+                translucency: 0.45,
                 double_sided: true,
                 collision: None,
                 heightfield_resolution: None,

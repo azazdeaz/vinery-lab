@@ -19,7 +19,7 @@ import pytest
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade
 
 from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
-from vinerylab.usd.build import CABLE_MATERIAL
+from vinerylab.usd.build import CABLE_MATERIAL, MATERIAL, MDL_OPAQUE, MDL_TRANSLUCENT, SHADER
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
@@ -113,10 +113,11 @@ def test_a_part_bounds_its_own_points(stage: Usd.Stage):
 
 
 def test_every_drawn_prim_carries_a_constant_display_color(stage: Usd.Stage):
-    """Nothing binds a preview material, so this is the only channel a renderer
-    reads; at the wrong interpolation it falls through to white. The curve is
-    held to the same rule: a flexible organ is drawn by it and by nothing else,
-    and untinted it stands out white among the meshes it replaces."""
+    """The fallback for a renderer that reads no MDL, which resolves no surface
+    from the bound material and lands here; at the wrong interpolation it falls
+    through to white. The curve is held to the same rule: a flexible organ is
+    drawn by it and by nothing else, and untinted it stands out white among the
+    meshes it replaces."""
     drawn = [
         (part_mesh(stage, "Leaf_1"), (0.24, 0.42, 0.16)),
         (part_mesh(stage, "Vine_0"), (0.31, 0.24, 0.18)),
@@ -126,6 +127,104 @@ def test_every_drawn_prim_carries_a_constant_display_color(stage: Usd.Stage):
         primvar = gprim.GetDisplayColorPrimvar()
         assert primvar.GetInterpolation() == UsdGeom.Tokens.constant
         assert tuple(primvar.Get()[0]) == pytest.approx(expected)
+
+
+def shader_inputs(stage: Usd.Stage, path: str) -> tuple[UsdShade.Shader, dict]:
+    """The MDL shader bound to the prim at `path`, and its authored inputs.
+
+    Goes through `MaterialBindingAPI` rather than the known path, so a material
+    that is authored but not reachable by a binding fails here."""
+    bound = UsdShade.MaterialBindingAPI(stage.GetPrimAtPath(path)).GetDirectBinding()
+    material = UsdShade.Material(stage.GetPrimAtPath(bound.GetMaterialPath()))
+    source = material.ComputeSurfaceSource("mdl")[0]
+    return source, {i.GetBaseName(): i.Get() for i in source.GetInputs()}
+
+
+@pytest.mark.parametrize(
+    ("drawn", "module", "expected"),
+    [
+        # Wood: rough, dry, and the default material's opposite.
+        (
+            f"{PARTS}/Vine_0/{GEOM}",
+            MDL_OPAQUE,
+            {
+                "diffuse_color_constant": (0.31, 0.24, 0.18),
+                "reflection_roughness_constant": 0.85,
+                "specular_level": 0.25,
+                "metallic_constant": 0.0,
+            },
+        ),
+        # A cane is a curve, not a mesh, and must not shade unlike the shoot it
+        # stands in for -- same numbers, same module.
+        (
+            CABLE,
+            MDL_OPAQUE,
+            {
+                "diffuse_color_constant": (0.18, 0.44, 0.12),
+                "reflection_roughness_constant": 0.85,
+                "specular_level": 0.25,
+            },
+        ),
+        # A blade, on the one module with a subsurface term. `specular_level`
+        # doubles onto OmniSurface's Fresnel weight and saturates there.
+        (
+            f"{PARTS}/Leaf_1/{GEOM}",
+            MDL_TRANSLUCENT,
+            {
+                "diffuse_reflection_color": (0.24, 0.42, 0.16),
+                "diffuse_reflection_weight": 1.0,
+                "specular_reflection_roughness": 0.5,
+                "specular_reflection_weight": 1.0,
+                "thin_walled": True,
+                "enable_diffuse_transmission": True,
+                "subsurface_weight": 0.45,
+                "subsurface_transmission_color": (0.24, 0.42, 0.16),
+            },
+        ),
+    ],
+    ids=["wood", "cane", "blade"],
+)
+def test_a_drawn_prim_binds_a_material_describing_its_surface(
+    stage: Usd.Stage, drawn: str, module: tuple[str, str], expected: dict
+):
+    """Unbound, Kit shades the whole scene with one default surface tinted by
+    `displayColor` -- a single roughness for bark, foliage and soil alike."""
+    shader, inputs = shader_inputs(stage, drawn)
+    asset, identifier = module
+
+    assert shader.GetPrim().IsValid(), "no MDL surface reachable from the binding"
+    assert shader.GetSourceAsset("mdl").path == asset
+    assert shader.GetSourceAssetSubIdentifier("mdl") == identifier
+    for name, value in expected.items():
+        got = inputs[name]
+        if isinstance(value, bool):
+            assert got is value, name
+        else:
+            # Shader inputs are float32, so nothing here compares exactly.
+            assert (tuple(got) if isinstance(value, tuple) else got) == pytest.approx(value), name
+
+
+def test_a_material_travels_inside_the_part_it_shades(stage: Usd.Stage):
+    """A binding target outside the referenced prim cannot be namespace-mapped
+    and is dropped, so a material authored anywhere else would silently unbind
+    on every instance -- which is thousands of leaves shaded as grey default."""
+    prototype = stage.GetPrimAtPath(LEAF).GetPrototype()
+    mesh = prototype.GetChild(GEOM)
+    bound = UsdShade.MaterialBindingAPI(mesh).GetDirectBinding()
+
+    assert bound.GetMaterialPath() == mesh.GetPath().AppendChild(MATERIAL)
+    assert bound.GetMaterial().GetPrim().IsValid()
+
+
+def test_a_material_offers_no_surface_outside_the_mdl_context(stage: Usd.Stage):
+    """The export targets Kit. Authoring the universal `outputs:surface` as
+    well would take `displayColor` away from every renderer that reads no MDL,
+    which is the only colour those have."""
+    material = UsdShade.Material(stage.GetPrimAtPath(f"{PARTS}/Vine_0/{GEOM}/{MATERIAL}"))
+
+    assert material.ComputeSurfaceSource("mdl")[0].GetPrim().IsValid()
+    assert not material.ComputeSurfaceSource()[0].GetPrim().IsValid()
+    assert material.GetPrim().GetChild(SHADER).GetTypeName() == "Shader"
 
 
 def test_optional_attributes_are_authored_only_where_the_document_has_them(

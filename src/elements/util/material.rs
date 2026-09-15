@@ -6,9 +6,16 @@
 //! two plants are not the same brown, while every piece of bark in the scene is
 //! equally rough.
 //!
-//! Two numbers is the whole of a material here, because nothing in the scene is
-//! metallic and nothing is textured yet: `roughness` and `ior` are all that
-//! separate one untextured organic surface from another.
+//! Two numbers is the whole of an opaque material here, because nothing in the
+//! scene is metallic and nothing is textured yet: `roughness` says how wide the
+//! highlight spreads and `reflectance` says how bright it is, and that is all
+//! that separates one untextured organic surface from another.
+//!
+//! # Not `ior`
+//!
+//! Bevy reads `StandardMaterial::ior` only on the refraction paths — specular
+//! and diffuse transmission. On an opaque dielectric the specular level comes
+//! from `reflectance`, so that is what a response authors.
 
 use crate::scene::Surface;
 
@@ -18,9 +25,10 @@ use crate::scene::Surface;
 pub struct Response {
     /// Microfacet roughness. 0 is a mirror, 1 is chalk.
     pub roughness: f32,
-    /// Index of refraction, which sets how bright the specular highlight is at
-    /// a glancing angle.
-    pub ior: f32,
+    /// Specular intensity, on a linear 0..1 scale where 0.5 is the 4% every
+    /// ordinary dielectric reflects. Low is a dry, dusty surface; high is one
+    /// under a wax or a varnish.
+    pub reflectance: f32,
 }
 
 impl Response {
@@ -29,34 +37,43 @@ impl Response {
         Surface {
             color,
             roughness: self.roughness,
-            ior: self.ior,
+            reflectance: self.reflectance,
+            translucency: 0.0,
+            thickness: 0.0,
             double_sided: false,
         }
     }
 
-    /// The same, for a surface with no inside — a leaf blade — which has to be
-    /// lit and drawn from behind as well, since a canopy is looked up into as
-    /// often as down onto.
-    pub fn double_sided(&self, color: [f32; 3]) -> Surface {
+    /// The same, for a leaf blade: a surface thin enough to have no inside.
+    ///
+    /// Two consequences, both of them thinness: it is lit and drawn from behind
+    /// as well, since a canopy is looked up into as often as down onto, and it
+    /// passes light through rather than stopping it, so a backlit blade glows
+    /// instead of going black.
+    pub fn blade(&self, color: [f32; 3]) -> Surface {
         Surface {
             double_sided: true,
+            translucency: BLADE_TRANSLUCENCY,
+            thickness: BLADE_THICKNESS,
             ..self.surface(color)
         }
     }
 }
 
-/// Dry bark: rough, matte, no sheen at any angle.
+/// Dry bark: rough, matte, and barely glinting — shaggy enough that what light
+/// it does reflect scatters off in every direction.
 pub const WOOD: Response = Response {
     roughness: 0.85,
-    ior: 1.5,
+    reflectance: 0.25,
 };
 
 /// Leaves and green canes both. They share one response deliberately — both
-/// are living tissue under a waxy cuticle, so their roughness genuinely
-/// matches. They still look nothing alike, because their colour differs.
+/// are living tissue under a waxy cuticle, so their roughness and their sheen
+/// genuinely match. They still look nothing alike, because their colour
+/// differs, and a blade is additionally thin — see [`Response::blade`].
 pub const FOLIAGE: Response = Response {
     roughness: 0.5,
-    ior: 1.45,
+    reflectance: 0.55,
 };
 
 /// A trellis post. Smoother than bark and rougher than a leaf, which is where
@@ -64,14 +81,26 @@ pub const FOLIAGE: Response = Response {
 /// highlight worth naming without a texture to break it up.
 pub const POLE: Response = Response {
     roughness: 0.7,
-    ior: 1.5,
+    reflectance: 0.45,
 };
 
-/// Dry cultivated loam. The roughest thing in the scene.
+/// Dry cultivated loam. The roughest and the least reflective thing in the
+/// scene: dust has no sheen at any angle.
 pub const GROUND: Response = Response {
     roughness: 0.95,
-    ior: 1.5,
+    reflectance: 0.2,
 };
+
+/// How much of the light landing on a blade passes through it rather than
+/// reflecting off it. Kept under 0.5, above which the shaded side of a leaf
+/// would out-glow the lit side — tissue paper, not a canopy.
+const BLADE_TRANSLUCENCY: f32 = 0.45;
+
+/// A blade's thickness in meters. Sets how far behind the surface the
+/// transmitted lobe is sampled from, which at leaf scale matters only to a
+/// nearby point light; it is authored anyway so the number is right when one
+/// arrives.
+const BLADE_THICKNESS: f32 = 0.000_3;
 
 #[cfg(test)]
 mod tests {
@@ -94,14 +123,44 @@ mod tests {
         assert!(ordered.iter().all(|r| (0.0..=1.0).contains(&r.roughness)));
     }
 
-    /// A blade is the one surface with no inside, and the flag is what keeps a
-    /// canopy from vanishing when the camera goes under it.
+    /// Roughness and sheen run together across this palette — the rougher a
+    /// surface is here, the drier it is, and the less it reflects. The
+    /// coincidence is worth pinning because it is what keeps the two knobs from
+    /// cancelling each other out and flattening the scene back to uniform.
     #[test]
-    fn only_a_double_sided_surface_is_lit_from_behind() {
+    fn the_rougher_a_surface_is_the_less_it_reflects() {
+        let ordered = [FOLIAGE, POLE, WOOD, GROUND];
+        for pair in ordered.windows(2) {
+            assert!(
+                pair[0].reflectance > pair[1].reflectance,
+                "{:?} reflects more than {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+        assert!(ordered.iter().all(|r| (0.0..=1.0).contains(&r.reflectance)));
+    }
+
+    /// A blade is the one surface with no inside, and the two flags that fall
+    /// out of that go together: one keeps a canopy from vanishing when the
+    /// camera goes under it, the other makes it glow when the sun is behind it.
+    #[test]
+    fn only_a_blade_is_lit_from_behind() {
         let color = [0.1, 0.2, 0.3];
-        assert!(!FOLIAGE.surface(color).double_sided);
-        assert!(FOLIAGE.double_sided(color).double_sided);
-        assert_eq!(FOLIAGE.double_sided(color).color, color);
-        assert_eq!(FOLIAGE.double_sided(color).roughness, FOLIAGE.roughness);
+        let solid = FOLIAGE.surface(color);
+        let blade = FOLIAGE.blade(color);
+
+        assert!(!solid.double_sided);
+        assert_eq!(solid.translucency, 0.0);
+
+        assert!(blade.double_sided);
+        assert!(blade.translucency > 0.0);
+        // Above 0.5 the shaded side would be the brighter one.
+        assert!(blade.translucency < 0.5);
+
+        // Thinness changes nothing else about the response.
+        assert_eq!(blade.color, color);
+        assert_eq!(blade.roughness, FOLIAGE.roughness);
+        assert_eq!(blade.reflectance, FOLIAGE.reflectance);
     }
 }
