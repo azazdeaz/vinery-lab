@@ -9,6 +9,7 @@
 //! [`scene::z_up_to_y_up`](crate::scene)), so the camera below works in Bevy's
 //! ordinary Y-up world.
 
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
@@ -17,12 +18,22 @@ use crate::elements::util::parcel;
 use crate::ui::ParamsPanel;
 
 /// Where the save key writes the scene document.
+#[cfg(not(target_arch = "wasm32"))]
 const SCENE_PATH: &str = "scene.json";
 
 pub fn run() {
     let mut app = App::new();
     app.add_plugins((
-        DefaultPlugins,
+        DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                // The web build draws into this canvas and tracks its size.
+                // Both fields are ignored off the web.
+                canvas: Some("#viewer".into()),
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        }),
         PanOrbitCameraPlugin,
         crate::scene::plugin,
         crate::elements::plugin,
@@ -34,12 +45,15 @@ pub fn run() {
         parcel::debug_plugin,
     ))
     .add_systems(Startup, setup)
-    .add_systems(
+    .add_systems(Update, sync_camera_enabled_with_ui);
+
+    // No filesystem on the web, and this system's `Err` would take the app
+    // down rather than log it: a `BevyError` defaults to `Severity::Panic`.
+    // **Copy Isaac Lab cfg** is the export path there.
+    #[cfg(not(target_arch = "wasm32"))]
+    app.add_systems(
         Update,
-        (
-            save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
-            sync_camera_enabled_with_ui,
-        ),
+        save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
     );
 
     // Off by default: it logs a line per re-authored frame, which during a
@@ -73,6 +87,7 @@ fn setup(mut commands: Commands) {
 ///
 /// Exports the entities on screen: the viewer and the export draw from one
 /// scene graph, so there is no preview shape and export shape to keep in step.
+#[cfg(not(target_arch = "wasm32"))]
 fn save_scene_on_key(world: &mut World) -> Result<()> {
     std::fs::write(SCENE_PATH, crate::scene::export::scene_json(world)?)?;
     info!("saved {SCENE_PATH} — build it with `python -m vinerylab.usd {SCENE_PATH} scene.usd`");

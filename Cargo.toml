@@ -49,3 +49,28 @@ opt-level = 1
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Web build only. Cargo unions features across target-specific and plain
+# dependency entries, so `webgpu` below lands on wasm and nowhere else.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGL2 has no compute shaders, so it gets none of the GPU preprocessing this
+# scene's mesh count wants; `webgpu` takes precedence over the default `webgl2`
+# on wasm. The backend is chosen at compile time, so one build serves one set of
+# browsers — Chrome, Edge, a recent Firefox, Safari 26+.
+bevy = { version = "0.19.1", features = ["webgpu"] }
+# `getrandom` reaches wasm32-unknown-unknown twice — 0.4 under bevy_math's rand,
+# 0.3 under curvo's argmin — and neither picks a backend on its own. Renamed
+# because two majors of one crate cannot share a key. See `.cargo/config.toml`
+# for the other half.
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+
+# What the web build ships. Plain `--release` is 123 MB, half of it the `name`
+# section; this is 40 MB, 12 MB over the wire.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
