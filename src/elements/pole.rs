@@ -35,6 +35,7 @@
 
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
+use crate::ui::Staged;
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
@@ -44,7 +45,6 @@ use super::Grow;
 use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::parcel::ParcelParams;
 use super::util::{color, material};
-use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Pole";
@@ -125,7 +125,7 @@ impl Metric<PoleConfig> for PoleMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -225,8 +225,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PoleParams>>| {
-                    params.radius = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.pole.radius = change.value;
                 })
             ),
             label_small("Pole sides"),
@@ -235,8 +235,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PoleParams>>| {
-                    params.sides = change.value.round().max(3.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.pole.sides = change.value.round().max(3.0) as u32;
                 })
             ),
         ]

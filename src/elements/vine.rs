@@ -69,13 +69,13 @@ use crate::quantize::{Metric, farthest_first};
 use crate::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
 };
+use crate::ui::Staged;
 
 use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
-use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its wood under.
 pub const PART: &str = "Vine";
@@ -330,7 +330,7 @@ impl Metric<VineConfig> for VineMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -403,7 +403,7 @@ pub fn plugin(app: &mut App) {
         PreUpdate,
         build
             .in_set(Grow::Vines)
-            .run_if(configs_changed::<VineConfig>.or_else(resource_changed::<VineParams>)),
+            .run_if(configs_changed::<VineConfig>.or_eager(resource_changed::<VineParams>)),
     );
 }
 
@@ -986,8 +986,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.trunk_height = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.trunk_height = change.value;
                 })
             ),
             label_small("Trunk radius"),
@@ -996,8 +996,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.trunk_radius = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.trunk_radius = change.value;
                 })
             ),
             label_small("Trunk wobble"),
@@ -1006,8 +1006,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.trunk_wobble = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.trunk_wobble = change.value;
                 })
             ),
             label_small("Cordons per vine"),
@@ -1016,8 +1016,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.arms = change.value.round().clamp(1.0, 2.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.arms = change.value.round().clamp(1.0, 2.0) as u32;
                 })
             ),
             label_small("Cordon gap"),
@@ -1026,8 +1026,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.cordon_gap = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.cordon_gap = change.value;
                 })
             ),
             label_small("Cordon radius"),
@@ -1036,8 +1036,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.002)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.cordon_radius = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.cordon_radius = change.value;
                 })
             ),
             label_small("Spur spacing"),
@@ -1046,8 +1046,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.spur_spacing = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.spur_spacing = change.value;
                 })
             ),
             label_small("Spur length"),
@@ -1056,8 +1056,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.spur_length = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.spur_length = change.value;
                 })
             ),
             label_small("Shoots per spur"),
@@ -1066,8 +1066,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.shoots_per_spur = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.shoots_per_spur = change.value;
                 })
             ),
             label_small("Bark roughness"),
@@ -1076,8 +1076,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.roughness = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.roughness = change.value;
                 })
             ),
             label_small("Vine sides"),
@@ -1086,8 +1086,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.sides = change.value.round().max(3.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.sides = change.value.round().max(3.0) as u32;
                 })
             ),
             label_small("Vine detail"),
@@ -1096,8 +1096,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.detail = change.value.round().max(4.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.detail = change.value.round().max(4.0) as u32;
                 })
             ),
             label_small("Vine variations"),
@@ -1106,8 +1106,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
-                    params.variations = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.vine.variations = change.value.round().max(1.0) as u32;
                 })
             ),
         ]

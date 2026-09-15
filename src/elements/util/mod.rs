@@ -49,18 +49,14 @@ pub fn par_map<T: Sync, R: Send + 'static>(
     items: &[T],
     f: impl Fn(usize, &T) -> R + Send + Sync,
 ) -> Vec<R> {
-    let pool = ComputeTaskPool::get();
-    // One chunk per thread. `par_chunk_map` hands a chunk its chunk number
-    // rather than its offset, so the stride has to be known here to recover
-    // each item's index.
-    let stride = items.len().div_ceil(pool.thread_num()).max(1);
-    items
-        .par_chunk_map(pool, stride, |nth, chunk| {
-            let at = nth * stride;
+    // Paired with their indices up front, because the chunked map hands a
+    // chunk its chunk number rather than the offset of the items in it.
+    let indexed: Vec<(usize, &T)> = items.iter().enumerate().collect();
+    indexed
+        .par_splat_map(ComputeTaskPool::get(), None, |_, chunk| {
             chunk
                 .iter()
-                .enumerate()
-                .map(|(i, item)| f(at + i, item))
+                .map(|(index, item)| f(*index, item))
                 .collect::<Vec<R>>()
         })
         .into_iter()

@@ -73,10 +73,8 @@ use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_upd
 use nalgebra::Point3;
 
 use super::leaf;
-use super::util::color;
-use super::util::material;
-use super::util::par_map;
 use super::util::strand::{Bark, Strand, strand_mesh};
+use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
@@ -296,7 +294,7 @@ impl Metric<ShootConfig> for ShootMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -377,7 +375,7 @@ pub fn plugin(app: &mut App) {
                 configs_changed::<ShootConfig>
                     // `flexible` reaches no config, so the reauthor above can
                     // leave every one of them alone and this still has to run.
-                    .or_else(resource_changed::<ShootParams>),
+                    .or_eager(resource_changed::<ShootParams>),
             ),
         )
             .chain()
@@ -926,8 +924,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.length = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.length = change.value;
                 })
             ),
             label_small("Shoot radius"),
@@ -936,8 +934,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.001)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.radius = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.radius = change.value;
                 })
             ),
             label_small("Shoot lean"),
@@ -946,8 +944,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.lean = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.lean = change.value;
                 })
             ),
             label_small("Flexible shoots"),
@@ -956,8 +954,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.flexible = change.value.clamp(0.0, 1.0);
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.flexible = change.value.clamp(0.0, 1.0);
                 })
             ),
             label_small("Leaf spacing"),
@@ -966,8 +964,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.internode = change.value.max(0.0);
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.internode = change.value.max(0.0);
                 })
             ),
             label_small("Leaf droop"),
@@ -976,8 +974,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.leaf_droop = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.leaf_droop = change.value;
                 })
             ),
             label_small("Shoot sides"),
@@ -986,8 +984,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.sides = change.value.round().max(3.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.sides = change.value.round().max(3.0) as u32;
                 })
             ),
             label_small("Shoot detail"),
@@ -996,8 +994,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.detail = change.value.round().max(4.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.detail = change.value.round().max(4.0) as u32;
                 })
             ),
             label_small("Shoot variations"),
@@ -1006,8 +1004,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
-                    params.variations = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.shoot.variations = change.value.round().max(1.0) as u32;
                 })
             ),
         ]

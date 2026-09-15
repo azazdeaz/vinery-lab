@@ -133,11 +133,14 @@ pub struct LeafConfig {
     /// How far this blade bends out of the drawing — see [`curl`]. Signed:
     /// a negative one cups and lifts where a positive one troughs and droops.
     pub curl: f32,
-    /// The unit draw [`curl`](Self::curl) was spread from, kept at the width
-    /// it was drawn at so applying the params again to a blade already hanging
-    /// lands on that same blade rather than near it. Not shape: the fields
-    /// above are what a mesh is built from, and [`LeafMetric`] reads this no
-    /// more than a mesh does.
+    /// The unit draw [`curl`](Self::curl) was spread from.
+    ///
+    /// `f64` rather than `f32` to match the stream it came out of: rounding it
+    /// re-cuts a blade already hanging to a slightly different curl, and the
+    /// exported bytes with it.
+    ///
+    /// Not shape: the fields above are what a mesh is built from, and
+    /// [`LeafMetric`] reads this no more than a mesh does.
     pub draw: f64,
 }
 
@@ -196,7 +199,7 @@ impl Metric<LeafConfig> for LeafMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -257,7 +260,7 @@ pub fn plugin(app: &mut App) {
         PreUpdate,
         (
             reauthor.run_if(resource_changed::<LeafParams>),
-            build.run_if(configs_changed::<LeafConfig>.or_else(resource_changed::<LeafParams>)),
+            build.run_if(configs_changed::<LeafConfig>.or_eager(resource_changed::<LeafParams>)),
         )
             .chain()
             .in_set(Grow::Scatter),
@@ -441,15 +444,10 @@ pub(crate) fn build(
             .with_context(|| format!("leaf shape {} could not be built", config.outline))
     });
 
-    let geometry = book
-        .representatives
-        .iter()
-        .zip(blades)
-        .enumerate()
-        .map(|(index, (config, blade))| {
-            Ok(library.part(PART, index, blade?, surface(config.outline)))
-        })
-        .collect::<anyhow::Result<Vec<Geometry>>>()?;
+    let mut geometry: Vec<Geometry> = Vec::with_capacity(book.len());
+    for (index, (config, blade)) in book.representatives.iter().zip(blades).enumerate() {
+        geometry.push(library.part(PART, index, blade?, surface(config.outline)));
+    }
 
     for ((_, entity, _), drew) in hung.iter().zip(&book.assignment) {
         commands
@@ -481,8 +479,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<LeafParams>>| {
-                    params.variations = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.variations = change.value.round().max(1.0) as u32;
                 })
             ),
             label_small("Leaf detail"),
@@ -491,8 +489,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(8.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<LeafParams>>| {
-                    params.detail = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.detail = change.value.round().max(1.0) as u32;
                 })
             ),
             label_small("Leaf curl"),
@@ -501,8 +499,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<LeafParams>>| {
-                    params.curl = change.value.max(0.0);
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.curl = change.value.max(0.0);
                 })
             ),
         ]

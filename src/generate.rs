@@ -37,7 +37,7 @@ fn grow(params: &VineyardParams) -> anyhow::Result<App> {
         .init_asset::<StandardMaterial>()
         .add_plugins((crate::scene::plugin, crate::elements::plugin));
     // After the element plugins, so these override their defaults.
-    params.clone().insert(app.world_mut());
+    params.apply(app.world_mut());
 
     // Let plugins finish deferred setup before the first update, as `run()`
     // would have done for us.

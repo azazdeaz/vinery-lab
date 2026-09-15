@@ -30,8 +30,10 @@ pub mod terrain;
 pub mod util;
 pub mod vine;
 
-use crate::ui::Staged;
+use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
+
+use crate::ui::Staged;
 
 /// Build order. Every layer's build system goes in exactly one of these, and
 /// they run chained in `PreUpdate`.
@@ -85,7 +87,7 @@ pub fn plugin(app: &mut App) {
 }
 
 /// Scene-wide parameters, owned by no element.
-#[derive(Resource, Clone, Debug, Default)]
+#[derive(Resource, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -114,8 +116,8 @@ pub fn ui() -> impl Scene {
                 bevy::ui_widgets::SliderPrecision(0)
                 on(bevy::ui_widgets::slider_self_update)
                 on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
-                    mut params: ResMut<Staged<SceneParams>>| {
-                    params.seed = change.value.round().max(0.0) as u64;
+                    mut params: ResMut<Staged>| {
+                    params.scene.seed = change.value.round().max(0.0) as u64;
                 })
             ),
         ]
@@ -125,9 +127,9 @@ pub fn ui() -> impl Scene {
 /// A plain snapshot of every element's params.
 ///
 /// The world stores each fragment as its own resource so change detection is
-/// per-element; this aggregate exists only to carry a full parameter set
-/// across the boundaries where resources aren't available yet — Python calls
-/// and headless generation.
+/// per-element; this aggregate is the whole parameter set as one value, for
+/// everything that has to hold one — Python calls, headless generation, and
+/// the viewer panel's [`Staged`] copy.
 #[derive(Clone, Debug, Default)]
 pub struct VineyardParams {
     pub scene: SceneParams,
@@ -143,23 +145,26 @@ pub struct VineyardParams {
 impl VineyardParams {
     /// Splits the aggregate back into the per-element resources the author
     /// systems actually read.
-    pub fn insert(self, world: &mut World) {
-        world.insert_resource(self.scene);
-        world.insert_resource(self.terrain);
-        world.insert_resource(self.parcel);
-        world.insert_resource(self.planting);
-        world.insert_resource(self.pole);
-        world.insert_resource(self.vine);
-        world.insert_resource(self.shoot);
-        world.insert_resource(self.leaf);
+    ///
+    /// A fragment that already holds its value is left alone rather than
+    /// rewritten, so applying a set in which one slider moved re-runs that
+    /// layer and no other.
+    pub fn apply(&self, world: &mut World) {
+        set(world, &self.scene);
+        set(world, &self.terrain);
+        set(world, &self.parcel);
+        set(world, &self.planting);
+        set(world, &self.pole);
+        set(world, &self.vine);
+        set(world, &self.shoot);
+        set(world, &self.leaf);
     }
 
     /// Reads every element's params resource back out of `world`.
     ///
-    /// The inverse of [`insert`](Self::insert), for the one caller that has a
-    /// live world and needs a plain snapshot: the viewer's save key, which
-    /// re-generates the scene headlessly rather than saving the stage it is
-    /// previewing.
+    /// The inverse of [`apply`](Self::apply), for the one caller that has a
+    /// live world and needs a plain snapshot: the viewer's panel, seeding the
+    /// copy its sliders write.
     pub fn from_world(world: &World) -> Self {
         Self {
             scene: world.resource::<SceneParams>().clone(),
@@ -171,6 +176,17 @@ impl VineyardParams {
             shoot: world.resource::<shoot::ShootParams>().clone(),
             leaf: world.resource::<leaf::LeafParams>().clone(),
         }
+    }
+}
+
+/// One fragment of [`VineyardParams::apply`]: inserts the resource if the
+/// world has none, and otherwise overwrites it only if the value differs.
+fn set<T: Resource<Mutability = Mutable> + Clone + PartialEq>(world: &mut World, value: &T) {
+    match world.get_resource_mut::<T>() {
+        Some(mut live) => {
+            live.set_if_neq(value.clone());
+        }
+        None => world.insert_resource(value.clone()),
     }
 }
 
