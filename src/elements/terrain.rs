@@ -128,10 +128,17 @@ pub fn plugin(app: &mut App) {
         // built from change. `ParcelParams` is not among them: `author` above
         // rewrites the layout on every run, so a parcel edit reaches here as a
         // layout change in the same frame.
+        //
+        // `SceneParams` is: `plant` draws the gaps, the replants and the post
+        // jitter off the scene seed, and it is the topmost layer that reads
+        // the seed at all — so this gate is the whole panel's seed slider.
+        // The layers below it read the seed too, and reach it through the
+        // respawn here rather than through gates of their own.
         .add_systems(
             PreUpdate,
             planting::plant.in_set(Grow::Planting).run_if(
                 resource_changed::<planting::PlantingParams>
+                    .or_eager(resource_changed::<super::SceneParams>)
                     .or_eager(resource_changed::<parcel::VineyardLayout>)
                     .or_eager(resource_changed::<super::vine::VineParams>)
                     .or_eager(resource_changed::<super::pole::PoleParams>),

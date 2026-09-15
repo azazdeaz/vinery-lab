@@ -34,7 +34,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 
 use crate::elements::util::{parcel, planting};
-use crate::elements::{Grow, leaf, pole, shoot, terrain, vine};
+use crate::elements::{Grow, SceneParams, leaf, pole, shoot, terrain, vine};
 
 /// Set this (to anything) to turn the viewer's instrumentation on.
 pub const ENV: &str = "VINERYLAB_PERF";
@@ -147,6 +147,7 @@ pub fn plugin(app: &mut App) {
 #[allow(clippy::too_many_arguments)]
 fn note_changed_params(
     mut perf: ResMut<Perf>,
+    scene_p: Res<SceneParams>,
     terrain_p: Res<terrain::TerrainParams>,
     parcel_p: Res<parcel::ParcelParams>,
     planting_p: Res<planting::PlantingParams>,
@@ -157,7 +158,8 @@ fn note_changed_params(
     ground: Res<terrain::Ground>,
     layout: Res<parcel::VineyardLayout>,
 ) {
-    let flags: [(&'static str, bool); 9] = [
+    let flags: [(&'static str, bool); 10] = [
+        ("SceneParams", scene_p.is_changed()),
         ("TerrainParams", terrain_p.is_changed()),
         ("ParcelParams", parcel_p.is_changed()),
         ("PlantingParams", planting_p.is_changed()),
@@ -286,7 +288,7 @@ mod bench {
                 w.resource_mut::<vine::VineParams>().trunk_radius += 0.001;
             }),
             ("scene.seed", |w| {
-                w.resource_mut::<crate::elements::SceneParams>().seed += 1;
+                w.resource_mut::<SceneParams>().seed += 1;
             }),
             ("parcel.row_spacing", |w| {
                 w.resource_mut::<parcel::ParcelParams>().row_spacing += 0.01;
