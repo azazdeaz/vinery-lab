@@ -362,7 +362,12 @@ def test_a_collision_proxy_is_placed_like_any_other_prim(stage: Usd.Stage):
 def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
     """Only a *linear*, *non-periodic* curve carrying the sim schema imports as
     a cable; anything else is skipped with a warning and simulates as nothing.
-    One curve per prim, or the importer welds them into one articulation."""
+    One curve per prim, or the importer welds them into one articulation.
+
+    It is `guide`, so nothing draws it: a curve whose points move every frame
+    renders with a visible glitch, and the organ is drawn by a mesh on each rod
+    segment instead. The importer buckets a cable on type and schema alone, so
+    purpose does not hide it from the solver."""
     prim = stage.GetPrimAtPath(CABLE)
     curves = UsdGeom.BasisCurves(prim)
 
@@ -371,6 +376,7 @@ def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
     assert prim.HasAPI(UsdPhysics.CollisionAPI)
     assert curves.GetTypeAttr().Get() == UsdGeom.Tokens.linear
     assert curves.GetWrapAttr().Get() == UsdGeom.Tokens.nonperiodic
+    assert curves.GetPurposeAttr().Get() == UsdGeom.Tokens.guide
     assert list(curves.GetCurveVertexCountsAttr().Get()) == [4]
     assert tuple(curves.GetPointsAttr().Get()[1]) == pytest.approx((0.04, 0.0, 0.02))
     # Drawn tapering, one width per point, while the rod stays uniform: no
@@ -380,9 +386,11 @@ def test_a_flexible_organ_is_a_curve_a_solver_can_recognise(stage: Usd.Stage):
 
 
 def test_a_cable_bounds_the_tube_it_is_drawn_as(stage: Usd.Stage):
-    """A curve is drawn as a tube around its centerline, so the box has to clear
-    the widths as well as the points. Kit RTX measures an animated curve's box
-    once and never refreshes it, so one that is too tight stays too tight."""
+    """A `Boundable` bounds what it would draw, and a curve draws as a tube
+    around its centerline -- so the box has to clear the widths as well as the
+    points, which is what `ComputeExtent` adds and a box around the points
+    alone does not. Authored even though the cable is `guide`: it is what a
+    consumer showing guides culls against."""
     curves = UsdGeom.BasisCurves(stage.GetPrimAtPath(CABLE))
     lo, hi = curves.GetExtentAttr().Get()
     reach = max(curves.GetWidthsAttr().Get()) / 2.0

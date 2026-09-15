@@ -51,7 +51,7 @@ fn grow(params: &VineyardParams) -> anyhow::Result<App> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::leaf;
+    use crate::elements::{leaf, shoot};
     use crate::scene::doc::{FORMAT, Node};
     use bevy::ecs::component::Mutable;
     use std::collections::{BTreeMap, BTreeSet};
@@ -173,10 +173,12 @@ mod tests {
     /// meshes of one element landing on it is a jitter stream wired to a
     /// constant seed, which every other check here would pass.
     ///
-    /// The canopy is the one exception, and a deliberate one: a blade is
-    /// shaded off the drawing it was cut from rather than off which mesh it
-    /// came out as, so a budget spent on curls of one drawing shares that
-    /// drawing's green — see [`leaf::surface`](crate::elements::leaf).
+    /// Two layers are exceptions, both deliberate. A blade is shaded off the
+    /// drawing it was cut from rather than off which mesh it came out as, so a
+    /// budget spent on curls of one drawing shares that drawing's green — see
+    /// [`leaf::surface`](crate::elements::leaf). And every tube of a cane is
+    /// the shade of the shoot mesh it stands in for, so that layer holds one
+    /// shade per shoot representative rather than one per tube.
     #[test]
     fn every_part_is_tinted_and_no_layer_repeats_a_shade() {
         let doc = scene();
@@ -193,6 +195,10 @@ mod tests {
             by_layer.entry(layer).or_default().push(&part.name);
         }
 
+        // One shoot part per representative, which is what a cane's tubes are
+        // shaded by.
+        let representatives = by_layer.get(shoot::PART).map_or(0, Vec::len);
+
         for (layer, names) in &by_layer {
             let shades: BTreeSet<[u32; 3]> = names
                 .iter()
@@ -203,6 +209,8 @@ mod tests {
                 .collect();
             let expected = if *layer == leaf::PART {
                 names.len().min(leaf::SHAPES)
+            } else if *layer == shoot::CANE {
+                representatives
             } else {
                 names.len()
             };

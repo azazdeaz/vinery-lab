@@ -97,7 +97,7 @@ impl PoleConfig {
 
     /// One post, standing on the origin and running up +Z.
     fn mesh(&self) -> MeshData {
-        cylinder_mesh(self.radius, self.height, self.sides as usize)
+        cylinder_mesh(self.radius, self.radius, self.height, self.sides as usize)
     }
 }
 
