@@ -1,9 +1,9 @@
-//! Feathers-based parameter panel, docked to the top-left corner of the
-//! viewer.
+//! Feathers-based parameter panel, docked full-height down the left edge of
+//! the viewer.
 //!
 //! The panel itself owns no controls — it just stacks the UI fragment each
-//! element publishes next to its own params and author fn. Adding an element
-//! to the panel is one line in [`params_panel`].
+//! element publishes next to its own params and author fn, one [`section`]
+//! each. Adding an element to the panel is one line in [`params_panel`].
 //!
 //! Sliders fire on every [`ValueChange`](bevy::ui_widgets::ValueChange),
 //! including mid-drag, so they write a [`Staged`] copy of the params rather
@@ -14,14 +14,15 @@
 use bevy::clipboard::Clipboard;
 use bevy::feathers::{
     FeathersPlugins,
-    containers::{pane, pane_body, pane_header},
-    controls::{ButtonVariant, FeathersButton},
+    containers::{group, group_body, group_header, pane, pane_body, pane_header},
+    controls::{ButtonVariant, FeathersButton, FeathersDisclosureToggle},
     dark_theme::create_dark_theme,
     theme::{ThemeBackgroundColor, ThemedText, UiTheme},
     tokens,
 };
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, ScrollArea};
+use bevy::ui::Checked;
+use bevy::ui_widgets::{Activate, ScrollArea, ValueChange, checkbox_self_update};
 
 use crate::elements::{Grow, VineyardParams};
 
@@ -98,10 +99,10 @@ fn params_panel() -> impl Scene {
     bsn! {
         Node {
             position_type: PositionType::Absolute,
-            top: px(10),
-            left: px(10),
-            width: px(240),
-            padding: px(8),
+            top: px(0),
+            left: px(0),
+            bottom: px(0),
+            width: px(260),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,
@@ -109,27 +110,31 @@ fn params_panel() -> impl Scene {
         ParamsPanel
         Interaction
         ThemeBackgroundColor(tokens::WINDOW_BG)
-        Children [ pane() Children [
+        // `min_height` on both: a flex item refuses to shrink below its own
+        // content by default, which would push the scroll area past the
+        // bottom of the window instead of letting it scroll.
+        Children [ pane() Node { flex_grow: 1.0, min_height: px(0) } Children [
             pane_header() Children [ (Text("Vineyard") ThemedText) ],
-            pane_body() Children [
+            pane_body() Node { flex_grow: 1.0, min_height: px(0) } Children [
                 (
                     Node {
                         display: Display::Flex,
                         flex_direction: FlexDirection::Column,
-                        row_gap: px(4),
-                        max_height: vh(75),
+                        row_gap: px(6),
+                        flex_grow: 1.0,
+                        min_height: px(0),
                         overflow: Overflow::scroll_y(),
                     }
                     ScrollArea
                     Children [
-                        scene_ui(),
-                        terrain_ui(),
-                        parcel_ui(),
-                        pole_ui(),
-                        vine_ui(),
-                        shoot_ui(),
-                        leaf_ui(),
-                        planting_ui(),
+                        section("Scene", bsn_list![scene_ui()]),
+                        section("Terrain", bsn_list![terrain_ui()]),
+                        section("Parcel", bsn_list![parcel_ui()]),
+                        section("Pole", bsn_list![pole_ui()]),
+                        section("Vine", bsn_list![vine_ui()]),
+                        section("Shoot", bsn_list![shoot_ui()]),
+                        section("Leaf", bsn_list![leaf_ui()]),
+                        section("Planting", bsn_list![planting_ui()]),
                     ]
                 ),
                 // Outside the scroll area, so it stays reachable however far
@@ -137,6 +142,60 @@ fn params_panel() -> impl Scene {
                 copy_cfg_button(),
             ],
         ]]
+    }
+}
+
+/// One element's fragment, under a header whose chevron folds it away.
+///
+/// Sections start open. Collapsing every element but the one being tuned is
+/// what keeps a panel of forty-odd sliders on screen without scrolling.
+///
+/// The group's children are `[header, body]` in that order, and the toggle
+/// sits in the header — [`fold_section`] walks that shape.
+fn section(title: &'static str, body: impl SceneList) -> impl Scene {
+    bsn! {
+        group()
+        Children [
+            group_header() Children [
+                (Text(title) ThemedText),
+                (
+                    @FeathersDisclosureToggle
+                    Checked
+                    on(checkbox_self_update)
+                    on(fold_section)
+                ),
+            ],
+            group_body() Children [ {body} ],
+        ]
+    }
+}
+
+/// Shows or hides the body of the section whose chevron was just toggled.
+fn fold_section(
+    change: On<ValueChange<bool>>,
+    parents: Query<&ChildOf>,
+    children: Query<&Children>,
+    mut nodes: Query<&mut Node>,
+) {
+    let Ok(group) = parents
+        .get(change.source)
+        .and_then(|header| parents.get(header.parent()))
+    else {
+        return;
+    };
+    let Some(body) = children
+        .get(group.parent())
+        .ok()
+        .and_then(|kids| kids.get(1))
+    else {
+        return;
+    };
+    if let Ok(mut node) = nodes.get_mut(*body) {
+        node.display = if change.value {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
@@ -208,5 +267,58 @@ mod tests {
 
         advance(&mut app, Duration::from_secs_f32(QUIET * 2.0));
         assert_eq!(app.world().resource::<SceneParams>().seed, 20, "released");
+    }
+
+    fn one_section() -> impl SceneList {
+        bsn_list![section("Test", bsn_list![Node])]
+    }
+
+    /// Everything a section's scene touches while spawning, and nothing else:
+    /// no window, no renderer, no theme.
+    fn panel_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::scene::ScenePlugin,
+        ))
+        .init_asset::<bevy::text::Font>()
+        .init_asset::<Image>()
+        .add_systems(Startup, one_section.spawn());
+        app.update();
+        app
+    }
+
+    /// How many nodes are currently folded away.
+    fn hidden(world: &mut World) -> usize {
+        world
+            .query::<&Node>()
+            .iter(world)
+            .filter(|node| node.display == Display::None)
+            .count()
+    }
+
+    /// The chevron folds its own section's body, and unfolds it again. The
+    /// walk from the toggle up to the group and back down to the body is the
+    /// one thing here that can silently land on the wrong entity.
+    #[test]
+    fn a_chevron_folds_the_body_of_its_section() {
+        let mut app = panel_app();
+        let world = app.world_mut();
+        let toggle = world
+            .query_filtered::<Entity, With<bevy::ui_widgets::Checkbox>>()
+            .single(world)
+            .expect("the section spawned one chevron");
+
+        assert_eq!(hidden(world), 0, "sections start open");
+        for (value, folded) in [(false, 1), (true, 0)] {
+            world.trigger(ValueChange {
+                source: toggle,
+                value,
+                is_final: true,
+            });
+            world.flush();
+            assert_eq!(hidden(world), folded, "after toggling to {value}");
+        }
     }
 }
