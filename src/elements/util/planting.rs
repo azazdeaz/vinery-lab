@@ -51,6 +51,7 @@ use crate::elements::SceneParams;
 use crate::scene::{Order, PrimRoot, UsdType, placed};
 
 use super::parcel::{ParcelParams, Row, VineyardLayout};
+use crate::ui::Staged;
 
 /// The prim this module owns under the scene root, and rewrites from scratch.
 pub const PLANTING: &str = "Planting";
@@ -312,7 +313,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PlantingParams>>| {
                     params.miss_rate = change.value;
                 })
             ),
@@ -322,7 +323,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PlantingParams>>| {
                     params.young_rate = change.value;
                 })
             ),
@@ -332,7 +333,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PlantingParams>>| {
                     params.young_scale = change.value;
                 })
             ),

@@ -44,6 +44,7 @@ use super::Grow;
 use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::parcel::ParcelParams;
 use super::util::{color, material};
+use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Pole";
@@ -224,7 +225,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PoleParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PoleParams>>| {
                     params.radius = change.value;
                 })
             ),
@@ -234,7 +235,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PoleParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<PoleParams>>| {
                     params.sides = change.value.round().max(3.0) as u32;
                 })
             ),

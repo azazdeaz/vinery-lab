@@ -53,6 +53,7 @@ mod tests {
     use super::*;
     use crate::elements::leaf;
     use crate::scene::doc::{FORMAT, Node};
+    use bevy::ecs::component::Mutable;
     use std::collections::{BTreeMap, BTreeSet};
 
     /// Writes the current scene document out, for eyeballing the export or
@@ -80,6 +81,58 @@ mod tests {
 
     fn scene() -> SceneDoc {
         generate_scene(&VineyardParams::default()).expect("the default parcel generates")
+    }
+
+    fn json(doc: &SceneDoc) -> String {
+        serde_json::to_string(doc).expect("the document serializes")
+    }
+
+    /// The scene a default one already standing reaches when `change` is
+    /// written to its `P` resource, beside the scene the same change generates
+    /// from scratch.
+    fn edited<P: Resource<Mutability = Mutable>>(
+        pick: impl FnOnce(&mut VineyardParams) -> &mut P,
+        change: impl Fn(&mut P),
+    ) -> (String, String) {
+        let mut want = VineyardParams::default();
+        change(pick(&mut want));
+
+        let mut app = crate::elements::util::testing::grown(VineyardParams::default());
+        change(&mut app.world_mut().resource_mut::<P>());
+        app.update();
+
+        let live = scene_doc(app.world_mut()).expect("the edited scene exports");
+        (
+            json(&live),
+            json(&generate_scene(&want).expect("and generates")),
+        )
+    }
+
+    /// An edit to a scene already standing has to land exactly where
+    /// generating those params from scratch would have.
+    ///
+    /// A layer re-applies its own params to the configs already placed rather
+    /// than having the layer above re-author them — see `leaf::reauthor` and
+    /// `shoot::reauthor` — so the two paths are different code, and every
+    /// other check here only ever exercises the second.
+    #[test]
+    fn an_edit_lands_where_generating_would_have() {
+        for (what, (edited, generated)) in [
+            (
+                "a leaf edit",
+                edited(|p| &mut p.leaf, |leaf| leaf.curl = 0.35),
+            ),
+            (
+                "a shoot edit",
+                edited(|p| &mut p.shoot, |shoot| shoot.length = 0.5),
+            ),
+            (
+                "a vine edit",
+                edited(|p| &mut p.vine, |vine| vine.trunk_height = 1.1),
+            ),
+        ] {
+            assert_eq!(edited, generated, "{what} drifted");
+        }
     }
 
     /// Every prim in the document, depth first.
@@ -225,8 +278,8 @@ mod tests {
     /// on these bytes.
     #[test]
     fn generating_twice_in_one_process_gives_the_same_scene() {
-        let once = serde_json::to_string(&scene()).unwrap();
-        let twice = serde_json::to_string(&scene()).unwrap();
+        let once = json(&scene());
+        let twice = json(&scene());
         assert_eq!(once.len(), twice.len(), "the same scene both times");
         assert!(once == twice, "and byte for byte the same");
     }

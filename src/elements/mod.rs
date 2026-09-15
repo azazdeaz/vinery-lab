@@ -30,6 +30,7 @@ pub mod terrain;
 pub mod util;
 pub mod vine;
 
+use crate::ui::Staged;
 use bevy::prelude::*;
 
 /// Build order. Every layer's build system goes in exactly one of these, and
@@ -113,7 +114,7 @@ pub fn ui() -> impl Scene {
                 bevy::ui_widgets::SliderPrecision(0)
                 on(bevy::ui_widgets::slider_self_update)
                 on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
-                    mut params: ResMut<SceneParams>| {
+                    mut params: ResMut<Staged<SceneParams>>| {
                     params.seed = change.value.round().max(0.0) as u64;
                 })
             ),

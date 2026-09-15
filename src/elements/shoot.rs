@@ -75,10 +75,12 @@ use nalgebra::Point3;
 use super::leaf;
 use super::util::color;
 use super::util::material;
+use super::util::par_map;
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
+use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -236,6 +238,12 @@ pub struct ShootConfig {
     /// [`ShootMetric`] does not either. Two shoots differing in nothing else
     /// must share a mesh and still hang their leaves at their own angle.
     pub leaf_droop: f32,
+    /// The draws this shoot was authored at, kept so the params can be
+    /// re-applied to a shoot already standing. Not shape: the fields above are
+    /// what a mesh is built from, and [`ShootMetric`] reads these no more than
+    /// a mesh does.
+    pub vigour: f32,
+    pub spacing: f32,
 }
 
 impl ShootConfig {
@@ -254,6 +262,8 @@ impl ShootConfig {
             detail: params.detail.max(1),
             internode: (params.internode * spacing).max(0.0),
             leaf_droop: params.leaf_droop,
+            vigour,
+            spacing,
         }
     }
 }
@@ -361,13 +371,31 @@ impl Default for ShootParams {
 pub fn plugin(app: &mut App) {
     app.init_resource::<ShootParams>().add_systems(
         PreUpdate,
-        build.in_set(Grow::Shoots).run_if(
-            configs_changed::<ShootConfig>
-                // The leaves this layer hangs are authored from `LeafParams`,
-                // and nothing re-authors the shoot configs when those change.
-                .or_else(resource_changed::<leaf::LeafParams>),
-        ),
+        (
+            reauthor.run_if(resource_changed::<ShootParams>),
+            build.run_if(
+                configs_changed::<ShootConfig>
+                    // `flexible` reaches no config, so the reauthor above can
+                    // leave every one of them alone and this still has to run.
+                    .or_else(resource_changed::<ShootParams>),
+            ),
+        )
+            .chain()
+            .in_set(Grow::Shoots),
     );
+}
+
+/// Re-grows every shoot already standing, in place.
+///
+/// [`vine`](super::vine) authors these configs, but re-running that layer to
+/// change the numbers on them would despawn and respawn every canopy below it.
+/// Each shoot keeps the draws it was authored at so the params can be applied
+/// again without it.
+fn reauthor(params: Res<ShootParams>, mut shoots: Query<&mut ShootConfig>) {
+    for mut config in &mut shoots {
+        let next = ShootConfig::new(&params, config.vigour, config.spacing);
+        config.set_if_neq(next);
+    }
 }
 
 // ─── Shape ──────────────────────────────────────────────────────────
@@ -768,13 +796,19 @@ pub(crate) fn build(
         &ShootMetric,
     );
 
+    let stem_seed = |index: usize| scene.seed ^ STEM_STREAM ^ salt(index as u64);
+    // The representatives are independent of each other, so they are grown in
+    // parallel and registered serially: `Assets<Mesh>` takes one writer.
+    let stems = par_map(&book.representatives, |index, config| {
+        build_shoot(config, stem_seed(index))
+    });
+
     let mut built: Vec<Built> = Vec::with_capacity(book.len());
-    for (index, config) in book.representatives.iter().enumerate() {
-        let seed = scene.seed ^ STEM_STREAM ^ salt(index as u64);
-        let ShootBuild { stem, nodes, cable } = build_shoot(config, seed)?;
+    for (index, grown) in stems.into_iter().enumerate() {
+        let ShootBuild { stem, nodes, cable } = grown?;
         // The curve draws in the mesh's colour, so a cane and a rigid shoot of
         // the same representative look alike.
-        let skin = surface(seed);
+        let skin = surface(stem_seed(index));
         built.push((nodes, cable, skin, library.part(PART, index, stem, skin)));
     }
 
@@ -892,7 +926,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.length = change.value;
                 })
             ),
@@ -902,7 +936,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.001)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.radius = change.value;
                 })
             ),
@@ -912,7 +946,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.lean = change.value;
                 })
             ),
@@ -922,7 +956,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.flexible = change.value.clamp(0.0, 1.0);
                 })
             ),
@@ -932,7 +966,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.internode = change.value.max(0.0);
                 })
             ),
@@ -942,7 +976,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.leaf_droop = change.value;
                 })
             ),
@@ -952,7 +986,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.sides = change.value.round().max(3.0) as u32;
                 })
             ),
@@ -962,7 +996,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.detail = change.value.round().max(4.0) as u32;
                 })
             ),
@@ -972,7 +1006,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ShootParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<ShootParams>>| {
                     params.variations = change.value.round().max(1.0) as u32;
                 })
             ),

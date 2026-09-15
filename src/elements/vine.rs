@@ -73,8 +73,9 @@ use crate::scene::{
 use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
 use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
-use super::util::{color, material};
+use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
+use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its wood under.
 pub const PART: &str = "Vine";
@@ -400,13 +401,9 @@ pub fn plugin(app: &mut App) {
     // owns it, and `elements::plugin` adds terrain first.
     app.init_resource::<VineParams>().add_systems(
         PreUpdate,
-        build.in_set(Grow::Vines).run_if(
-            configs_changed::<VineConfig>
-                // The shoots this layer spawns are authored from `ShootParams`,
-                // and nothing re-authors the vine configs when those change.
-                .or_else(resource_changed::<shoot::ShootParams>)
-                .or_else(resource_changed::<VineParams>),
-        ),
+        build
+            .in_set(Grow::Vines)
+            .run_if(configs_changed::<VineConfig>.or_else(resource_changed::<VineParams>)),
     );
 }
 
@@ -903,15 +900,21 @@ pub(crate) fn build(
         &VineMetric,
     );
 
+    // Mixing the index in rather than adding, so neighbouring representatives
+    // give unrelated vines instead of the same vine shifted by one.
+    let wood_seed = |index: usize| scene.seed ^ WOOD_STREAM ^ salt(index as u64);
+    // The representatives are independent of each other, so they are grown in
+    // parallel and registered serially: `Assets<Mesh>` takes one writer.
+    let woods = par_map(&book.representatives, |index, config| {
+        build_vine(config, wood_seed(index))
+    });
+
     // Every representative is built once. A replant registers no part, so the
     // library can have gaps in its numbering — the index is a key, not a rank.
     let mut built: Vec<(Vec<Option<Bud>>, Option<Geometry>)> = Vec::with_capacity(book.len());
-    for (index, config) in book.representatives.iter().enumerate() {
-        // Mixing rather than adding, so neighbouring representatives give
-        // unrelated vines instead of the same vine shifted by one.
-        let seed = scene.seed ^ WOOD_STREAM ^ salt(index as u64);
-        let VineBuild { wood, buds } = build_vine(config, seed)?;
-        let geometry = wood.map(|mesh| library.part(PART, index, mesh, surface(seed)));
+    for (index, grown) in woods.into_iter().enumerate() {
+        let VineBuild { wood, buds } = grown?;
+        let geometry = wood.map(|mesh| library.part(PART, index, mesh, surface(wood_seed(index))));
         built.push((buds, geometry));
     }
 
@@ -983,7 +986,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.trunk_height = change.value;
                 })
             ),
@@ -993,7 +996,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.trunk_radius = change.value;
                 })
             ),
@@ -1003,7 +1006,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.trunk_wobble = change.value;
                 })
             ),
@@ -1013,7 +1016,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.arms = change.value.round().clamp(1.0, 2.0) as u32;
                 })
             ),
@@ -1023,7 +1026,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.cordon_gap = change.value;
                 })
             ),
@@ -1033,7 +1036,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.002)
                 SliderPrecision(3)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.cordon_radius = change.value;
                 })
             ),
@@ -1043,7 +1046,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.spur_spacing = change.value;
                 })
             ),
@@ -1053,7 +1056,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.spur_length = change.value;
                 })
             ),
@@ -1063,7 +1066,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.shoots_per_spur = change.value;
                 })
             ),
@@ -1073,7 +1076,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.roughness = change.value;
                 })
             ),
@@ -1083,7 +1086,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.sides = change.value.round().max(3.0) as u32;
                 })
             ),
@@ -1093,7 +1096,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.detail = change.value.round().max(4.0) as u32;
                 })
             ),
@@ -1103,7 +1106,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<VineParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<VineParams>>| {
                     params.variations = change.value.round().max(1.0) as u32;
                 })
             ),

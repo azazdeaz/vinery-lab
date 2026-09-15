@@ -253,11 +253,13 @@ mod bench {
         println!("\ninitial build:       {}", breakdown(&app));
         println!("scene:               {}\n", scene_size(&mut app));
 
-        // Several, not one: a resource written during `PreUpdate` is still
-        // "changed" to a run condition evaluated the following frame, so the
-        // authoring settles a couple of frames after the last edit. The last
-        // of these is the real floor.
-        for i in 0..4 {
+        // A resource written during `PreUpdate` is still "changed" to a run
+        // condition evaluated the following frame, so a build ripples down the
+        // pipeline one layer per frame and the initial one takes about seven
+        // to settle. Every row below has to be read from a quiet scene, so the
+        // settle must finish here — stop short and each edit's cost is the
+        // ripple's instead.
+        for i in 0..16 {
             app.update();
             println!("idle frame {i}:        {}", breakdown(&app));
         }
@@ -296,8 +298,9 @@ mod bench {
             app.update();
             println!("{name:<20} {}", breakdown(&app));
             // Back to quiet before the next one, so each row is one edit's
-            // cost and not the tail of the previous one.
-            for _ in 0..3 {
+            // cost and not the tail of the previous one. Long enough for the
+            // deepest ripple: a terrain edit re-authors every layer below it.
+            for _ in 0..8 {
                 app.update();
             }
         }

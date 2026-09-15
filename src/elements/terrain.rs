@@ -34,6 +34,7 @@ use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_upd
 use super::Grow;
 use super::util::mesh::MeshData;
 use super::util::{color, material, parcel, planting};
+use crate::ui::Staged;
 
 /// The prim this element owns under the scene root.
 pub const TERRAIN: &str = "Terrain";
@@ -378,7 +379,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<TerrainParams>>| {
                     params.length = change.value;
                 })
             ),
@@ -388,7 +389,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<TerrainParams>>| {
                     params.width = change.value;
                 })
             ),
@@ -398,7 +399,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<TerrainParams>>| {
                     params.max_inclination = change.value;
                 })
             ),
@@ -408,7 +409,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<TerrainParams>>| {
                     params.feature_size = change.value;
                 })
             ),
@@ -418,7 +419,7 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged<TerrainParams>>| {
                     params.detail = change.value.round().max(1.0) as u32;
                 })
             ),

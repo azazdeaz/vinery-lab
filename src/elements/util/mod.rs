@@ -34,3 +34,36 @@ pub mod planting;
 pub mod strand;
 #[cfg(test)]
 pub mod testing;
+
+use bevy::tasks::{ComputeTaskPool, ParallelSlice};
+
+/// Maps `items` across the compute pool, handing each call its index.
+///
+/// Results come back in input order, so a build that maps its representatives
+/// through here stays a function of the slice it was given — see the
+/// determinism note on [`quantize`](crate::quantize).
+///
+/// On wasm the pool has no threads and this runs inline: correct, just not
+/// faster.
+pub fn par_map<T: Sync, R: Send + 'static>(
+    items: &[T],
+    f: impl Fn(usize, &T) -> R + Send + Sync,
+) -> Vec<R> {
+    let pool = ComputeTaskPool::get();
+    // One chunk per thread. `par_chunk_map` hands a chunk its chunk number
+    // rather than its offset, so the stride has to be known here to recover
+    // each item's index.
+    let stride = items.len().div_ceil(pool.thread_num()).max(1);
+    items
+        .par_chunk_map(pool, stride, |nth, chunk| {
+            let at = nth * stride;
+            chunk
+                .iter()
+                .enumerate()
+                .map(|(i, item)| f(at + i, item))
+                .collect::<Vec<R>>()
+        })
+        .into_iter()
+        .flatten()
+        .collect()
+}
