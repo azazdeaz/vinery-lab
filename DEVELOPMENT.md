@@ -63,7 +63,9 @@ in front of a commit.
 
     cargo run --release
 
-Sliders write into the params resources, which re-run the layers below them.
+Sliders write a staged copy of the params; a value reaches the live resources
+once it has held still for 150 ms, and re-runs the layers below it. Dragging
+one is a single rebuild rather than one per frame — see `src/ui.rs`.
 Press `S` to write the scene out as `scene.json`, and build it with:
 
     python -m vinerylab.usd scene.json scene.usd
@@ -142,23 +144,27 @@ pub struct GrapeConfig { pub radius: f32, pub ripeness: f32, /* ... */ }
 pub struct GrapeMetric;
 impl Metric<GrapeConfig> for GrapeMetric { /* weighted L2 over the fields */ }
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all))]
 pub struct GrapeParams { pub variations: u32, pub radius: f32, /* ... */ }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<GrapeParams>()
-        .add_systems(PreUpdate, build
-            .in_set(Grow::Scatter)
-            .run_if(configs_changed::<GrapeConfig>));
+    app.init_resource::<GrapeParams>().add_systems(PreUpdate, (
+        reauthor.run_if(resource_changed::<GrapeParams>),
+        build.run_if(configs_changed::<GrapeConfig>),
+    ).chain().in_set(Grow::Scatter));
 }
+
+/// Re-applies the params to every berry already hanging, in place.
+fn reauthor(params: Res<GrapeParams>, mut grapes: Query<&mut GrapeConfig>) { /* ... */ }
 
 fn build(commands: Commands, library: Library, /* ... */) -> Result<()> { /* ... */ }
 
-pub fn ui() -> impl Scene { /* sliders writing into GrapeParams */ }
+pub fn ui() -> impl Scene { /* sliders writing into Staged's `grape` field */ }
 ```
 
-Adding an element is one new file plus one line in `elements::plugin`.
+Adding an element is one new file, one line in `elements::plugin`, one field in
+`VineyardParams`, and one line in `ui::params_panel`.
 
 Everything under `src/elements/` that *isn't* an element lives in
 `src/elements/util/`: the geometry kernels (`strand` skins a polyline of radii
@@ -321,8 +327,20 @@ spawning before the one after it queries.
 
 **Rebuild only on change.** `run_if(configs_changed::<XConfig>)` is the
 dirty-tracking mechanism — curvo tessellation is expensive enough that this
-matters. A layer that also reads a resource the layer above does not re-author
-on (`ShootParams` for the shoots a vine hangs) adds `resource_changed` for it.
+matters.
+
+**A params edit is re-applied in place, not re-authored from above.** A layer
+owns the configs the layer above placed, so it runs a `reauthor` pass that
+writes its own params onto them with `set_if_neq` and leaves everything else —
+the position, the draws they were authored from — exactly where it was. Editing
+a leaf param therefore re-cuts the blades instead of replanting the vineyard to
+reach them. Only a param that reaches no config field (`ShootParams::flexible`,
+or any `variations`) still needs a `resource_changed` on the layer's own build.
+
+**Combine run conditions with `or_eager`, never `or_else`.** `or_else`
+short-circuits, and a condition system that does not run does not advance its
+`last_run` — so the change it skipped reads as new again the next frame and
+rebuilds the layer a second time.
 
 **Determinism.** Bevy's query iteration order is not stable across runs and a
 codebook has to be a function of its population alone, so every organ carries a

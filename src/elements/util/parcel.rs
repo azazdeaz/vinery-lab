@@ -37,9 +37,10 @@ use bevy::ui_widgets::{
 };
 
 use crate::elements::terrain::{Ground, TerrainParams};
+use crate::ui::Staged;
 
 /// How vineyard rows are laid out across the terrain.
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -348,8 +349,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.orientation = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.orientation = change.value;
                 })
             ),
             label_small("Headland"),
@@ -358,8 +359,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.5)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.headland = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.headland = change.value;
                 })
             ),
             label_small("Row spacing"),
@@ -368,8 +369,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.row_spacing = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.row_spacing = change.value;
                 })
             ),
             label_small("Vine spacing"),
@@ -378,8 +379,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.vine_spacing = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.vine_spacing = change.value;
                 })
             ),
             label_small("Post spacing"),
@@ -388,8 +389,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.5)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.post_spacing = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.post_spacing = change.value;
                 })
             ),
             label_small("Trellis height"),
@@ -398,8 +399,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<ParcelParams>| {
-                    params.trellis_height = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.parcel.trellis_height = change.value;
                 })
             ),
             (

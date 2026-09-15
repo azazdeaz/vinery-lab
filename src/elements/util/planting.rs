@@ -49,6 +49,7 @@ use crate::elements::vine;
 
 use crate::elements::SceneParams;
 use crate::scene::{Order, PrimRoot, UsdType, placed};
+use crate::ui::Staged;
 
 use super::parcel::{ParcelParams, Row, VineyardLayout};
 
@@ -90,7 +91,7 @@ const POLE_TILT: f64 = 0.02;
 /// nothing else here is visible.
 const POLE_SINK: f64 = 0.05;
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -312,8 +313,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
-                    params.miss_rate = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.planting.miss_rate = change.value;
                 })
             ),
             label_small("Young vines"),
@@ -322,8 +323,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
-                    params.young_rate = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.planting.young_rate = change.value;
                 })
             ),
             label_small("Young vine scale"),
@@ -332,8 +333,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<PlantingParams>| {
-                    params.young_scale = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.planting.young_scale = change.value;
                 })
             ),
         ]

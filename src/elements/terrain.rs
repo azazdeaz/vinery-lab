@@ -26,6 +26,7 @@
 
 use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
+use crate::ui::Staged;
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
@@ -66,7 +67,7 @@ const MIN_FEATURE_SIZE: f64 = 0.5;
 /// otherwise build a mesh too heavy to rebuild while a slider is dragged.
 const MAX_SAMPLES: usize = 256;
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -108,12 +109,15 @@ pub fn plugin(app: &mut App) {
         .init_resource::<parcel::ParcelParams>()
         .init_resource::<parcel::VineyardLayout>()
         .init_resource::<planting::PlantingParams>()
+        // `or_eager`, never `or_else`: a short-circuited condition system does
+        // not advance its `last_run`, so the change it skipped still reads as
+        // new the next frame and rebuilds the layer a second time.
         .add_systems(
             PreUpdate,
             (
                 build.run_if(resource_changed::<TerrainParams>),
                 parcel::author.run_if(
-                    resource_changed::<parcel::ParcelParams>.or_else(resource_changed::<Ground>),
+                    resource_changed::<parcel::ParcelParams>.or_eager(resource_changed::<Ground>),
                 ),
             )
                 .chain()
@@ -121,15 +125,16 @@ pub fn plugin(app: &mut App) {
         )
         // Planting authors every plant's and post's config, so it re-runs
         // whenever the layout moves or any of the params those configs are
-        // built from change.
+        // built from change. `ParcelParams` is not among them: `author` above
+        // rewrites the layout on every run, so a parcel edit reaches here as a
+        // layout change in the same frame.
         .add_systems(
             PreUpdate,
             planting::plant.in_set(Grow::Planting).run_if(
                 resource_changed::<planting::PlantingParams>
-                    .or_else(resource_changed::<parcel::VineyardLayout>)
-                    .or_else(resource_changed::<parcel::ParcelParams>)
-                    .or_else(resource_changed::<super::vine::VineParams>)
-                    .or_else(resource_changed::<super::pole::PoleParams>),
+                    .or_eager(resource_changed::<parcel::VineyardLayout>)
+                    .or_eager(resource_changed::<super::vine::VineParams>)
+                    .or_eager(resource_changed::<super::pole::PoleParams>),
             ),
         );
 }
@@ -378,8 +383,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.length = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.length = change.value;
                 })
             ),
             label_small("Terrain width"),
@@ -388,8 +393,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.width = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.width = change.value;
                 })
             ),
             label_small("Max inclination (deg)"),
@@ -398,8 +403,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.max_inclination = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.max_inclination = change.value;
                 })
             ),
             label_small("Feature size (m)"),
@@ -408,8 +413,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.feature_size = change.value;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.feature_size = change.value;
                 })
             ),
             label_small("Terrain detail"),
@@ -418,8 +423,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<TerrainParams>| {
-                    params.detail = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.detail = change.value.round().max(1.0) as u32;
                 })
             ),
         ]

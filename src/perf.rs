@@ -242,6 +242,20 @@ mod bench {
         )
     }
 
+    /// One more frame, which must not re-author anything.
+    ///
+    /// Every row of the bench has to be read from a quiet scene, or it
+    /// measures the tail of the previous rebuild instead of its own edit. A
+    /// rebuild reaches every layer within the frame that triggered it, so one
+    /// quiet frame is the whole settle — a second frame of authoring means a
+    /// run condition is firing a frame late (see the `or_eager` note in
+    /// `terrain::plugin`).
+    fn settle(app: &mut App) {
+        app.update();
+        let authored = app.world().resource::<Perf>().total("author:");
+        assert!(authored < 0.5, "rebuilt again: {}", breakdown(app));
+    }
+
     /// Not an assertion — a measurement. Run with
     /// `cargo test perf::bench -- --ignored --nocapture`.
     #[test]
@@ -252,16 +266,7 @@ mod bench {
         app.update();
         println!("\ninitial build:       {}", breakdown(&app));
         println!("scene:               {}\n", scene_size(&mut app));
-
-        // Several, not one: a resource written during `PreUpdate` is still
-        // "changed" to a run condition evaluated the following frame, so the
-        // authoring settles a couple of frames after the last edit. The last
-        // of these is the real floor.
-        for i in 0..4 {
-            app.update();
-            println!("idle frame {i}:        {}", breakdown(&app));
-        }
-        println!();
+        settle(&mut app);
 
         // Each of these is a slider a user would drag. They are deliberately
         // spread across the dependency graph: a leaf param re-authors
@@ -295,11 +300,7 @@ mod bench {
             nudge(app.world_mut());
             app.update();
             println!("{name:<20} {}", breakdown(&app));
-            // Back to quiet before the next one, so each row is one edit's
-            // cost and not the tail of the previous one.
-            for _ in 0..3 {
-                app.update();
-            }
+            settle(&mut app);
         }
         println!("\nscene:               {}\n", scene_size(&mut app));
     }

@@ -132,7 +132,7 @@ pub fn named_children(world: &mut World, entity: Entity) -> Vec<(String, Entity)
 pub fn grown(params: VineyardParams) -> App {
     let mut app = scene_app();
     app.add_plugins(crate::elements::plugin);
-    params.insert(app.world_mut());
+    params.apply(app.world_mut());
     app.finish();
     app.cleanup();
     app.update();

@@ -57,10 +57,11 @@ use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_upd
 
 use super::util::mesh::MeshData;
 use super::util::outline::{Outline, outline_mesh};
-use super::util::{color, material};
+use super::util::{color, material, par_map};
 use super::{Grow, Rng};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
+use crate::ui::Staged;
 
 /// The mesh-library prefix this element registers its blades under.
 pub const PART: &str = "Leaf";
@@ -132,6 +133,15 @@ pub struct LeafConfig {
     /// How far this blade bends out of the drawing — see [`curl`]. Signed:
     /// a negative one cups and lifts where a positive one troughs and droops.
     pub curl: f32,
+    /// The unit draw [`curl`](Self::curl) was spread from.
+    ///
+    /// `f64` rather than `f32` to match the stream it came out of: rounding it
+    /// re-cuts a blade already hanging to a slightly different curl, and the
+    /// exported bytes with it.
+    ///
+    /// Not shape: the fields above are what a mesh is built from, and
+    /// [`LeafMetric`] reads this no more than a mesh does.
+    pub draw: f64,
 }
 
 /// How far a leaf's own curl strays from what [`LeafParams::curl`] asks for.
@@ -152,12 +162,13 @@ impl LeafConfig {
     /// The draw is the caller's because the curl is *per leaf*: a canopy of
     /// one curl repeated reads as a printed pattern, however good the curl is.
     pub fn new(params: &LeafParams, outline: usize, draw: f64) -> Self {
-        let spread =
-            CURL_SPREAD.start + draw.clamp(0.0, 1.0) * (CURL_SPREAD.end - CURL_SPREAD.start);
+        let draw = draw.clamp(0.0, 1.0);
+        let spread = CURL_SPREAD.start + draw * (CURL_SPREAD.end - CURL_SPREAD.start);
         Self {
             outline: (outline % SHAPES) as u32,
             detail: params.detail.max(1),
             curl: params.curl.max(0.0) * spread as f32,
+            draw,
         }
     }
 }
@@ -188,7 +199,7 @@ impl Metric<LeafConfig> for LeafMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -247,10 +258,26 @@ impl Default for LeafParams {
 pub fn plugin(app: &mut App) {
     app.init_resource::<LeafParams>().add_systems(
         PreUpdate,
-        build
-            .in_set(Grow::Scatter)
-            .run_if(configs_changed::<LeafConfig>.or_else(resource_changed::<LeafParams>)),
+        (
+            reauthor.run_if(resource_changed::<LeafParams>),
+            build.run_if(configs_changed::<LeafConfig>.or_eager(resource_changed::<LeafParams>)),
+        )
+            .chain()
+            .in_set(Grow::Scatter),
     );
+}
+
+/// Re-cuts every blade already hanging, in place.
+///
+/// [`shoot`](super::shoot) authors these configs, but re-running that layer to
+/// change two numbers on them would despawn and respawn the whole canopy — six
+/// figures of entities for an edit that moves no leaf. Each blade keeps the
+/// draw it was spread from so the params can be applied again without it.
+fn reauthor(params: Res<LeafParams>, mut leaves: Query<&mut LeafConfig>) {
+    for mut config in &mut leaves {
+        let next = LeafConfig::new(&params, config.outline as usize, config.draw);
+        config.set_if_neq(next);
+    }
 }
 
 // ─── Shape ──────────────────────────────────────────────────────────
@@ -409,16 +436,18 @@ pub(crate) fn build(
         &LeafMetric,
     );
 
-    let geometry = book
-        .representatives
-        .iter()
-        .enumerate()
-        .map(|(index, config)| {
-            let mesh = blade_mesh(config)
-                .with_context(|| format!("leaf shape {} could not be built", config.outline))?;
-            Ok(library.part(PART, index, mesh.to_mesh(), surface(config.outline)))
-        })
-        .collect::<anyhow::Result<Vec<Geometry>>>()?;
+    // The representatives are independent of each other, so they are cut in
+    // parallel and registered serially: `Assets<Mesh>` takes one writer.
+    let blades = par_map(&book.representatives, |_, config| {
+        blade_mesh(config)
+            .map(|blade| blade.to_mesh())
+            .with_context(|| format!("leaf shape {} could not be built", config.outline))
+    });
+
+    let mut geometry: Vec<Geometry> = Vec::with_capacity(book.len());
+    for (index, (config, blade)) in book.representatives.iter().zip(blades).enumerate() {
+        geometry.push(library.part(PART, index, blade?, surface(config.outline)));
+    }
 
     for ((_, entity, _), drew) in hung.iter().zip(&book.assignment) {
         commands
@@ -450,8 +479,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<LeafParams>| {
-                    params.variations = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.variations = change.value.round().max(1.0) as u32;
                 })
             ),
             label_small("Leaf detail"),
@@ -460,8 +489,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(8.0)
                 SliderPrecision(0)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<LeafParams>| {
-                    params.detail = change.value.round().max(1.0) as u32;
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.detail = change.value.round().max(1.0) as u32;
                 })
             ),
             label_small("Leaf curl"),
@@ -470,8 +499,8 @@ pub fn ui() -> impl Scene {
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<LeafParams>| {
-                    params.curl = change.value.max(0.0);
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.leaf.curl = change.value.max(0.0);
                 })
             ),
         ]
@@ -510,6 +539,7 @@ mod tests {
                     outline: i as u32,
                     detail: params().detail,
                     curl,
+                    draw: 0.0,
                 })
                 .unwrap_or_else(|e| panic!("leaf_{}: {e:#}", i + 1))
             })
