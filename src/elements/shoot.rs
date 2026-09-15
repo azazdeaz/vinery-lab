@@ -367,6 +367,10 @@ impl Default for ShootParams {
 }
 
 pub fn plugin(app: &mut App) {
+    // `SceneParams` is not gated on here although `build` reads the seed:
+    // `planting::plant` gates on it and respawns every vine when it moves, and
+    // `vine::build` hangs fresh shoots off them, so the seed arrives as a
+    // config change in the same frame.
     app.init_resource::<ShootParams>().add_systems(
         PreUpdate,
         (

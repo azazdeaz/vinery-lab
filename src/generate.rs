@@ -130,6 +130,10 @@ mod tests {
                 "a vine edit",
                 edited(|p| &mut p.vine, |vine| vine.trunk_height = 1.1),
             ),
+            (
+                "a seed edit",
+                edited(|p| &mut p.scene, |scene| scene.seed = 7),
+            ),
         ] {
             assert_eq!(edited, generated, "{what} drifted");
         }
