@@ -1,8 +1,7 @@
 """Walk a quadruped down the alleys of a generated vineyard.
 
-The vineyard and the quadruped are set up here; the route comes from `route`,
-the walking from `driver`, and the debug markers that show what the follower
-is doing from `markers`.
+The vineyard and the quadruped are set up here; the route comes from `route`
+and the walking from `driver`.
 
 The physics backend and the viewer are command-line choices, e.g.
 `--physics newton_mjwarp --viz newton`; `--help` lists the full launcher set.
@@ -29,7 +28,6 @@ from vinerylab.isaaclab import (
 )
 
 from driver import DECIMATION, SIM_DT, Driver
-from markers import DebugMarkers
 from newton_patches import fix_heightfield_offsets
 from route import alley_route
 
@@ -115,14 +113,12 @@ def design_scene() -> Articulation:
 def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: np.ndarray):
     """Runs the simulation loop."""
     driver = Driver(route, robot)
-    markers = DebugMarkers(route)
     driver.place()
 
     step = 0
     while sim.is_headless_or_exist_active_visualizer():
         if step % DECIMATION == 0:
             driver.control()
-            markers.show(robot, driver.target, driver.command)
         robot.write_data_to_sim()
         sim.step()
         robot.update(SIM_DT)
