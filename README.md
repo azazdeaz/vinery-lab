@@ -7,11 +7,11 @@
 This is a parametric vineyard generator. It generates USD scenes for robotics simulation. Mainly targeting Isaac Lab.
 
 **Try the parameter editor in your browser:
-[azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/)** — no
-install, needs WebGPU. It exports the same way the native editor does, by
+[azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/)** — needs WebGPU. It exports the same way the native editor does, by
 copying a config snippet; generating the USD itself stays local.
 
-<img width="2490" height="1471" alt="Screenshot from 2026-09-03 19-46-54" src="https://github.com/user-attachments/assets/ab6b0ed5-0165-4ae7-adcd-b4bd4752887a" />
+<img width="2452" height="1423" alt="isaaclab-3-0" src="https://github.com/user-attachments/assets/4de84929-f21f-49ad-bf08-99ff14379001" />
+
 
 
 ## Features
