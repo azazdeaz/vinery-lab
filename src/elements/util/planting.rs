@@ -2,7 +2,8 @@
 //!
 //! [`parcel`](super::parcel) solves *where* things go; this authors *what* is
 //! there. It walks the solved [`VineyardLayout`], draping it onto [`Ground`],
-//! and spawns one entity per vine and per post carrying that organ's config.
+//! and spawns one entity per vine, per post, and per span of wire strung
+//! between two posts, each carrying that organ's config.
 //!
 //! Terrain's placement helper, exactly as [`parcel`] is its layout helper: it
 //! owns no element identity of its own and is wired from [`terrain::plugin`]
@@ -46,6 +47,7 @@ use crate::elements::Rng;
 use crate::elements::pole;
 use crate::elements::terrain::Ground;
 use crate::elements::vine;
+use crate::elements::wire;
 
 use crate::elements::SceneParams;
 use crate::scene::{Order, PrimRoot, UsdType, placed};
@@ -89,7 +91,10 @@ const POLE_TILT: f64 = 0.02;
 /// draw actually buys is a row whose post tops don't sit on one perfect line,
 /// which is the thing that reads as a real vineyard from a distance at which
 /// nothing else here is visible.
-const POLE_SINK: f64 = 0.05;
+///
+/// The wires do not go down with it: [`row_wires`] adds a post's own sink back
+/// along its axis, so a trellis stays level over posts that are not.
+pub(crate) const POLE_SINK: f64 = 0.05;
 
 #[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
@@ -140,6 +145,7 @@ pub fn plant(
     parcel: Res<ParcelParams>,
     vine_params: Res<vine::VineParams>,
     pole_params: Res<pole::PoleParams>,
+    wire_params: Res<wire::WireParams>,
     layout: Res<VineyardLayout>,
     ground: Res<Ground>,
     root: Res<PrimRoot>,
@@ -167,6 +173,14 @@ pub fn plant(
         order += 1;
         Order(order)
     };
+    // Every post carries its wires at the same heights, so the stack is solved
+    // once for the parcel rather than per post.
+    let anchors = wire::anchors(
+        &wire_params,
+        pole_params.radius,
+        vine_params.trunk_height,
+        parcel.trellis_height,
+    );
 
     for (index, row) in layout.rows.iter().enumerate() {
         // A Scope, not an Xform: a row carries no transform of its own — its
@@ -192,12 +206,23 @@ pub fn plant(
                 ChildOf(group),
             ));
         }
-        for (name, transform) in row_poles(row, &ground, &mut pole_rng) {
+        let posts = row_poles(row, &ground, &mut pole_rng);
+        for (name, transform, _) in &posts {
+            commands.spawn((
+                Name::new(name.clone()),
+                *transform,
+                Visibility::default(),
+                pole::PoleConfig::new(&pole_params, &parcel),
+                next(),
+                ChildOf(group),
+            ));
+        }
+        for (name, transform, length) in row_wires(&posts, &anchors) {
             commands.spawn((
                 Name::new(name),
                 transform,
                 Visibility::default(),
-                pole::PoleConfig::new(&pole_params, &parcel),
+                wire::WireConfig { length },
                 next(),
                 ChildOf(group),
             ));
@@ -240,7 +265,10 @@ fn row_vines(
     plants
 }
 
-/// The posts of one row, named by post slot.
+/// The posts of one row, named by post slot, each with how deep it was driven.
+///
+/// The sink comes back out because [`row_wires`] has to undo it: it is the one
+/// part of a post's placement the trellis on it does not share.
 ///
 /// Every post is placed; nothing here is the posts' equivalent of
 /// [`PlantingParams::miss_rate`], because a missing post is a broken trellis
@@ -257,7 +285,7 @@ fn row_vines(
 /// millimeter on anything this terrain generates — but "a post sits on the
 /// ground" is worth being exactly true rather than nearly, since it is what
 /// every check of this placement rests on.
-fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Transform)> {
+fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Transform, f32)> {
     let (along, across) = (row.direction(), row.direction().perp());
     let yaw = row.direction().to_angle();
     let mut posts = Vec::new();
@@ -280,9 +308,53 @@ fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Transfor
                 tilt,
                 1.0,
             ),
+            sink,
         ));
     }
     posts
+}
+
+/// One wire span per panel per anchor, named `Wire_<panel>_<k>`.
+///
+/// A span leaves post `panel` at anchor `k` and runs straight to the same
+/// anchor on the next post, so the trellis follows the ground piecewise the
+/// way the posts do. Placed *on* the anchor it leaves, running up +Z to the one
+/// it reaches — the frame [`wire`] builds its geometry in.
+///
+/// A post's own sink is added back before the anchor is transformed by its
+/// frame: [`wire::anchors`] are heights above the ground, and a post driven
+/// deeper carries its staples up with it. Without that the fruiting wire would
+/// miss the cordons, which are planted on a ground that does not sink.
+fn row_wires(
+    posts: &[(String, Transform, f32)],
+    anchors: &[Vec3],
+) -> Vec<(String, Transform, f32)> {
+    let mut spans = Vec::new();
+    for (panel, pair) in posts.windows(2).enumerate() {
+        let [(_, from, from_sink), (_, to, to_sink)] = pair else {
+            continue;
+        };
+        for (k, anchor) in anchors.iter().enumerate() {
+            let start = from.transform_point(*anchor + Vec3::Z * *from_sink);
+            let run = to.transform_point(*anchor + Vec3::Z * *to_sink) - start;
+            let length = run.length();
+            // Two posts on one spot leave nothing to string between them, and
+            // no direction to string it along.
+            if length < 1e-6 {
+                continue;
+            }
+            spans.push((
+                format!("Wire_{panel:03}_{k}"),
+                Transform {
+                    translation: start,
+                    rotation: Quat::from_rotation_arc(Vec3::Z, run / length),
+                    scale: Vec3::ONE,
+                },
+                length,
+            ));
+        }
+    }
+    spans
 }
 
 /// How established a plant whose age draw came out at `age` is, or `None` if it
@@ -396,6 +468,7 @@ mod tests {
 
         assert!(names.contains(&"Vine_000".to_string()), "got {names:?}");
         assert!(names.contains(&"Pole_000".to_string()), "got {names:?}");
+        assert!(names.contains(&"Wire_000_0".to_string()), "got {names:?}");
         assert_eq!(
             names.iter().collect::<std::collections::HashSet<_>>().len(),
             names.len(),

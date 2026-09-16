@@ -108,6 +108,25 @@ class PoleCfg:
 
 
 @configclass
+class WireCfg:
+    """The wires strung from post to post, and what the vines are trained onto.
+
+    One *fruiting wire* on the post axis at `VineCfg.trunk_height` -- the head
+    height the cordons are tied along -- and above it `catch_wires` levels of
+    *pairs*, one wire either side of the post, that the season's shoots grow up
+    between. The levels are spread evenly from the fruiting wire to just under
+    `ParcelCfg.trellis_height`, so the top pair is the wire a hedger cuts to.
+
+    Each wire spans one panel, post to post, so a run follows the ground the
+    way the posts do. There is no `variations`: a trellis is strung from one
+    reel of wire, and every span is the same mesh stretched to its own length.
+    """
+
+    catch_wires: int = 2
+    radius: float = 0.0015
+
+
+@configclass
 class VineCfg:
     """The permanent woody framework of a grapevine.
 
@@ -228,6 +247,7 @@ class VineyardCfg(FileCfg):
     parcel: ParcelCfg = ParcelCfg()
     planting: PlantingCfg = PlantingCfg()
     pole: PoleCfg = PoleCfg()
+    wire: WireCfg = WireCfg()
     vine: VineCfg = VineCfg()
     shoot: ShootCfg = ShootCfg()
     leaf: LeafCfg = LeafCfg()
@@ -246,6 +266,7 @@ FRAGMENTS: tuple[tuple[str, type], ...] = (
     ("parcel", ParcelCfg),
     ("planting", PlantingCfg),
     ("pole", PoleCfg),
+    ("wire", WireCfg),
     ("vine", VineCfg),
     ("shoot", ShootCfg),
     ("leaf", LeafCfg),

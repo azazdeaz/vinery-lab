@@ -34,6 +34,7 @@ use crate::elements::ui as scene_ui;
 use crate::elements::util::parcel::ui as parcel_ui;
 use crate::elements::util::planting::ui as planting_ui;
 use crate::elements::vine::ui as vine_ui;
+use crate::elements::wire::ui as wire_ui;
 
 pub fn plugin(app: &mut App) {
     // Every element plugin is added before this one, so the live params are
@@ -131,6 +132,7 @@ fn params_panel() -> impl Scene {
                         section("Terrain", bsn_list![terrain_ui()]),
                         section("Parcel", bsn_list![parcel_ui()]),
                         section("Pole", bsn_list![pole_ui()]),
+                        section("Wire", bsn_list![wire_ui()]),
                         section("Vine", bsn_list![vine_ui()]),
                         section("Shoot", bsn_list![shoot_ui()]),
                         section("Leaf", bsn_list![leaf_ui()]),

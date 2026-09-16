@@ -19,6 +19,7 @@ from ._core import (
     TerrainParams,
     VineParams,
     VineyardParams,
+    WireParams,
     __version__,
 )
 
@@ -32,5 +33,6 @@ __all__ = [
     "TerrainParams",
     "VineParams",
     "VineyardParams",
+    "WireParams",
     "__version__",
 ]

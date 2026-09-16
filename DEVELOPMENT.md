@@ -120,7 +120,7 @@ there is no preview shape and export shape to keep in step.
 ## Elements
 
 The scene is built from **elements**, one per thing that exists in a vineyard
-(terrain, pole, vine, shoot, leaf, grape, weed).
+(terrain, pole, wire, vine, shoot, leaf, grape, weed).
 
 Parts are named the way viticulture names them: a vine's **trunk** rises from
 the ground to its **head**, where it turns into one or two **cordons** running
@@ -201,7 +201,8 @@ Every element is one layer of the same five-step pipeline:
    representative offers.
 
 `planting` starts it by placing a `VineConfig` and a `PoleConfig` on every slot
-the layout solved; `leaf` ends it, having nothing below to expand into.
+the layout solved, and a `WireConfig` on every span between two posts;
+`leaf` ends it, having nothing below to expand into.
 
 **Frames come from the representative; child configs are per instance.** Step 5
 is where the two halves meet. The structural skeleton — how many spurs, where
