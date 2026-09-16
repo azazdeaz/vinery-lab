@@ -34,7 +34,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 
 use crate::elements::util::{parcel, planting};
-use crate::elements::{Grow, SceneParams, leaf, pole, shoot, terrain, vine};
+use crate::elements::{Grow, SceneParams, leaf, pole, shoot, terrain, vine, wire};
 
 /// Set this (to anything) to turn the viewer's instrumentation on.
 pub const ENV: &str = "VINERYLAB_PERF";
@@ -152,18 +152,20 @@ fn note_changed_params(
     parcel_p: Res<parcel::ParcelParams>,
     planting_p: Res<planting::PlantingParams>,
     pole_p: Res<pole::PoleParams>,
+    wire_p: Res<wire::WireParams>,
     vine_p: Res<vine::VineParams>,
     shoot_p: Res<shoot::ShootParams>,
     leaf_p: Res<leaf::LeafParams>,
     ground: Res<terrain::Ground>,
     layout: Res<parcel::VineyardLayout>,
 ) {
-    let flags: [(&'static str, bool); 10] = [
+    let flags: [(&'static str, bool); 11] = [
         ("SceneParams", scene_p.is_changed()),
         ("TerrainParams", terrain_p.is_changed()),
         ("ParcelParams", parcel_p.is_changed()),
         ("PlantingParams", planting_p.is_changed()),
         ("PoleParams", pole_p.is_changed()),
+        ("WireParams", wire_p.is_changed()),
         ("VineParams", vine_p.is_changed()),
         ("ShootParams", shoot_p.is_changed()),
         ("LeafParams", leaf_p.is_changed()),

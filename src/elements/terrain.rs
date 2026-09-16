@@ -141,7 +141,8 @@ pub fn plugin(app: &mut App) {
                     .or_eager(resource_changed::<super::SceneParams>)
                     .or_eager(resource_changed::<parcel::VineyardLayout>)
                     .or_eager(resource_changed::<super::vine::VineParams>)
-                    .or_eager(resource_changed::<super::pole::PoleParams>),
+                    .or_eager(resource_changed::<super::pole::PoleParams>)
+                    .or_eager(resource_changed::<super::wire::WireParams>),
             ),
         );
 }

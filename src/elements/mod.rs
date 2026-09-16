@@ -29,6 +29,7 @@ pub mod shoot;
 pub mod terrain;
 pub mod util;
 pub mod vine;
+pub mod wire;
 
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
@@ -49,7 +50,7 @@ pub enum Grow {
     Layout,
     /// One config per plant and post, placed on the ground.
     Planting,
-    /// Quantizes the posts and builds their meshes.
+    /// Quantizes the posts and builds their meshes, and the wires between them.
     Poles,
     /// Quantizes the plants, builds their wood, and hangs a shoot config on
     /// every bud.
@@ -80,6 +81,7 @@ pub fn plugin(app: &mut App) {
     .add_plugins((
         terrain::plugin,
         pole::plugin,
+        wire::plugin,
         shoot::plugin,
         vine::plugin,
         leaf::plugin,
@@ -137,6 +139,7 @@ pub struct VineyardParams {
     pub parcel: util::parcel::ParcelParams,
     pub planting: util::planting::PlantingParams,
     pub pole: pole::PoleParams,
+    pub wire: wire::WireParams,
     pub vine: vine::VineParams,
     pub shoot: shoot::ShootParams,
     pub leaf: leaf::LeafParams,
@@ -155,6 +158,7 @@ impl VineyardParams {
         set(world, &self.parcel);
         set(world, &self.planting);
         set(world, &self.pole);
+        set(world, &self.wire);
         set(world, &self.vine);
         set(world, &self.shoot);
         set(world, &self.leaf);
@@ -172,6 +176,7 @@ impl VineyardParams {
             parcel: world.resource::<util::parcel::ParcelParams>().clone(),
             planting: world.resource::<util::planting::PlantingParams>().clone(),
             pole: world.resource::<pole::PoleParams>().clone(),
+            wire: world.resource::<wire::WireParams>().clone(),
             vine: world.resource::<vine::VineParams>().clone(),
             shoot: world.resource::<shoot::ShootParams>().clone(),
             leaf: world.resource::<leaf::LeafParams>().clone(),

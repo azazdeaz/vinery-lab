@@ -18,6 +18,7 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
+use crate::elements::wire::WireParams;
 use crate::generate::generate_scene;
 
 /// Formats with `{:#}` so `anyhow`'s full context chain reaches the Python
@@ -100,6 +101,22 @@ impl PoleParams {
     #[pyo3(signature = (radius=0.04, sides=8))]
     fn py_new(radius: f32, sides: u32) -> Self {
         Self { radius, sides }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+impl WireParams {
+    #[new]
+    #[pyo3(signature = (catch_wires=2, radius=0.0015))]
+    fn py_new(catch_wires: u32, radius: f32) -> Self {
+        Self {
+            catch_wires,
+            radius,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -267,6 +284,7 @@ pub struct PyVineyardParams {
     pub parcel: Py<ParcelParams>,
     pub planting: Py<PlantingParams>,
     pub pole: Py<PoleParams>,
+    pub wire: Py<WireParams>,
     pub vine: Py<VineParams>,
     pub shoot: Py<ShootParams>,
     pub leaf: Py<LeafParams>,
@@ -276,8 +294,8 @@ pub struct PyVineyardParams {
 impl PyVineyardParams {
     #[new]
     #[pyo3(signature = (
-        scene=None, terrain=None, parcel=None, planting=None, pole=None, vine=None,
-        shoot=None, leaf=None
+        scene=None, terrain=None, parcel=None, planting=None, pole=None, wire=None,
+        vine=None, shoot=None, leaf=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
@@ -287,6 +305,7 @@ impl PyVineyardParams {
         parcel: Option<Py<ParcelParams>>,
         planting: Option<Py<PlantingParams>>,
         pole: Option<Py<PoleParams>>,
+        wire: Option<Py<WireParams>>,
         vine: Option<Py<VineParams>>,
         shoot: Option<Py<ShootParams>>,
         leaf: Option<Py<LeafParams>>,
@@ -311,6 +330,10 @@ impl PyVineyardParams {
             pole: match pole {
                 Some(v) => v,
                 None => Py::new(py, PoleParams::default())?,
+            },
+            wire: match wire {
+                Some(v) => v,
+                None => Py::new(py, WireParams::default())?,
             },
             vine: match vine {
                 Some(v) => v,
@@ -377,6 +400,7 @@ impl PyVineyardParams {
             parcel: (*self.parcel.borrow(py)).clone(),
             planting: (*self.planting.borrow(py)).clone(),
             pole: (*self.pole.borrow(py)).clone(),
+            wire: (*self.wire.borrow(py)).clone(),
             vine: (*self.vine.borrow(py)).clone(),
             shoot: (*self.shoot.borrow(py)).clone(),
             leaf: (*self.leaf.borrow(py)).clone(),
@@ -399,6 +423,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ParcelParams>()?;
     m.add_class::<PlantingParams>()?;
     m.add_class::<PoleParams>()?;
+    m.add_class::<WireParams>()?;
     m.add_class::<VineParams>()?;
     m.add_class::<ShootParams>()?;
     m.add_class::<LeafParams>()?;

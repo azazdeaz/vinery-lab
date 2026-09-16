@@ -46,6 +46,10 @@ pub const WOOD: u32 = 0x5A4A38;
 /// them but their silhouette.
 pub const POLE: u32 = 0x8C8981;
 
+/// A trellis wire. Galvanized steel, lighter and cooler than a weathered post
+/// — enough to read as a separate thing where one crosses another.
+pub const WIRE: u32 = 0xA9ADAD;
+
 /// Bare cultivated ground between the rows. Dry loam, no cover crop yet.
 pub const GROUND: u32 = 0x6B5744;
 

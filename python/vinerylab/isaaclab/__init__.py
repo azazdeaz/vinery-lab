@@ -31,6 +31,7 @@ from .vineyard_cfg import (
     TerrainCfg,
     VineCfg,
     VineyardCfg,
+    WireCfg,
 )
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "TerrainCfg",
     "VineCfg",
     "VineyardCfg",
+    "WireCfg",
     "make_coupled_physics_cfg",
     "tune_shoots",
     "spawn_vineyard",

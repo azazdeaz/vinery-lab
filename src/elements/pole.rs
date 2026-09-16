@@ -17,6 +17,9 @@
 //! there. It is also what the layout gizmo already draws its posts to, so the
 //! geometry and the overlay agree without either being told about the other.
 //!
+//! [`wire`](super::wire) hangs its top pair a hand below that, so the tops of
+//! the posts stand clear of the trellis they carry.
+//!
 //! # Local frame
 //!
 //! Authored **standing on the origin**, running up +Z. Same convention as

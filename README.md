@@ -20,6 +20,7 @@ copying a config snippet; generating the USD itself stays local.
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
+ - Trellis wires: a fruiting wire along the cordons and paired catch wires above it, strung post to post down every row
  - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
  - Stray shoots — a share of the canopy the trellis failed to hold, leaning out into the alley or over the top wire — are exported as deformable curves a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
 

@@ -24,6 +24,7 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
+use crate::elements::wire::WireParams;
 
 /// One fragment's worth of `name=value` arguments.
 #[derive(Default)]
@@ -104,6 +105,12 @@ fn pole(p: &PoleParams, out: &mut Fields) {
     out.int("sides", p.sides as u64, d.sides as u64);
 }
 
+fn wire(p: &WireParams, out: &mut Fields) {
+    let d = WireParams::default();
+    out.int("catch_wires", p.catch_wires as u64, d.catch_wires as u64);
+    out.float("radius", p.radius, d.radius);
+}
+
 fn vine(p: &VineParams, out: &mut Fields) {
     let d = VineParams::default();
     out.int("variations", p.variations as u64, d.variations as u64);
@@ -141,7 +148,7 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     out.float("curl", p.curl, d.curl);
 }
 
-/// The eight fragments, as the attribute name and cfg class the snippet uses.
+/// The nine fragments, as the attribute name and cfg class the snippet uses.
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
@@ -149,7 +156,7 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     clippy::type_complexity,
     reason = "the table's shape is its documentation"
 )]
-const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 8] = [
+const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 9] = [
     ("scene", "SceneCfg", |p, out| scene(&p.scene, out)),
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),
     ("parcel", "ParcelCfg", |p, out| parcel(&p.parcel, out)),
@@ -157,6 +164,7 @@ const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 8] = [
         planting(&p.planting, out)
     }),
     ("pole", "PoleCfg", |p, out| pole(&p.pole, out)),
+    ("wire", "WireCfg", |p, out| wire(&p.wire, out)),
     ("vine", "VineCfg", |p, out| vine(&p.vine, out)),
     ("shoot", "ShootCfg", |p, out| shoot(&p.shoot, out)),
     ("leaf", "LeafCfg", |p, out| leaf(&p.leaf, out)),
@@ -238,6 +246,7 @@ mod tests {
             format!("{:?}", params.parcel),
             format!("{:?}", params.planting),
             format!("{:?}", params.pole),
+            format!("{:?}", params.wire),
             format!("{:?}", params.vine),
             format!("{:?}", params.shoot),
             format!("{:?}", params.leaf),
