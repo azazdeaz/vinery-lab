@@ -961,7 +961,12 @@ pub(crate) fn build(
                 Name::new(bud.name.clone()),
                 placed(bud.position, bud.yaw + turn * bud.spread, tilt, bud.scale),
                 Visibility::default(),
-                shoot::ShootConfig::new(&shoot_params, vigour, spacing),
+                shoot::ShootConfig::new(
+                    &shoot_params,
+                    vigour,
+                    spacing,
+                    shoot::stray_pitch(&shoot_params, scene.seed, shoot_order),
+                ),
                 Order(shoot_order),
             ));
         }

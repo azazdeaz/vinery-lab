@@ -206,7 +206,7 @@ impl ShootParams {
         detail=40,
         internode=0.07,
         leaf_droop=0.35,
-        flexible=0.0,
+        stray=0.0,
     ))]
     fn py_new(
         variations: u32,
@@ -217,7 +217,7 @@ impl ShootParams {
         detail: u32,
         internode: f32,
         leaf_droop: f32,
-        flexible: f32,
+        stray: f32,
     ) -> Self {
         Self {
             variations,
@@ -228,7 +228,7 @@ impl ShootParams {
             detail,
             internode,
             leaf_droop,
-            flexible,
+            stray,
         }
     }
 

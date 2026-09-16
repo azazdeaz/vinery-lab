@@ -44,10 +44,12 @@ VINEYARD_CFG = VineyardCfg(
     # A small field, so a wave to match: roughly 0.8 m of relief across it.
     terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=1.7),
-    # A few canes for the robot to push through. They bend under
-    # `--physics newton_flexible` and under nothing else.
-    shoot=ShootCfg(flexible=0.05),
+    # A few stray shoots reaching into the alley for the robot to push
+    # through. They bend under `--physics newton_flexible` and under nothing
+    # else.
+    shoot=ShootCfg(stray=0.05),
 )
+
 VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
 
