@@ -9,6 +9,7 @@ the body labels Newton's rod importer derives from it.
 from __future__ import annotations
 
 import re
+import types
 
 import pytest
 
@@ -19,6 +20,10 @@ try:
     from vinerylab.isaaclab import physics
 except ImportError:
     pytest.skip("Isaac Lab is not installed", allow_module_level=True)
+
+from isaaclab.physics import PhysicsEvent  # noqa: E402
+from isaaclab_newton.physics import NewtonManager  # noqa: E402
+from newton import JointType  # noqa: E402
 
 VINEYARD = "/World/Vineyard"
 ROBOT = "/World/envs/env_0/Robot"
@@ -70,3 +75,44 @@ def test_the_shoots_step_finer_than_the_robot(cfg, entries):
     cost off the robot and off the coupling passes."""
     assert cfg.num_substeps >= 4
     assert entries["shoots"].substeps > entries["rigid"].substeps
+
+
+@pytest.fixture
+def builder(monkeypatch) -> object:
+    """A model builder holding one rod joint between two of something else.
+
+    Four slots per rod, starting at the joint's own DoF: a walk that reads the
+    start index or the slot count wrong writes into a neighbouring joint
+    instead, and nothing about that fails loudly.
+    """
+    builder = types.SimpleNamespace(
+        joint_type=[JointType.D6, JointType.ROD, JointType.REVOLUTE],
+        joint_qd_start=[0, 6, 10],
+        joint_target_ke=[1.0] * 6 + [200.0, 100.0, 4.0, 2.0] + [1.0],
+        joint_target_kd=[0.0] * 11,
+    )
+    monkeypatch.setattr(NewtonManager, "_builder", builder, raising=False)
+    # `tune_shoots` registers a callback per call, and nothing here deregisters.
+    NewtonManager.clear_callbacks()
+    return builder
+
+
+def test_only_a_rods_angular_slots_are_stiffened(builder):
+    """Stretch and shear already hold a cane together; raising them only
+    shortens the substep it survives. The two angular slots are what a cane
+    stands up with."""
+    physics.tune_shoots(stiffen=10.0, damping=0.0)
+    NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
+
+    assert builder.joint_target_ke == pytest.approx([1.0] * 6 + [200.0, 100.0, 40.0, 20.0] + [1.0])
+
+
+def test_every_rod_slot_takes_damping_from_its_own_stiffness(builder):
+    """The four slots differ by orders of magnitude, so one damping in absolute
+    units would be either nothing or a clamp. A fraction of each slot's own
+    stiffness is a time constant, and the same number then means the same
+    settling in all four."""
+    physics.tune_shoots(stiffen=1.0, damping=0.1)
+    NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
+
+    assert builder.joint_target_kd == pytest.approx([0.0] * 6 + [20.0, 10.0, 0.4, 0.2] + [0.0])

@@ -25,6 +25,7 @@ from vinerylab.isaaclab import (
     TerrainCfg,
     VineyardCfg,
     make_coupled_physics_cfg,
+    tune_shoots,
 )
 
 from driver import DECIMATION, SIM_DT, Driver
@@ -133,6 +134,7 @@ def main():
     sim_cfg = sim_utils.SimulationCfg(
         dt=SIM_DT, device=args_cli.device, physics=physics_cfg(args_cli.physics)
     )
+    flexible = args_cli.physics == FLEXIBLE
     # The launcher rebuilds the physics config from this argument, and knows
     # only Isaac Lab's own backend names; cleared, it keeps the one built above.
     args_cli.physics = None
@@ -143,6 +145,9 @@ def main():
         robot = design_scene()
         # Look down the first alley from behind the robot's start.
         sim.set_camera_view(eye=(route[0] + [4.0, 4.0, 3.0]).tolist(), target=route[0].tolist())
+        # The shoots are built with the reset, and want their rods tuned first.
+        if flexible:
+            tune_shoots()
         # Play the simulator
         sim.reset()
         fix_heightfield_offsets()

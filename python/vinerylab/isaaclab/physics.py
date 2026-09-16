@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from isaaclab.physics import PhysicsEvent
 from isaaclab_contrib.coupling import (
     CouplerEntryCfg,
     CouplerProxyCfg,
@@ -53,6 +54,74 @@ off the coupling passes between the two.
 """
 
 
+SHOOT_STIFFEN = 100.0
+"""What a rod joint's bend and twist stiffness is multiplied by.
+
+Not a preference. VBD solves a rod chain with `VBDSolverCfg.iterations` (ten)
+Gauss-Seidel sweeps per substep, and ten sweeps leave a cane's joints holding
+about an eighth of the stiffness they were given; what a sweep does not
+converge becomes velocity. At the stiffness the cable material implies -- about
+3 N.m/rad for a 9 mm shoot -- that eighth is a hinge too soft to carry the
+cane. It swings from its first few joints as a pendulum, through a metre of
+height at the pendulum's own period, for as long as the run lasts. Multiplied
+by this it droops a few centimetres and stops. Forty sweeps at thirty times
+hold the same pose for about twice the cost; four hundred at the authored
+stiffness restore the droop but not the calm.
+
+Bend and twist only. Stretch and shear already hold the chain together, and
+raising them shortens the substep a rod stays stable at -- see `SUBSTEPS`.
+"""
+
+SHOOT_DAMPING = 0.01
+"""Damping a rod joint takes as a fraction of its own stiffness, in seconds.
+
+Newton builds every rod joint undamped -- the cable importer never passes
+`add_rod` a damping, and the curve material schema has no attribute to carry
+one -- so a stiffened cane rings around its drooped pose instead of arriving at
+it. This much takes the ring out within a second or two.
+
+It cannot be more. VBD folds damping into every sweep's stiffness as `kd / dt`,
+and a chain that stiff converges worse in ten sweeps, not better: at a tenth
+the canes give way further under their own weight than undamped, at a fifth
+they swing harder than with no damping at all. Damping in this solver softens
+a rod before it slows one.
+"""
+
+
+def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) -> None:
+    """Stiffen every rod joint against gravity and give it damping.
+
+    Call once from inside the running app and **before the first
+    `SimulationContext.reset()`**: that is what builds the model, and the
+    solver copies a rod's stiffness and damping out of the model when it is
+    constructed and never looks again. The only window to write them is the
+    builder's -- after the importer has filled it, before it is finalized --
+    and Isaac Lab dispatches `MODEL_INIT` in exactly that window.
+
+    Without this a cane swings from its base like a pendulum for as long as
+    the run lasts; see `SHOOT_STIFFEN`.
+    """
+    # Imported here and not at module scope: `newton` brings `pxr` with it, and
+    # Kit's own `pxr` wins the import only if nothing loaded the pip one first.
+    from isaaclab_newton.physics import NewtonManager
+    from newton import JointType
+
+    def tune(_payload) -> None:
+        builder = NewtonManager._builder
+        for joint, kind in enumerate(builder.joint_type):
+            if kind != JointType.ROD:
+                continue
+            # A rod's four slots, in the builder's order: stretch, shear, bend,
+            # twist.
+            dof = builder.joint_qd_start[joint]
+            for slot in (dof + 2, dof + 3):
+                builder.joint_target_ke[slot] *= stiffen
+            for slot in range(dof, dof + 4):
+                builder.joint_target_kd[slot] = damping * builder.joint_target_ke[slot]
+
+    NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
+
+
 def make_coupled_physics_cfg(
     vineyard: str,
     robot: str,
@@ -70,7 +139,8 @@ def make_coupled_physics_cfg(
             straight through one.
 
     Returns:
-        A physics config to hand to `SimulationCfg(physics=...)`.
+        A physics config to hand to `SimulationCfg(physics=...)`. The shoots
+        also want `tune_shoots` called once the app is up.
     """
     return NewtonCfg(
         solver_cfg=CouplerProxyCfg(
