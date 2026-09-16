@@ -161,8 +161,11 @@ class ShootParams:
     anywhere: it comes out of each leaf's age, as a scale on a prototype of
     fixed area.
 
-    `flexible` is the fraction of shoots exported as a deformable curve rather
-    than a mesh -- bare canes, without leaves, that a physics engine bends.
+    `stray` is the fraction of shoots the trellis failed to hold -- missed by
+    shoot positioning, so grown out into the alley, or by hedging, so grown on
+    past the top wire. A stray shoot leans out of the canopy, longer than the
+    shoots beside it, and is exported as a deformable curve that a physics
+    engine bends.
     """
 
     variations: int
@@ -173,7 +176,7 @@ class ShootParams:
     detail: int
     internode: float
     leaf_droop: float
-    flexible: float
+    stray: float
 
     def __init__(
         self,
@@ -185,7 +188,7 @@ class ShootParams:
         detail: int = 40,
         internode: float = 0.07,
         leaf_droop: float = 0.35,
-        flexible: float = 0.0,
+        stray: float = 0.0,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

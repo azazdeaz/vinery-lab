@@ -334,8 +334,8 @@ owns the configs the layer above placed, so it runs a `reauthor` pass that
 writes its own params onto them with `set_if_neq` and leaves everything else —
 the position, the draws they were authored from — exactly where it was. Editing
 a leaf param therefore re-cuts the blades instead of replanting the vineyard to
-reach them. Only a param that reaches no config field (`ShootParams::flexible`,
-or any `variations`) still needs a `resource_changed` on the layer's own build.
+reach them. Only a param that reaches no config field (any `variations`) still
+needs a `resource_changed` on the layer's own build.
 
 **Combine run conditions with `or_eager`, never `or_else`.** `or_else`
 short-circuits, and a condition system that does not run does not advance its

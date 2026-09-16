@@ -21,12 +21,11 @@ copying a config snippet; generating the USD itself stays local.
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
  - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
- - A share of the shoots can be exported as deformable curves — bare canes a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
+ - Stray shoots — a share of the canopy the trellis failed to hold, leaning out into the alley or over the top wire — are exported as deformable curves a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
 
 ## Upcoming features
  - Cover crops and weeds
  - Optinally use PointInstancer to spawn organs without a unique prim path
- - Leaves on the flexible shoots, and shoots aimed into the alley rather than drawn at random
  - Simulate human workers and other safety critical scenarios
 
 ## Planned features
