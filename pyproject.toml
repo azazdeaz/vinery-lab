@@ -37,7 +37,7 @@ known-first-party = ["vinerylab"]
 [tool.ruff.lint.per-file-ignores]
 # The demo mirrors Isaac Lab's own example layout, which groups imports by
 # subsystem rather than by isort's rules.
-"examples/isaaclab_demo/*" = ["I001"]
+"examples/*_demo/*" = ["I001"]
 
 [tool.mypy]
 files = ["python/vinerylab"]
