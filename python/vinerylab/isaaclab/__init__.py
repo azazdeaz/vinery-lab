@@ -19,7 +19,7 @@ except ImportError as err:  # pragma: no cover - depends on the environment
         " without it."
     ) from err
 
-from .physics import CABLE, make_coupled_physics_cfg
+from .physics import CABLE, make_coupled_physics_cfg, tune_shoots
 from .vineyard import spawn_vineyard
 from .vineyard_cfg import (
     LeafCfg,
@@ -45,5 +45,6 @@ __all__ = [
     "VineCfg",
     "VineyardCfg",
     "make_coupled_physics_cfg",
+    "tune_shoots",
     "spawn_vineyard",
 ]
