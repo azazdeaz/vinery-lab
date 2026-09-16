@@ -53,6 +53,12 @@ The same demo on the PhysX backend (it doesn't support flexible shoots)
 uv run main.py --physics physx
 ```
 
+Drive a straddling robot down every row
+```bash
+cd examples/straddler_demo/
+uv run main.py
+```
+
 
 ## How it works (main points)
 
