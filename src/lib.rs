@@ -10,6 +10,9 @@ pub mod elements;
 pub mod generate;
 pub mod perf;
 pub mod quantize;
+// Pipes frames to an `ffmpeg` child process, which the web has neither of.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod record;
 pub mod scene;
 pub mod snippet;
 pub mod ui;
