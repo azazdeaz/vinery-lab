@@ -10,6 +10,7 @@ Isaac Lab integration lives in the `vinerylab.isaaclab` subpackage and is
 """
 
 from ._core import (
+    CoverParams,
     LeafParams,
     ParcelParams,
     PlantingParams,
@@ -19,11 +20,13 @@ from ._core import (
     TerrainParams,
     VineParams,
     VineyardParams,
+    WeedParams,
     WireParams,
     __version__,
 )
 
 __all__ = [
+    "CoverParams",
     "LeafParams",
     "ParcelParams",
     "PlantingParams",
@@ -33,6 +36,7 @@ __all__ = [
     "TerrainParams",
     "VineParams",
     "VineyardParams",
+    "WeedParams",
     "WireParams",
     "__version__",
 ]

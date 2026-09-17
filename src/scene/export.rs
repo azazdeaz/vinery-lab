@@ -215,11 +215,16 @@ fn build_node(
         return Ok(None);
     };
 
-    let children: Vec<Node> = prim
+    let mut children: Vec<Node> = prim
         .children
         .iter()
         .filter_map(|child| build_node(*child, prims, solid).transpose())
         .collect::<anyhow::Result<_>>()?;
+    // In name order rather than spawn order: a layer that rebuilds itself
+    // respawns its subtree after its siblings, and a document keyed on its
+    // bytes must not move a prim for that. Sibling names are unique, so the
+    // order is total.
+    children.sort_by(|a, b| a.name.cmp(&b.name));
 
     // The invariant `instanceable` rests on. An instanceable prim's
     // descendants are not addressable, so a referencing prim that grew
@@ -413,6 +418,21 @@ mod tests {
 
         let err = scene_doc(&mut world).unwrap_err().to_string();
         assert!(err.contains("must be leaves"), "got: {err}");
+    }
+
+    /// A layer that rebuilds itself respawns its subtree after its siblings;
+    /// the document has to read the same whichever layer moved last.
+    #[test]
+    fn siblings_are_emitted_in_name_order_whatever_order_they_were_spawned_in() {
+        let mut world = world();
+        let root = root(&mut world);
+        world.spawn((Name::new("Planting"), ChildOf(root)));
+        world.spawn((Name::new("Cover"), ChildOf(root)));
+        world.spawn((Name::new("Terrain"), ChildOf(root)));
+
+        let doc = scene_doc(&mut world).unwrap();
+        let names: Vec<&str> = doc.root.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Cover", "Planting", "Terrain"]);
     }
 
     /// The viewer's camera, lights and UI are unnamed, and neither they nor

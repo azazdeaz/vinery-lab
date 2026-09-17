@@ -15,8 +15,12 @@ use bevy::clipboard::Clipboard;
 use bevy::feathers::{
     FeathersPlugins,
     containers::{group, group_body, group_header, pane, pane_body, pane_header},
-    controls::{ButtonVariant, FeathersButton, FeathersDisclosureToggle},
+    controls::{
+        ButtonVariant, FeathersButton, FeathersDisclosureToggle, FeathersMenu, FeathersMenuButton,
+        FeathersMenuItem, FeathersMenuPopup,
+    },
     dark_theme::create_dark_theme,
+    display::label_small,
     theme::{ThemeBackgroundColor, ThemedText, UiTheme},
     tokens,
 };
@@ -26,6 +30,7 @@ use bevy::ui_widgets::{Activate, ScrollArea, ValueChange, checkbox_self_update};
 
 use crate::elements::{Grow, VineyardParams};
 
+use crate::elements::cover::ui as cover_ui;
 use crate::elements::leaf::ui as leaf_ui;
 use crate::elements::pole::ui as pole_ui;
 use crate::elements::shoot::ui as shoot_ui;
@@ -34,6 +39,7 @@ use crate::elements::ui as scene_ui;
 use crate::elements::util::parcel::ui as parcel_ui;
 use crate::elements::util::planting::ui as planting_ui;
 use crate::elements::vine::ui as vine_ui;
+use crate::elements::weed::ui as weed_ui;
 use crate::elements::wire::ui as wire_ui;
 
 pub fn plugin(app: &mut App) {
@@ -44,7 +50,78 @@ pub fn plugin(app: &mut App) {
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(Staged(live))
         .add_systems(Startup, params_panel_list.spawn())
-        .add_systems(PreUpdate, commit.before(Grow::Terrain));
+        .add_systems(PreUpdate, commit.before(Grow::Terrain))
+        .add_systems(Update, sync_dropdown_captions);
+}
+
+/// Marks a dropdown's caption, with the read that keeps it current.
+#[derive(Component, Clone, Copy)]
+pub struct DropdownCaption(fn(&VineyardParams) -> &str);
+
+/// Blank, and only because a scene template constructs its components from
+/// their defaults before patching them; every dropdown patches the read in.
+impl Default for DropdownCaption {
+    fn default() -> Self {
+        Self(|_| "")
+    }
+}
+
+/// A choice among named options: a menu button showing the current one,
+/// opening onto the rest.
+///
+/// `read` says which option the params hold and `write` stores a pick; both
+/// address [`Staged`], like a slider does. The caption is not set by the pick
+/// but read back from the params every frame by [`sync_dropdown_captions`],
+/// so it is right however the params came to change and needs no walk from
+/// a menu item back to the button it belongs to.
+pub fn dropdown(
+    label: &'static str,
+    options: &'static [&'static str],
+    read: fn(&VineyardParams) -> &str,
+    write: fn(&mut VineyardParams, &'static str),
+) -> impl Scene {
+    let items: Vec<_> = options
+        .iter()
+        .map(|name| {
+            let name: &'static str = name;
+            bsn! {
+                (
+                    @FeathersMenuItem { @caption: bsn! { Text(name) ThemedText } }
+                    on(move |_activate: On<Activate>, mut params: ResMut<Staged>| {
+                        write(&mut params.0, name);
+                    })
+                )
+            }
+        })
+        .collect();
+    bsn! {
+        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
+        Children [
+            label_small(label),
+            (
+                @FeathersMenu
+                Children [
+                    (
+                        @FeathersMenuButton {
+                            @caption: bsn! { (Text("") ThemedText DropdownCaption(read)) }
+                        }
+                        Node { flex_grow: 1.0 }
+                    ),
+                    (@FeathersMenuPopup Children [ {items} ]),
+                ]
+            ),
+        ]
+    }
+}
+
+/// Shows every dropdown the option its params currently hold.
+fn sync_dropdown_captions(staged: Res<Staged>, mut captions: Query<(&DropdownCaption, &mut Text)>) {
+    for (caption, mut text) in &mut captions {
+        let current = (caption.0)(&staged.0);
+        if text.0 != current {
+            text.0 = current.to_string();
+        }
+    }
 }
 
 /// How long a staged value has to hold still before it reaches the scene.
@@ -137,6 +214,8 @@ fn params_panel() -> impl Scene {
                         section("Shoot", bsn_list![shoot_ui()]),
                         section("Leaf", bsn_list![leaf_ui()]),
                         section("Planting", bsn_list![planting_ui()]),
+                        section("Cover", bsn_list![cover_ui()]),
+                        section("Weeds", bsn_list![weed_ui()]),
                     ]
                 ),
                 // Outside the scroll area, so it stays reachable however far
@@ -322,5 +401,72 @@ mod tests {
             world.flush();
             assert_eq!(hidden(world), folded, "after toggling to {value}");
         }
+    }
+
+    fn one_dropdown() -> impl SceneList {
+        bsn_list![dropdown(
+            "Kind",
+            &crate::elements::cover::Kind::NAMES,
+            |params| &params.cover.kind,
+            |params, name| params.cover.kind = name.to_string(),
+        )]
+    }
+
+    /// The caption a dropdown shows, in a world with the params it reads.
+    fn caption(world: &mut World) -> String {
+        world
+            .query_filtered::<&Text, With<DropdownCaption>>()
+            .single(world)
+            .expect("one caption")
+            .0
+            .clone()
+    }
+
+    /// A dropdown's two halves, neither of which a compile can check: the
+    /// caption follows the params, and activating an item writes them.
+    #[test]
+    fn a_dropdown_shows_the_current_choice_and_writes_a_pick() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::scene::ScenePlugin,
+        ))
+        .init_asset::<bevy::text::Font>()
+        .init_asset::<Image>()
+        .insert_resource(Staged(VineyardParams::default()))
+        .add_systems(Startup, one_dropdown.spawn())
+        .add_systems(Update, sync_dropdown_captions);
+        app.update();
+        app.update();
+        assert_eq!(
+            caption(app.world_mut()),
+            "spontaneous",
+            "the default reads through"
+        );
+
+        // The item reading "sown": its label hangs somewhere under the item
+        // that carries the observer.
+        let world = app.world_mut();
+        let label = world
+            .query::<(Entity, &Text)>()
+            .iter(world)
+            .find(|(_, text)| text.0 == "sown")
+            .map(|(entity, _)| entity)
+            .expect("an item reads sown");
+        let mut item = label;
+        while !world.entity(item).contains::<bevy::ui_widgets::MenuItem>() {
+            item = world
+                .entity(item)
+                .get::<ChildOf>()
+                .expect("the label hangs under an item")
+                .parent();
+        }
+        world.trigger(Activate { entity: item });
+        world.flush();
+        assert_eq!(world.resource::<Staged>().cover.kind, "sown");
+
+        app.update();
+        assert_eq!(caption(app.world_mut()), "sown", "and the caption follows");
     }
 }

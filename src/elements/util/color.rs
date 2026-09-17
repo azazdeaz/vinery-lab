@@ -50,14 +50,33 @@ pub const POLE: u32 = 0x8C8981;
 /// — enough to read as a separate thing where one crosses another.
 pub const WIRE: u32 = 0xA9ADAD;
 
-/// Bare cultivated ground between the rows. Dry loam, no cover crop yet.
+/// Bare cultivated ground between the rows. Dry loam.
 pub const GROUND: u32 = 0x6B5744;
+
+/// A living sward: the grass of a grassed alley. Lighter and yellower than a
+/// vine blade, which is what separates the floor from the canopy above it.
+pub const SWARD: u32 = 0x5F8C3C;
+
+/// The same sward dead on its feet — the straw a Mediterranean alley is from
+/// June to the autumn rains. What [`SWARD`] is mixed toward as it dries.
+pub const STRAW: u32 = 0xB8A46B;
+
+/// Weed foliage. Between the sward and a vine blade, so a plant in the strip
+/// reads as neither.
+pub const WEED: u32 = 0x4E7A31;
 
 // ─── Conversion ─────────────────────────────────────────────────────
 
 /// An `0xRRGGBB` sRGB triple as the linear RGB both consumers want.
 pub fn srgb(hex: u32) -> [f32; 3] {
     [16, 8, 0].map(|shift| linear(((hex >> shift) & 0xFF) as f32 / 255.0))
+}
+
+/// `a` blended `t` of the way toward `b`, channel by channel. Both linear,
+/// which is where a blend is right — mixing sRGB values darkens the middle.
+pub fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0);
+    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
 }
 
 /// One channel of the inverse sRGB transfer function.
@@ -128,6 +147,16 @@ mod tests {
     fn srgb_keeps_its_channels_in_order() {
         let [r, g, b] = srgb(0xFF7F00);
         assert!(r > g && g > b, "got {r}, {g}, {b}");
+    }
+
+    #[test]
+    fn mix_runs_from_one_end_to_the_other_and_no_further() {
+        let (a, b) = (srgb(SWARD), srgb(STRAW));
+        assert_eq!(mix(a, b, 0.0), a);
+        assert_eq!(mix(a, b, 1.0), b);
+        assert_eq!(mix(a, b, 7.0), b, "clamped");
+        let mid = mix(a, b, 0.5);
+        assert!((0..3).all(|i| (mid[i] - (a[i] + b[i]) / 2.0).abs() < 1e-6));
     }
 
     fn drift(base: u32, seed: u64) -> [f32; 3] {

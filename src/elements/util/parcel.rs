@@ -133,6 +133,68 @@ impl Row {
                 .map(move |v| ground.lift(panel_start + dir * (vine_step * (v as f32 + 0.5))))
         })
     }
+
+    /// The strip of ground along this row reaching `half_width` either side
+    /// of the trunks — the under-vine strip.
+    pub fn band(&self, half_width: f32) -> Band {
+        Band {
+            start: self.start,
+            end: self.end,
+            half_width,
+        }
+    }
+}
+
+/// A strip of ground: a centerline in plan view and how far it reaches either
+/// side of it.
+///
+/// A row's under-vine strip is one, the alley between two rows is one, and so
+/// is a tile of sward — anything placed *within* a zone rather than *along* a
+/// line takes its frame from here. See [`scatter`](super::scatter).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Band {
+    pub start: Vec2,
+    pub end: Vec2,
+    pub half_width: f32,
+}
+
+impl Band {
+    pub fn length(&self) -> f32 {
+        self.start.distance(self.end)
+    }
+
+    /// Unit vector along the band, in plan view.
+    pub fn direction(&self) -> Vec2 {
+        (self.end - self.start).normalize_or_zero()
+    }
+
+    /// Unit vector across the band: a quarter turn counter-clockwise from
+    /// [`direction`](Self::direction).
+    pub fn across(&self) -> Vec2 {
+        self.direction().perp()
+    }
+
+    /// `p` in the band's own frame: meters along from `start`, meters across
+    /// from the centerline.
+    pub fn local(&self, p: Vec2) -> Vec2 {
+        let d = p - self.start;
+        Vec2::new(d.dot(self.direction()), d.dot(self.across()))
+    }
+
+    pub fn contains(&self, p: Vec2) -> bool {
+        let local = self.local(p);
+        (0.0..=self.length()).contains(&local.x) && local.y.abs() <= self.half_width
+    }
+}
+
+/// The alley between two neighbouring rows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Alley {
+    /// The row on its one side: alley `k` lies between rows `k` and `k + 1`.
+    pub index: usize,
+    /// The whole width between the two rows' centerlines. A row's own strip
+    /// is the caller's to subtract.
+    pub band: Band,
 }
 
 /// The solved row layout: a set of parallel rows filling the headland-inset
@@ -144,6 +206,43 @@ pub struct VineyardLayout {
     /// The planting rectangle: the terrain's extent, inset by `headland`.
     pub bounds: Rect,
     pub rows: Vec<Row>,
+    /// The spacing the rows were solved at, in meters. What says whether two
+    /// consecutive rows are neighbours — see [`alleys`](Self::alleys).
+    pub row_spacing: f32,
+}
+
+impl VineyardLayout {
+    /// The alley between every pair of neighbouring rows.
+    ///
+    /// Rows are listed in the order they were swept, so neighbours are
+    /// consecutive — except across a row that was dropped for being too
+    /// short, which leaves a gap wider than the spacing and no alley in it.
+    ///
+    /// On a parcel cut at an angle the two rows are clipped at different
+    /// points, so the centerline joins the midpoints of their ends and runs a
+    /// little past the shorter row; anything placed in a band still checks
+    /// [`bounds`](Self::bounds).
+    pub fn alleys(&self) -> Vec<Alley> {
+        self.rows
+            .windows(2)
+            .enumerate()
+            .filter_map(|(index, pair)| {
+                let [a, b] = pair else { return None };
+                let width = (b.start - a.start).dot(a.direction().perp()).abs();
+                if width > 1.5 * self.row_spacing {
+                    return None;
+                }
+                Some(Alley {
+                    index,
+                    band: Band {
+                        start: (a.start + b.start) / 2.0,
+                        end: (a.end + b.end) / 2.0,
+                        half_width: width / 2.0,
+                    },
+                })
+            })
+            .collect()
+    }
 }
 
 /// Re-solves [`VineyardLayout`] from `parcel` and `terrain`. Called from
@@ -171,6 +270,7 @@ fn solve(parcel: &ParcelParams, terrain: &TerrainParams) -> VineyardLayout {
         return VineyardLayout {
             bounds: Rect::from_center_size(extent.center(), Vec2::ZERO),
             rows: Vec::new(),
+            row_spacing: parcel.row_spacing,
         };
     }
 
@@ -210,7 +310,11 @@ fn solve(parcel: &ParcelParams, terrain: &TerrainParams) -> VineyardLayout {
         })
         .collect();
 
-    VineyardLayout { bounds, rows }
+    VineyardLayout {
+        bounds,
+        rows,
+        row_spacing,
+    }
 }
 
 /// Divides a row into panels close to `post_spacing` long, then each panel
@@ -552,5 +656,59 @@ mod tests {
         let (t0, t1) = clip_line(Vec2::ZERO, Vec2::X, rect).unwrap();
         assert!((t0 - (-1.0)).abs() < 1e-5);
         assert!((t1 - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_band_measures_points_in_its_own_frame() {
+        let band = Band {
+            start: Vec2::new(0.0, 0.0),
+            end: Vec2::new(0.0, 10.0),
+            half_width: 1.0,
+        };
+        // Along +Y, so "across" is a quarter turn on: -X.
+        assert!((band.across() - Vec2::new(-1.0, 0.0)).length() < 1e-6);
+        let local = band.local(Vec2::new(-0.5, 4.0));
+        assert!((local - Vec2::new(4.0, 0.5)).length() < 1e-6);
+        assert!(band.contains(Vec2::new(0.9, 9.9)));
+        assert!(!band.contains(Vec2::new(1.1, 5.0)));
+        assert!(!band.contains(Vec2::new(0.0, 10.1)));
+    }
+
+    #[test]
+    fn an_alley_lies_between_every_pair_of_neighbouring_rows() {
+        let layout = solve(&params(), &terrain());
+        let alleys = layout.alleys();
+        assert_eq!(alleys.len(), layout.rows.len() - 1);
+        for (alley, pair) in alleys.iter().zip(layout.rows.windows(2)) {
+            assert!((alley.band.half_width * 2.0 - params().row_spacing).abs() < 1e-4);
+            let mid = (pair[0].start + pair[1].start) / 2.0;
+            assert!((alley.band.start - mid).length() < 1e-4);
+            assert!(alley.band.contains(pair[0].start.lerp(pair[1].start, 0.5)));
+            let edge = alley.band.local(pair[0].start).y.abs();
+            assert!(
+                (edge - alley.band.half_width).abs() < 1e-4,
+                "a row is the edge"
+            );
+        }
+    }
+
+    /// A row dropped for being too short leaves its two neighbours twice the
+    /// spacing apart, and that gap is not an alley anything should be placed in.
+    #[test]
+    fn a_dropped_row_leaves_no_alley() {
+        let row = |y: f32| Row {
+            start: Vec2::new(0.0, y),
+            end: Vec2::new(10.0, y),
+            panels: 1,
+            vines_per_panel: 1,
+        };
+        let layout = VineyardLayout {
+            bounds: Rect::from_center_half_size(Vec2::new(5.0, 2.0), Vec2::new(5.0, 3.0)),
+            rows: vec![row(0.0), row(1.0), row(3.0)],
+            row_spacing: 1.0,
+        };
+        let alleys = layout.alleys();
+        assert_eq!(alleys.len(), 1);
+        assert_eq!(alleys[0].index, 0);
     }
 }

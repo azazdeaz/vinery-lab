@@ -24,9 +24,9 @@ copying a config snippet; generating the USD itself stays local.
  - Trellis wires: a fruiting wire along the cordons and paired catch wires above it, strung post to post down every row
  - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
  - Stray shoots — a share of the canopy the trellis failed to hold, leaning out into the alley or over the top wire — are exported as deformable curves a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
+ - Cover crops and weeds — a spontaneous, sown or drilled cover down the alleys, every second one bare if you like, at whatever height the last mowing left it; and under the vines the weeds a sprayed, hoed, mown or untouched strip actually grows, tilted by the season
 
 ## Upcoming features
- - Cover crops and weeds
  - Optinally use PointInstancer to spawn organs without a unique prim path
  - Simulate human workers and other safety critical scenarios
 

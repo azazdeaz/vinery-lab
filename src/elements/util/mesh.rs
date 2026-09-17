@@ -11,8 +11,9 @@
 use std::f32::consts::TAU;
 
 use bevy::asset::RenderAssetUsages;
-use bevy::math::DVec3;
+use bevy::math::{DVec3, Vec3};
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
+use bevy::transform::components::Transform;
 
 /// A polygonal mesh, as the geometry kernels produce it.
 ///
@@ -88,6 +89,36 @@ impl MeshData {
         }
         area
     }
+
+    /// This mesh with every point carried through `transform`.
+    ///
+    /// The kernels build in a part's own frame; this is how a blade is moved
+    /// onto the tuft it belongs to before the tuft is merged into one mesh.
+    pub fn transformed(&self, transform: &Transform) -> MeshData {
+        MeshData {
+            points: self
+                .points
+                .iter()
+                .map(|p| transform.transform_point(Vec3::from(*p)).to_array())
+                .collect(),
+            face_vertex_counts: self.face_vertex_counts.clone(),
+            face_vertex_indices: self.face_vertex_indices.clone(),
+        }
+    }
+}
+
+/// Rolls the flat coordinate `u` of a point sitting `z` above a sheet onto an
+/// arc of curvature `k`, curving toward -Z.
+///
+/// Exact in arc length: the sheet bends without being stretched, which moving
+/// points in z and leaving x and y where they were cannot be. `u = 0` stays
+/// put, and so does the sheet's direction there. A curvature of zero has no
+/// arc to roll onto — callers skip the call rather than pass one.
+pub fn bend(u: f64, z: f64, k: f64) -> (f64, f64) {
+    // A rotation about the arc's center, which sits `1 / k` below the origin.
+    let radius = 1.0 / k + z;
+    let turn = k * u;
+    (radius * turn.sin(), radius * turn.cos() - 1.0 / k)
 }
 
 /// One mesh holding every part, with each part's indices rebased.
@@ -399,5 +430,22 @@ mod tests {
     fn merging_nothing_yields_an_empty_mesh() {
         let merged = merge_meshes(&[]);
         assert!(merged.points.is_empty() && merged.face_vertex_counts.is_empty());
+    }
+
+    #[test]
+    fn transformed_moves_the_points_and_nothing_else() {
+        let moved = box_mesh(2.0).transformed(&Transform::from_xyz(10.0, 0.0, 0.0));
+        assert!(moved.points.iter().all(|p| (p[0] - 10.0).abs() == 1.0));
+        assert_eq!(moved.face_vertex_indices, box_mesh(2.0).face_vertex_indices);
+    }
+
+    /// An arc keeps its length: a unit run rolled onto a unit curvature ends
+    /// one radian around the circle, and the origin stays put.
+    #[test]
+    fn bend_rolls_onto_an_arc_without_stretching() {
+        assert_eq!(bend(0.0, 0.0, 1.0), (0.0, 0.0));
+        let (u, z) = bend(1.0, 0.0, 1.0);
+        assert!((u - 1.0f64.sin()).abs() < 1e-12 && (z - (1.0f64.cos() - 1.0)).abs() < 1e-12);
+        assert!(z < 0.0, "curves toward -Z");
     }
 }

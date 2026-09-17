@@ -23,12 +23,14 @@
 //!
 //! [`Order`]: crate::scene::Order
 
+pub mod cover;
 pub mod leaf;
 pub mod pole;
 pub mod shoot;
 pub mod terrain;
 pub mod util;
 pub mod vine;
+pub mod weed;
 pub mod wire;
 
 use bevy::ecs::component::Mutable;
@@ -58,7 +60,9 @@ pub enum Grow {
     /// Quantizes the shoots, builds their stems, and hangs a leaf config on
     /// every node.
     Shoots,
-    /// High-count scatter: leaves, grapes, weeds.
+    /// High-count scatter: leaves, grapes, cover tiles, weeds. The floor
+    /// layers author themselves here from the layout rather than from a
+    /// layer above.
     Scatter,
 }
 
@@ -85,11 +89,13 @@ pub fn plugin(app: &mut App) {
         shoot::plugin,
         vine::plugin,
         leaf::plugin,
+        cover::plugin,
+        weed::plugin,
     ));
 }
 
 /// Scene-wide parameters, owned by no element.
-#[derive(Resource, Clone, Debug, PartialEq, Default)]
+#[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -104,6 +110,22 @@ pub struct SceneParams {
     /// its cache on the params, and "which of three seeds moved" is not a
     /// question anyone was asking.
     pub seed: u64,
+    /// Where in the growing season the scene is: `0.0` at budbreak, `1.0` at
+    /// harvest.
+    ///
+    /// Scene-wide rather than an element's, because it is one date for
+    /// everything on the ground. Today only the weeds read it — which species
+    /// are up, and whether a bolter has bolted; the canopy does not yet.
+    pub season: f32,
+}
+
+impl Default for SceneParams {
+    fn default() -> Self {
+        Self {
+            seed: 0,
+            season: 0.5,
+        }
+    }
 }
 
 /// The scene-wide fragment's slice of the params panel.
@@ -120,6 +142,17 @@ pub fn ui() -> impl Scene {
                 on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
                     mut params: ResMut<Staged>| {
                     params.scene.seed = change.value.round().max(0.0) as u64;
+                })
+            ),
+            bevy::feathers::display::label_small("Season"),
+            (
+                @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.5 }
+                bevy::ui_widgets::SliderStep(0.05)
+                bevy::ui_widgets::SliderPrecision(2)
+                on(bevy::ui_widgets::slider_self_update)
+                on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
+                    mut params: ResMut<Staged>| {
+                    params.scene.season = change.value.clamp(0.0, 1.0);
                 })
             ),
         ]
@@ -143,6 +176,8 @@ pub struct VineyardParams {
     pub vine: vine::VineParams,
     pub shoot: shoot::ShootParams,
     pub leaf: leaf::LeafParams,
+    pub cover: cover::CoverParams,
+    pub weed: weed::WeedParams,
 }
 
 impl VineyardParams {
@@ -162,6 +197,8 @@ impl VineyardParams {
         set(world, &self.vine);
         set(world, &self.shoot);
         set(world, &self.leaf);
+        set(world, &self.cover);
+        set(world, &self.weed);
     }
 
     /// Reads every element's params resource back out of `world`.
@@ -180,6 +217,8 @@ impl VineyardParams {
             vine: world.resource::<vine::VineParams>().clone(),
             shoot: world.resource::<shoot::ShootParams>().clone(),
             leaf: world.resource::<leaf::LeafParams>().clone(),
+            cover: world.resource::<cover::CoverParams>().clone(),
+            weed: world.resource::<weed::WeedParams>().clone(),
         }
     }
 }

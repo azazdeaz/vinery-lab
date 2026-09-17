@@ -14,8 +14,13 @@
 //!   tube. Knows no botany.
 //! - [`outline`] — the other geometry kernel: reads a shape traced in SVG and
 //!   fills it with triangles. Knows no botany either.
+//! - [`shapes`] — outlines built in code, in the frame a traced one is read
+//!   into, for shapes cheaper to describe than to draw.
+//! - [`scatter`] — points spread over a band of ground, for everything placed
+//!   within a zone rather than along a line.
 //! - [`parcel`] — the row-layout solver. Publishes [`parcel::VineyardLayout`]
-//!   and builds nothing.
+//!   and the bands — rows, alleys — other elements place against, and builds
+//!   nothing.
 //! - [`planting`] — walks the solved layout and places a config on every plant
 //!   and post. Owns the `Planting` subtree, but is driven by
 //!   [`terrain`](super::terrain) rather than standing as an element in its own
@@ -31,6 +36,8 @@ pub mod mesh;
 pub mod outline;
 pub mod parcel;
 pub mod planting;
+pub mod scatter;
+pub mod shapes;
 pub mod strand;
 #[cfg(test)]
 pub mod testing;
