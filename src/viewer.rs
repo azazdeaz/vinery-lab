@@ -74,6 +74,13 @@ pub fn run() {
         app.add_plugins(crate::perf::plugin);
     }
 
+    // Off by default: records the window to the video file it names. See
+    // [`crate::record`].
+    #[cfg(not(target_arch = "wasm32"))]
+    if std::env::var_os(crate::record::ENV).is_some() {
+        app.add_plugins(crate::record::plugin);
+    }
+
     app.run();
 }
 

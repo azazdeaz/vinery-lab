@@ -73,6 +73,14 @@ Press `S` to write the scene out as `scene.json`, and build it with:
 `VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
 rebuilt something — see `src/perf.rs`.
 
+`VINERYLAB_RECORD=demo.mp4 cargo run --release` records the window for the
+whole run. One captured frame becomes one video frame, so the stall a rebuild
+causes costs a frame rather than the freeze a screen recorder would keep —
+which is the point of it, for demo videos. Frames are piped to `ffmpeg`, which
+has to be on `PATH`; the extension picks the container. `VINERYLAB_RECORD_FPS`
+sets the rate, 30 by default, and is also how fast the window is sampled. See
+`src/record.rs`.
+
 ### Web build
 
 The same viewer, compiled to wasm and published by the manually triggered
