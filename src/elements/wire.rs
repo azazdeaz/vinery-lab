@@ -41,7 +41,7 @@
 //! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
 
 use crate::scene::{Library, Surface, configs_changed};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
@@ -216,6 +216,7 @@ pub fn ui() -> impl Scene {
             label_small("Catch wires"),
             (
                 @FeathersSlider { @min: 0.0, @max: 4.0, @value: 2.0 }
+                Tip("Levels of catch wire above the fruiting wire. Each level is a pair, one either side of the post, with the shoots between them.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -226,6 +227,7 @@ pub fn ui() -> impl Scene {
             label_small("Wire radius"),
             (
                 @FeathersSlider { @min: 0.001, @max: 0.004, @value: 0.0015 }
+                Tip("Wire radius. The default is the 3 mm high-tensile steel a trellis is strung with.")
                 SliderStep(0.0005)
                 SliderPrecision(4)
                 on(slider_self_update)

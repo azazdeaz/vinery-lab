@@ -89,7 +89,7 @@ use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -1194,6 +1194,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot length"),
             (
                 @FeathersSlider { @min: 0.1, @max: 1.6, @value: 0.75 }
+                Tip("Bud to tip — how tall a shoot stands above the spur it grew from.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1204,6 +1205,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot radius"),
             (
                 @FeathersSlider { @min: 0.002, @max: 0.015, @value: 0.006 }
+                Tip("Radius at the bud, in metres.")
                 SliderStep(0.001)
                 SliderPrecision(3)
                 on(slider_self_update)
@@ -1214,6 +1216,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot lean"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.25, @value: 0.06 }
+                Tip("How far the tip wanders off vertical, in metres.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1224,6 +1227,7 @@ pub fn ui() -> impl Scene {
             label_small("Stray shoots"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.2, @value: 0.0 }
+                Tip("Fraction of shoots the trellis failed to hold, leaning out of the canopy. Each is exported as a deformable curve, so this is the priciest knob here.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1234,6 +1238,7 @@ pub fn ui() -> impl Scene {
             label_small("Leaf spacing"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.25, @value: 0.07 }
+                Tip("Distance between leaf nodes up the shoot — how many leaves it carries, said the way a viticulturist would.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1244,6 +1249,7 @@ pub fn ui() -> impl Scene {
             label_small("Leaf droop"),
             (
                 @FeathersSlider { @min: 0.0, @max: 1.2, @value: 0.35 }
+                Tip("How far a full-grown blade pitches below horizontal, in radians. The small blades at the tip stand nearly straight out.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1254,6 +1260,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot sides"),
             (
                 @FeathersSlider { @min: 3.0, @max: 12.0, @value: 6.0 }
+                Tip("Vertices around the tube.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -1264,6 +1271,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot detail"),
             (
                 @FeathersSlider { @min: 8.0, @max: 90.0, @value: 40.0 }
+                Tip("Rings per metre. High here and cheaper than it looks — a stem is a shared mesh, and the tip bend needs the density.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -1274,6 +1282,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoot variations"),
             (
                 @FeathersSlider { @min: 1.0, @max: 8.0, @value: 4.0 }
+                Tip("A budget, not a count: how many distinct stem meshes the clustering may keep.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)

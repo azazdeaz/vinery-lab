@@ -51,7 +51,7 @@ use crate::elements::wire;
 
 use crate::elements::SceneParams;
 use crate::scene::{Order, PrimRoot, UsdType, placed};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 use super::parcel::{ParcelParams, Row, VineyardLayout};
 
@@ -382,6 +382,7 @@ pub fn ui() -> impl Scene {
             label_small("Missing vines"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.3, @value: 0.03 }
+                Tip("Fraction of planting positions left empty. A perception model trained without gaps learns that they cannot happen.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -392,6 +393,7 @@ pub fn ui() -> impl Scene {
             label_small("Young vines"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.5, @value: 0.08 }
+                Tip("Fraction of vines that are recent replants — one green shoot out of the ground, not a shrunk mature vine.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -402,6 +404,7 @@ pub fn ui() -> impl Scene {
             label_small("Young vine scale"),
             (
                 @FeathersSlider { @min: 0.2, @max: 1.0, @value: 0.55 }
+                Tip("How small the youngest replant is, relative to a full-grown shoot.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)

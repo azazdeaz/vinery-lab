@@ -10,6 +10,9 @@
 //! than the resources the build systems read. [`commit`] hands the edit over
 //! once the slider has stopped moving, which is what keeps the drag itself
 //! smooth: one rebuild per drag instead of one per frame.
+//!
+//! Every control carries a [`Tip`] saying what its parameter means; [`tips`]
+//! floats it beside the control while the pointer is over it.
 
 use bevy::clipboard::Clipboard;
 use bevy::feathers::{
@@ -21,11 +24,13 @@ use bevy::feathers::{
     },
     dark_theme::create_dark_theme,
     display::label_small,
-    theme::{ThemeBackgroundColor, ThemedText, UiTheme},
+    theme::{ThemeBackgroundColor, ThemeBorderColor, ThemedText, UiTheme},
     tokens,
 };
+use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
-use bevy::ui::Checked;
+use bevy::ui::{Checked, OverrideClip};
+use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use bevy::ui_widgets::{Activate, ScrollArea, ValueChange, checkbox_self_update};
 
 use crate::elements::{Grow, VineyardParams};
@@ -51,7 +56,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Staged(live))
         .add_systems(Startup, params_panel_list.spawn())
         .add_systems(PreUpdate, commit.before(Grow::Terrain))
-        .add_systems(Update, sync_dropdown_captions);
+        .add_systems(Update, (sync_dropdown_captions, tips));
 }
 
 /// Marks a dropdown's caption, with the read that keeps it current.
@@ -76,6 +81,7 @@ impl Default for DropdownCaption {
 /// a menu item back to the button it belongs to.
 pub fn dropdown(
     label: &'static str,
+    tip: &'static str,
     options: &'static [&'static str],
     read: fn(&VineyardParams) -> &str,
     write: fn(&mut VineyardParams, &'static str),
@@ -106,6 +112,7 @@ pub fn dropdown(
                             @caption: bsn! { (Text("") ThemedText DropdownCaption(read)) }
                         }
                         Node { flex_grow: 1.0 }
+                        Tip(tip)
                     ),
                     (@FeathersMenuPopup Children [ {items} ]),
                 ]
@@ -121,6 +128,87 @@ fn sync_dropdown_captions(staged: Res<Staged>, mut captions: Query<(&DropdownCap
         if text.0 != current {
             text.0 = current.to_string();
         }
+    }
+}
+
+/// What a control's parameter means, in a line or two.
+///
+/// Goes on the control rather than on its caption: every feathers slider,
+/// checkbox and menu button already carries [`Hovered`], so a tip is the whole
+/// per-parameter cost of a tooltip — no wrapper node, no lookup table.
+#[derive(Component, Clone, Copy, Default)]
+pub struct Tip(pub &'static str);
+
+/// The card [`tips`] spawns, so it can find it again to take it down.
+#[derive(Component, Clone, Default)]
+struct TipPopup;
+
+/// Floats a control's [`Tip`] beside it while the pointer is over it.
+///
+/// `Hovered` is immutable and reinserted only when the pointer crosses the
+/// control's bounds, so `Changed` is an exact enter/leave edge: one card is
+/// spawned on enter and despawned on leave, and none exist in between.
+fn tips(
+    mut commands: Commands,
+    crossed: Query<(Entity, &Hovered, &Tip), Changed<Hovered>>,
+    shown: Query<(Entity, &ChildOf), With<TipPopup>>,
+) {
+    for (control, hovered, tip) in &crossed {
+        let card = shown
+            .iter()
+            .find(|(_, of)| of.parent() == control)
+            .map(|(card, _)| card);
+        match (hovered.get(), card) {
+            (true, None) => {
+                commands
+                    .spawn_scene(tip_popup(tip.0))
+                    .insert(ChildOf(control));
+            }
+            (false, Some(card)) => commands.entity(card).despawn(),
+            _ => {}
+        }
+    }
+}
+
+/// The card itself. [`Popover`] anchors it to the control it is a child of and
+/// flips it to whichever side has room, so it clears the panel's right edge.
+fn tip_popup(text: &'static str) -> impl Scene {
+    bsn! {
+        Node {
+            // `position_popover` sets this itself, but only after a frame of
+            // layout — without it the card is in flow once and shoves the row.
+            position_type: PositionType::Absolute,
+            max_width: px(200),
+            padding: UiRect::axes(px(8), px(5)),
+            border: px(1),
+            border_radius: {BorderRadius::all(px(4))},
+        }
+        TipPopup
+        ThemeBackgroundColor(tokens::MENU_BG)
+        ThemeBorderColor(tokens::MENU_BORDER)
+        GlobalZIndex(100)
+        // The panel body scrolls, and a scroll clip reaches every descendant
+        // whatever its `position_type`. This is the only way out of one.
+        OverrideClip
+        // The card overlaps the control it belongs to, and a hit on it would
+        // read as a hover leave — which would flicker the card away.
+        Pickable::IGNORE
+        Popover {
+            positions: vec![
+                PopoverPlacement {
+                    side: PopoverSide::Right,
+                    align: PopoverAlign::Start,
+                    gap: 8.0,
+                },
+                PopoverPlacement {
+                    side: PopoverSide::Left,
+                    align: PopoverAlign::Start,
+                    gap: 8.0,
+                },
+            ],
+            window_margin: 10.0,
+        }
+        Children [ label_small(text) ]
     }
 }
 
@@ -406,6 +494,7 @@ mod tests {
     fn one_dropdown() -> impl SceneList {
         bsn_list![dropdown(
             "Kind",
+            "Which sward is sown in the alleys.",
             &crate::elements::cover::Kind::NAMES,
             |params| &params.cover.kind,
             |params, name| params.cover.kind = name.to_string(),
@@ -468,5 +557,83 @@ mod tests {
 
         app.update();
         assert_eq!(caption(app.world_mut()), "sown", "and the caption follows");
+    }
+
+    /// A tip appears while the pointer is over its control and leaves with it.
+    ///
+    /// `Hovered` is immutable, so the pointer crossing a control shows up here
+    /// as a re-insert — which is also what makes `Changed` an exact edge.
+    #[test]
+    fn a_tip_follows_the_pointer_onto_its_control_and_off_again() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::scene::ScenePlugin,
+        ))
+        .init_asset::<bevy::text::Font>()
+        .add_systems(Update, tips);
+        let control = app
+            .world_mut()
+            .spawn((Tip("Post radius."), Hovered(false)))
+            .id();
+
+        let cards = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<(), With<TipPopup>>()
+                .iter(app.world())
+                .count()
+        };
+
+        app.update();
+        assert_eq!(cards(&mut app), 0, "nothing shows unhovered");
+
+        app.world_mut().entity_mut(control).insert(Hovered(true));
+        app.update();
+        assert_eq!(cards(&mut app), 1, "the pointer arrives");
+        app.update();
+        assert_eq!(cards(&mut app), 1, "and one card is enough");
+
+        app.world_mut().entity_mut(control).insert(Hovered(false));
+        app.update();
+        assert_eq!(cards(&mut app), 0, "the pointer leaves");
+    }
+
+    /// Every control in the panel carries a tip.
+    ///
+    /// The tips are a copy of the field list, the way `snippet.rs` keeps one,
+    /// and they go in by hand at each control: add a slider without a tip and
+    /// the two counts part company here rather than in the running panel.
+    #[test]
+    fn every_control_in_the_panel_carries_a_tip() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            bevy::asset::AssetPlugin::default(),
+            bevy::scene::ScenePlugin,
+        ))
+        .init_asset::<bevy::text::Font>()
+        .init_asset::<Image>()
+        .insert_resource(Staged(VineyardParams::default()))
+        .add_systems(Startup, params_panel_list.spawn());
+        app.update();
+
+        let world = app.world_mut();
+        // The section chevrons are checkboxes too, and fold rather than
+        // configure — they are the one control with nothing to explain.
+        let controls = world
+            .query_filtered::<(), (
+                Or<(
+                    With<bevy::ui_widgets::Slider>,
+                    With<bevy::ui_widgets::Checkbox>,
+                    With<bevy::ui_widgets::MenuButton>,
+                )>,
+                Without<FeathersDisclosureToggle>,
+            )>()
+            .iter(world)
+            .count();
+        let tipped = world.query_filtered::<(), With<Tip>>().iter(world).count();
+        assert!(controls > 50, "the whole panel spawned, not a fragment");
+        assert_eq!(tipped, controls, "a control was added without a Tip");
     }
 }

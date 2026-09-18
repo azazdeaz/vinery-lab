@@ -61,7 +61,7 @@ use super::util::{color, material, par_map};
 use super::{Grow, Rng};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 /// The mesh-library prefix this element registers its blades under.
 pub const PART: &str = "Leaf";
@@ -463,6 +463,7 @@ pub fn ui() -> impl Scene {
             label_small("Leaf variations"),
             (
                 @FeathersSlider { @min: 1.0, @max: 100.0, @value: 40.0 }
+                Tip("A budget, not a count. Past the first few drawn outlines, what it buys is curl — the same shapes bent a dozen ways each.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -473,6 +474,7 @@ pub fn ui() -> impl Scene {
             label_small("Leaf detail"),
             (
                 @FeathersSlider { @min: 8.0, @max: 400.0, @value: 120.0 }
+                Tip("Triangles a blade's area is cut into. Also the floor on how fine the curl can be before it reads as noise.")
                 SliderStep(8.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -483,6 +485,7 @@ pub fn ui() -> impl Scene {
             label_small("Leaf curl"),
             (
                 @FeathersSlider { @min: 0.0, @max: 2.0, @value: 1.0 }
+                Tip("How far a blade bends out of the flat shape it was drawn as. Zero is flat, and a canopy of flat blades reads as a green wall.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)

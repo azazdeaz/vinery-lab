@@ -50,7 +50,7 @@ use super::util::{color, material, par_map, shapes};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed};
-use crate::ui::{Staged, dropdown};
+use crate::ui::{Staged, Tip, dropdown};
 
 /// The mesh-library prefix the tiles are registered under.
 pub const PART: &str = "Sward";
@@ -589,12 +589,14 @@ pub fn ui() -> impl Scene {
         Children [
             dropdown(
                 "Cover kind",
+                "Which sward is sown in the alleys — what is growing there, and how it reads.",
                 &Kind::NAMES,
                 |params| &params.cover.kind,
                 |params, name| params.cover.kind = name.to_string(),
             ),
             (
                 @FeathersCheckbox { @caption: bsn! { Text("Alternate alleys") ThemedText } }
+                Tip("Leave every second alley bare: the cover on half of them, the tractor's tyres on the other half.")
                 on(checkbox_self_update)
                 on(|change: On<ValueChange<bool>>, mut params: ResMut<Staged>| {
                     params.cover.alternate = change.value;
@@ -603,6 +605,7 @@ pub fn ui() -> impl Scene {
             label_small("Cover width"),
             (
                 @FeathersSlider { @min: 0.1, @max: 1.0, @value: 0.75 }
+                Tip("How much of the alley's width the cover spans, centred on the alley. Three quarters keeps a band clear of the vines.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -613,6 +616,7 @@ pub fn ui() -> impl Scene {
             label_small("Cover height"),
             (
                 @FeathersSlider { @min: 0.02, @max: 1.5, @value: 0.15 }
+                Tip("Standing height: a few centimetres just after mowing, half a metre left to head, more for a cereal in spring.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -623,6 +627,7 @@ pub fn ui() -> impl Scene {
             label_small("Cover density"),
             (
                 @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.7 }
+                Tip("Fraction of the ground inside the band the cover actually covers.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -633,6 +638,7 @@ pub fn ui() -> impl Scene {
             label_small("Dryness"),
             (
                 @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.0 }
+                Tip("0 green, 1 straw — a Mediterranean alley in August.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -643,6 +649,7 @@ pub fn ui() -> impl Scene {
             label_small("Cover variations"),
             (
                 @FeathersSlider { @min: 1.0, @max: 64.0, @value: 12.0 }
+                Tip("A budget, not a count: how many distinct tile meshes the scene may hold.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -653,6 +660,7 @@ pub fn ui() -> impl Scene {
             label_small("Cover detail"),
             (
                 @FeathersSlider { @min: 50.0, @max: 2000.0, @value: 600.0 }
+                Tip("Blades per square metre baked into a tile at full cover. The one knob that trades sward density for triangles.")
                 SliderStep(50.0)
                 SliderPrecision(0)
                 on(slider_self_update)

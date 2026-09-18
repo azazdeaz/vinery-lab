@@ -38,7 +38,7 @@
 
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
@@ -225,6 +225,7 @@ pub fn ui() -> impl Scene {
             label_small("Pole radius"),
             (
                 @FeathersSlider { @min: 0.01, @max: 0.1, @value: 0.04 }
+                Tip("Post radius. The default is the 8 cm round softwood post commonest in a European vineyard; a steel profile is half as thick.")
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
@@ -235,6 +236,7 @@ pub fn ui() -> impl Scene {
             label_small("Pole sides"),
             (
                 @FeathersSlider { @min: 3.0, @max: 16.0, @value: 8.0 }
+                Tip("Vertices around the post — the silhouette, and the only detail knob a straight tube has.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)

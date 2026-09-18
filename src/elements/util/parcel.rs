@@ -37,7 +37,7 @@ use bevy::ui_widgets::{
 };
 
 use crate::elements::terrain::{Ground, TerrainParams};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 /// How vineyard rows are laid out across the terrain.
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -450,6 +450,7 @@ pub fn ui() -> impl Scene {
             label_small("Row orientation"),
             (
                 @FeathersSlider { @min: -90.0, @max: 90.0, @value: 0.0 }
+                Tip("Row direction, in degrees counter-clockwise from +X.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -460,6 +461,7 @@ pub fn ui() -> impl Scene {
             label_small("Headland"),
             (
                 @FeathersSlider { @min: 0.0, @max: 20.0, @value: 6.0 }
+                Tip("Inset from the terrain's edge left unplanted — the turning area machinery needs at each end of a row.")
                 SliderStep(0.5)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -470,6 +472,7 @@ pub fn ui() -> impl Scene {
             label_small("Row spacing"),
             (
                 @FeathersSlider { @min: 0.8, @max: 6.0, @value: 2.4 }
+                Tip("Distance between neighbouring row centrelines, in metres.")
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -480,6 +483,7 @@ pub fn ui() -> impl Scene {
             label_small("Vine spacing"),
             (
                 @FeathersSlider { @min: 0.5, @max: 3.0, @value: 1.2 }
+                Tip("Distance between neighbouring vines along a row, in metres.")
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -490,6 +494,7 @@ pub fn ui() -> impl Scene {
             label_small("Post spacing"),
             (
                 @FeathersSlider { @min: 2.0, @max: 12.0, @value: 6.0 }
+                Tip("Target distance between posts. Panel count is solved from it and the row's real length, so the spacing lands close rather than exact.")
                 SliderStep(0.5)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -500,6 +505,7 @@ pub fn ui() -> impl Scene {
             label_small("Trellis height"),
             (
                 @FeathersSlider { @min: 0.5, @max: 3.0, @value: 1.8 }
+                Tip("Height of the posts above the ground. Not the fruiting wire — that is the vine's trunk height.")
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -509,6 +515,7 @@ pub fn ui() -> impl Scene {
             ),
             (
                 @FeathersCheckbox { @caption: bsn! { Text("Show layout") ThemedText } }
+                Tip("Draw the solved row and post layout over the scene.")
                 on(checkbox_self_update)
                 on(|change: On<ValueChange<bool>>, mut show: ResMut<ShowLayout>| {
                     show.0 = change.value;

@@ -168,7 +168,7 @@ fn reauthor(params: Res<GrapeParams>, mut grapes: Query<&mut GrapeConfig>) { /* 
 
 fn build(commands: Commands, library: Library, /* ... */) -> Result<()> { /* ... */ }
 
-pub fn ui() -> impl Scene { /* sliders writing into Staged's `grape` field */ }
+pub fn ui() -> impl Scene { /* tipped sliders writing into Staged's `grape` field */ }
 ```
 
 Adding an element is one new file, one line in `elements::plugin`, one field in
