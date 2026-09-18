@@ -95,6 +95,15 @@ def test_to_params_round_trips_every_fragment(cfg):
     assert params.terrain.detail == isaaclab_cfg.TerrainCfg().detail
 
 
+def test_a_misspelt_regime_name_is_rejected_before_generating(tmp_path):
+    """A categorical field is a name out of a fixed list, and a typo in a
+    config has to fail at the boundary rather than silently generate the
+    default regime."""
+    cfg = VineyardCfg(cover=isaaclab_cfg.CoverCfg(kind="sowed"))
+    with pytest.raises(ValueError, match="cover.kind"):
+        vineyard.to_params(cfg).write_usd(str(tmp_path / "typo.usd"))
+
+
 # ─── The cfg survives what Isaac Lab does to configs ────────────────
 
 

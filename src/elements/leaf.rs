@@ -55,7 +55,7 @@ use bevy::feathers::display::label_small;
 use bevy::prelude::*;
 use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
-use super::util::mesh::MeshData;
+use super::util::mesh::{MeshData, bend};
 use super::util::outline::{Outline, outline_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng};
@@ -393,19 +393,6 @@ fn curl(mesh: &mut MeshData, amount: f64, seed: u64) {
         let (x, z) = bend(x, z, DROOP * amount / reach);
         *point = [x as f32, y as f32, z as f32];
     }
-}
-
-/// Rolls the flat coordinate `u` of a point sitting `z` above the sheet onto
-/// an arc of curvature `k`, curving toward -Z.
-///
-/// Exact in arc length: the sheet bends without being stretched, which moving
-/// points in z and leaving x and y where they were cannot be. `u = 0` stays
-/// put, and so does the sheet's direction there.
-fn bend(u: f64, z: f64, k: f64) -> (f64, f64) {
-    // A rotation about the arc's center, which sits `1 / k` below the origin.
-    let radius = 1.0 / k + z;
-    let turn = k * u;
-    (radius * turn.sin(), radius * turn.cos() - 1.0 / k)
 }
 
 // ─── Building ───────────────────────────────────────────────────────

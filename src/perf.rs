@@ -34,7 +34,7 @@ use std::time::Instant;
 use bevy::prelude::*;
 
 use crate::elements::util::{parcel, planting};
-use crate::elements::{Grow, SceneParams, leaf, pole, shoot, terrain, vine, wire};
+use crate::elements::{Grow, SceneParams, cover, leaf, pole, shoot, terrain, vine, weed, wire};
 
 /// Set this (to anything) to turn the viewer's instrumentation on.
 pub const ENV: &str = "VINERYLAB_PERF";
@@ -128,7 +128,13 @@ pub fn plugin(app: &mut App) {
                 mark("author:pole").after(pole::build).before(vine::build),
                 mark("author:vine").after(vine::build).before(shoot::build),
                 mark("author:shoot").after(shoot::build).before(leaf::build),
-                mark("author:leaf").after(leaf::build),
+                // The floor layers share `Grow::Scatter` with the leaves and
+                // have no order among themselves; the marks impose one.
+                mark("author:leaf").after(leaf::build).before(cover::author),
+                mark("author:cover")
+                    .after(cover::build)
+                    .before(weed::author),
+                mark("author:weed").after(weed::build),
             ),
         )
         // Schedule-level brackets: `RunFixedMainLoop` runs between `PreUpdate`
@@ -156,10 +162,12 @@ fn note_changed_params(
     vine_p: Res<vine::VineParams>,
     shoot_p: Res<shoot::ShootParams>,
     leaf_p: Res<leaf::LeafParams>,
+    cover_p: Res<cover::CoverParams>,
+    weed_p: Res<weed::WeedParams>,
     ground: Res<terrain::Ground>,
     layout: Res<parcel::VineyardLayout>,
 ) {
-    let flags: [(&'static str, bool); 11] = [
+    let flags: [(&'static str, bool); 13] = [
         ("SceneParams", scene_p.is_changed()),
         ("TerrainParams", terrain_p.is_changed()),
         ("ParcelParams", parcel_p.is_changed()),
@@ -169,6 +177,8 @@ fn note_changed_params(
         ("VineParams", vine_p.is_changed()),
         ("ShootParams", shoot_p.is_changed()),
         ("LeafParams", leaf_p.is_changed()),
+        ("CoverParams", cover_p.is_changed()),
+        ("WeedParams", weed_p.is_changed()),
         ("Ground", ground.is_changed()),
         ("VineyardLayout", layout.is_changed()),
     ];

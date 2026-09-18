@@ -17,6 +17,7 @@
 
 use crate::elements::SceneParams;
 use crate::elements::VineyardParams;
+use crate::elements::cover::CoverParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -24,6 +25,7 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
+use crate::elements::weed::WeedParams;
 use crate::elements::wire::WireParams;
 
 /// One fragment's worth of `name=value` arguments.
@@ -50,6 +52,22 @@ impl Fields {
             self.changed.push(format!("{name}={value}"));
         }
     }
+
+    /// A categorical field: a name out of an element's fixed list, quoted.
+    fn string(&mut self, name: &'static str, value: &str, default: &str) {
+        self.offered.push(name);
+        if value != default {
+            self.changed.push(format!("{name}={value:?}"));
+        }
+    }
+
+    fn boolean(&mut self, name: &'static str, value: bool, default: bool) {
+        self.offered.push(name);
+        if value != default {
+            let literal = if value { "True" } else { "False" };
+            self.changed.push(format!("{name}={literal}"));
+        }
+    }
 }
 
 /// Formats an `f32` as a Python float literal.
@@ -70,6 +88,7 @@ fn python_float(value: f32) -> String {
 fn scene(p: &SceneParams, out: &mut Fields) {
     let d = SceneParams::default();
     out.int("seed", p.seed, d.seed);
+    out.float("season", p.season, d.season);
 }
 
 fn terrain(p: &TerrainParams, out: &mut Fields) {
@@ -148,7 +167,30 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     out.float("curl", p.curl, d.curl);
 }
 
-/// The nine fragments, as the attribute name and cfg class the snippet uses.
+fn cover(p: &CoverParams, out: &mut Fields) {
+    let d = CoverParams::default();
+    out.string("kind", &p.kind, &d.kind);
+    out.boolean("alternate", p.alternate, d.alternate);
+    out.float("width", p.width, d.width);
+    out.float("height", p.height, d.height);
+    out.float("cover", p.cover, d.cover);
+    out.float("dryness", p.dryness, d.dryness);
+    out.int("variations", p.variations as u64, d.variations as u64);
+    out.int("detail", p.detail as u64, d.detail as u64);
+}
+
+fn weed(p: &WeedParams, out: &mut Fields) {
+    let d = WeedParams::default();
+    out.string("strip", &p.strip, &d.strip);
+    out.float("strip_width", p.strip_width, d.strip_width);
+    out.float("pressure", p.pressure, d.pressure);
+    out.float("alley_pressure", p.alley_pressure, d.alley_pressure);
+    out.float("tall", p.tall, d.tall);
+    out.int("variations", p.variations as u64, d.variations as u64);
+    out.int("detail", p.detail as u64, d.detail as u64);
+}
+
+/// The fragments, as the attribute name and cfg class the snippet uses.
 ///
 /// Same order and same names as `FRAGMENTS` in `vineyard_cfg.py`, which is
 /// what makes the emitted keyword arguments land on the right fields.
@@ -156,7 +198,7 @@ fn leaf(p: &LeafParams, out: &mut Fields) {
     clippy::type_complexity,
     reason = "the table's shape is its documentation"
 )]
-const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 9] = [
+const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 11] = [
     ("scene", "SceneCfg", |p, out| scene(&p.scene, out)),
     ("terrain", "TerrainCfg", |p, out| terrain(&p.terrain, out)),
     ("parcel", "ParcelCfg", |p, out| parcel(&p.parcel, out)),
@@ -168,6 +210,8 @@ const FRAGMENTS: [(&str, &str, fn(&VineyardParams, &mut Fields)); 9] = [
     ("vine", "VineCfg", |p, out| vine(&p.vine, out)),
     ("shoot", "ShootCfg", |p, out| shoot(&p.shoot, out)),
     ("leaf", "LeafCfg", |p, out| leaf(&p.leaf, out)),
+    ("cover", "CoverCfg", |p, out| cover(&p.cover, out)),
+    ("weed", "WeedCfg", |p, out| weed(&p.weed, out)),
 ];
 
 /// The current params as a paste-ready `VineyardCfg` construction.
@@ -250,6 +294,8 @@ mod tests {
             format!("{:?}", params.vine),
             format!("{:?}", params.shoot),
             format!("{:?}", params.leaf),
+            format!("{:?}", params.cover),
+            format!("{:?}", params.weed),
         ];
 
         for ((attr, _, collect), debug) in FRAGMENTS.iter().zip(&debugs) {
@@ -306,5 +352,18 @@ mod tests {
         assert_eq!(python_float(2.0), "2.0");
         assert_eq!(python_float(2.8), "2.8");
         assert_eq!(python_float(0.035), "0.035");
+    }
+
+    /// A name is quoted and a flag is capitalised, the way Python spells them.
+    #[test]
+    fn strings_and_flags_are_python_literals() {
+        let mut params = VineyardParams::default();
+        params.cover.kind = "cereal".into();
+        params.cover.alternate = true;
+        let snippet = vineyard_cfg(&params);
+        assert!(
+            snippet.contains("cover=CoverCfg(kind=\"cereal\", alternate=True)"),
+            "{snippet}"
+        );
     }
 }

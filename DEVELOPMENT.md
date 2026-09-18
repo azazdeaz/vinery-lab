@@ -128,7 +128,7 @@ there is no preview shape and export shape to keep in step.
 ## Elements
 
 The scene is built from **elements**, one per thing that exists in a vineyard
-(terrain, pole, wire, vine, shoot, leaf, grape, weed).
+(terrain, pole, wire, vine, shoot, leaf, cover, weed, grape).
 
 Parts are named the way viticulture names them: a vine's **trunk** rises from
 the ground to its **head**, where it turns into one or two **cordons** running
@@ -172,17 +172,21 @@ pub fn ui() -> impl Scene { /* sliders writing into Staged's `grape` field */ }
 ```
 
 Adding an element is one new file, one line in `elements::plugin`, one field in
-`VineyardParams`, and one line in `ui::params_panel`.
+`VineyardParams`, one line in `ui::params_panel`, and its params mirrored in
+`snippet.rs`, `python.rs`, `_core.pyi` and `vineyard_cfg.py` — the last four
+each have a test that fails when a field is missed.
 
 Everything under `src/elements/` that *isn't* an element lives in
 `src/elements/util/`: the geometry kernels (`strand` skins a polyline of radii
-into a tube, `outline` fills a shape traced in SVG, `mesh` holds the type they
-both produce), the palette (`color` for hue, `material` for how a surface
-responds to light), the row-layout solver (`parcel`) and the pass that walks
-the layout and places a config on every plant and post (`planting`). The
-dividing line is identity, not file size — nothing there corresponds to a thing
-that exists in a vineyard, so nothing there gets a mesh library or a line in
-`elements::plugin`.
+into a tube, `outline` fills a shape traced in SVG, `shapes` builds outlines in
+code and folds them, `mesh` holds the type they all produce), the palette
+(`color` for hue, `material` for how a surface responds to light), the
+row-layout solver (`parcel`, which also hands out the *bands* — a row's strip,
+an alley — that ground layers place within), the scatter over a band
+(`scatter`) and the pass that walks the layout and places a config on every
+plant and post (`planting`). The dividing line is identity, not file size —
+nothing there corresponds to a thing that exists in a vineyard, so nothing
+there gets a mesh library or a line in `elements::plugin`.
 
 ### Drawn shapes
 
@@ -195,6 +199,11 @@ away and every transform in it is resolved on load. Outlines are pulled in
 with `include_str!` rather than read at run time, because the crate also ships
 as a Python extension module inside a wheel, where `assets/` is not there to
 read.
+
+Some are cheaper to describe: a grass blade is a length, a width and a taper,
+and `util::shapes` builds those as outlines in the same frame a drawing is read
+into. The weeds' leaves are built this way for now; a traced file replaces a
+`shapes::` call at the one place it is made.
 
 ### The pipeline
 
@@ -351,6 +360,22 @@ short-circuits, and a condition system that does not run does not advance its
 `last_run` — so the change it skipped reads as new again the next frame and
 rebuilds the layer a second time.
 
+**A layout-driven element authors its own configs.** `cover` and `weed` hang
+off no layer above: their `author` system places configs from
+`VineyardLayout`, `Ground` and `SceneParams`, gated on all three and on their
+own params, and there is no `reauthor` — re-authoring the layer *is* the
+in-place edit at their scale. Their `build` is gated on the same condition as
+well as on `configs_changed`, so a change that leaves nothing to build still
+clears the library.
+
+**A categorical param is a string naming one of the element's fixed list**
+(`CoverParams::kind`, `WeedParams::strip`), parsed once into a Rust enum with
+`ALL`/`NAMES`/`parse`. The name is validated where it enters from Python
+(`python.rs::snapshot` raises `ValueError`); the element itself falls back to
+the default with a warning, because a build system is no place to fail. The
+viewer offers the list as a dropdown (`ui::dropdown`) and only ever writes a
+valid name.
+
 **Determinism.** Bevy's query iteration order is not stable across runs and a
 codebook has to be a function of its population alone, so every organ carries a
 `scene::Order` assigned in authoring order and every layer sorts by it before
@@ -374,9 +399,10 @@ to know.
 
 `src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
 `SceneDoc`. Unnamed entities and their subtrees are skipped, which is how the
-Y-up correction stays out of the file. A prim carrying `UsdReference` may not
-have children — the exporter errors rather than emitting something USD would
-silently drop.
+Y-up correction stays out of the file. Siblings are emitted in name order
+rather than spawn order, so a layer that rebuilt itself last does not move in
+the document. A prim carrying `UsdReference` may not have children — the
+exporter errors rather than emitting something USD would silently drop.
 
 `build.py` turns the document into a stage. Its docstring is the single home of
 every USD rule the project depends on, each of which fails *silently* if

@@ -10,7 +10,15 @@ write `from vinerylab import VineyardParams` rather than reaching into
 `_core` themselves.
 """
 
+from typing import Literal
+
 __version__: str
+
+CoverKind = Literal["none", "spontaneous", "sown", "cereal"]
+"""What the alley grows. See `CoverParams.kind`."""
+
+WeedStrip = Literal["herbicide", "tilled", "mown", "untouched"]
+"""What is done to the under-vine strip. See `WeedParams.strip`."""
 
 class SceneParams:
     """Parameters that belong to no single element.
@@ -19,13 +27,19 @@ class SceneParams:
     it with a constant of its own before drawing, so nudging one never re-rolls
     another -- change it and you get a different vineyard, not a different
     trunk on the same one.
+
+    `season` is where in the growing season the scene is, from 0.0 at budbreak
+    to 1.0 at harvest. Today only the weeds read it: which species are up, and
+    whether a bolter has bolted.
     """
 
     seed: int
+    season: float
 
     def __init__(
         self,
         seed: int = 0,
+        season: float = 0.5,
     ) -> None: ...
     def __repr__(self) -> str: ...
 
@@ -272,6 +286,92 @@ class PlantingParams:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class CoverParams:
+    """What grows in the alley between two rows.
+
+    `kind` is the regime, by name: "none" for a bare or tilled alley,
+    "spontaneous" for a sward that came up on its own -- ragged, gappy --,
+    "sown" for a drilled grass sward, one height and dense, or "cereal" for a
+    winter rye in drill lines along the alley. Any other name raises
+    `ValueError` when the scene is generated. The species are the generator's
+    to pick from the regime.
+
+    `alternate` leaves every second alley bare, the commonest permanent
+    arrangement in France. `width` is how much of the alley the cover spans,
+    centred; `height` its standing height in meters, from a few centimetres
+    just after mowing to half a metre left to head; `cover` the fraction of
+    the ground inside the band that is actually covered; `dryness` runs the
+    colour from green at 0 to straw at 1.
+
+    The sward is built as half-metre tiles of blades, instanced down each
+    alley: `variations` is the budget of distinct tile meshes and `detail` the
+    blades per square metre baked into one.
+    """
+
+    kind: CoverKind
+    alternate: bool
+    width: float
+    height: float
+    cover: float
+    dryness: float
+    variations: int
+    detail: int
+
+    def __init__(
+        self,
+        kind: CoverKind = "spontaneous",
+        alternate: bool = False,
+        width: float = 0.75,
+        height: float = 0.15,
+        cover: float = 0.7,
+        dryness: float = 0.0,
+        variations: int = 12,
+        detail: int = 600,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class WeedParams:
+    """The plants that come up where nothing was sown: in the under-vine
+    strip, and as escapes in the alley.
+
+    `strip` is what is done to the under-vine strip, by name, and it picks
+    the species: "herbicide" leaves the annual grasses and tall bolters a
+    spray does not kill, "tilled" the annuals that come back from seed,
+    "mown" the rosettes and tufts that duck the blade, "untouched" everything.
+    Any other name raises `ValueError` when the scene is generated. The
+    scene's `season` tilts the mix between the spring and summer flushes and
+    decides whether a bolter has bolted.
+
+    `strip_width` is how far the strip reaches either side of the trunks, in
+    meters. `pressure` and `alley_pressure` are plants per square metre in
+    the strip and the alley; zero is clean. `tall` is the share of plants
+    that are tall -- bolters and sprawling broadleaves -- against low tufts,
+    mats and rosettes.
+
+    Every plant is one mesh; `variations` is the budget of distinct ones and
+    `detail` the triangles a leaf is cut into.
+    """
+
+    strip: WeedStrip
+    strip_width: float
+    pressure: float
+    alley_pressure: float
+    tall: float
+    variations: int
+    detail: int
+
+    def __init__(
+        self,
+        strip: WeedStrip = "mown",
+        strip_width: float = 0.3,
+        pressure: float = 6.0,
+        alley_pressure: float = 0.5,
+        tall: float = 0.3,
+        variations: int = 24,
+        detail: int = 16,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 class VineyardParams:
     """The full parameter set, one attribute per element.
 
@@ -281,6 +381,7 @@ class VineyardParams:
         params.terrain.detail = 8
     """
 
+    scene: SceneParams
     terrain: TerrainParams
     parcel: ParcelParams
     planting: PlantingParams
@@ -289,6 +390,8 @@ class VineyardParams:
     vine: VineParams
     shoot: ShootParams
     leaf: LeafParams
+    cover: CoverParams
+    weed: WeedParams
 
     def __init__(
         self,
@@ -301,6 +404,8 @@ class VineyardParams:
         vine: VineParams | None = None,
         shoot: ShootParams | None = None,
         leaf: LeafParams | None = None,
+        cover: CoverParams | None = None,
+        weed: WeedParams | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
     def generate_scene_json(self) -> str:

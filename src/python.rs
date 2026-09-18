@@ -6,11 +6,12 @@
 //! authoring the stage) lives in [`crate::generate`] and the element modules,
 //! and is exercised identically by the interactive viewer.
 
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 
 use crate::elements::SceneParams;
 use crate::elements::VineyardParams;
+use crate::elements::cover::{self, CoverParams};
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -18,6 +19,7 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
+use crate::elements::weed::{self, WeedParams};
 use crate::elements::wire::WireParams;
 use crate::generate::generate_scene;
 
@@ -183,9 +185,9 @@ impl VineParams {
 #[pymethods]
 impl SceneParams {
     #[new]
-    #[pyo3(signature = (seed=0))]
-    fn py_new(seed: u64) -> Self {
-        Self { seed }
+    #[pyo3(signature = (seed=0, season=0.5))]
+    fn py_new(seed: u64, season: f32) -> Self {
+        Self { seed, season }
     }
 
     fn __repr__(&self) -> String {
@@ -271,6 +273,85 @@ impl LeafParams {
     }
 }
 
+#[pymethods]
+impl CoverParams {
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        kind="spontaneous",
+        alternate=false,
+        width=0.75,
+        height=0.15,
+        cover=0.7,
+        dryness=0.0,
+        variations=12,
+        detail=600,
+    ))]
+    fn py_new(
+        kind: &str,
+        alternate: bool,
+        width: f32,
+        height: f32,
+        cover: f32,
+        dryness: f32,
+        variations: u32,
+        detail: u32,
+    ) -> Self {
+        Self {
+            kind: kind.to_string(),
+            alternate,
+            width,
+            height,
+            cover,
+            dryness,
+            variations,
+            detail,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[pymethods]
+impl WeedParams {
+    #[new]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        strip="mown",
+        strip_width=0.3,
+        pressure=6.0,
+        alley_pressure=0.5,
+        tall=0.3,
+        variations=24,
+        detail=16,
+    ))]
+    fn py_new(
+        strip: &str,
+        strip_width: f32,
+        pressure: f32,
+        alley_pressure: f32,
+        tall: f32,
+        variations: u32,
+        detail: u32,
+    ) -> Self {
+        Self {
+            strip: strip.to_string(),
+            strip_width,
+            pressure,
+            alley_pressure,
+            tall,
+            variations,
+            detail,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 /// The full parameter set, one field per element.
 ///
 /// Fragments are held as `Py<T>` rather than by value so attribute access
@@ -288,6 +369,8 @@ pub struct PyVineyardParams {
     pub vine: Py<VineParams>,
     pub shoot: Py<ShootParams>,
     pub leaf: Py<LeafParams>,
+    pub cover: Py<CoverParams>,
+    pub weed: Py<WeedParams>,
 }
 
 #[pymethods]
@@ -295,7 +378,7 @@ impl PyVineyardParams {
     #[new]
     #[pyo3(signature = (
         scene=None, terrain=None, parcel=None, planting=None, pole=None, wire=None,
-        vine=None, shoot=None, leaf=None
+        vine=None, shoot=None, leaf=None, cover=None, weed=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn py_new(
@@ -309,6 +392,8 @@ impl PyVineyardParams {
         vine: Option<Py<VineParams>>,
         shoot: Option<Py<ShootParams>>,
         leaf: Option<Py<LeafParams>>,
+        cover: Option<Py<CoverParams>>,
+        weed: Option<Py<WeedParams>>,
     ) -> PyResult<Self> {
         Ok(Self {
             scene: match scene {
@@ -347,11 +432,19 @@ impl PyVineyardParams {
                 Some(v) => v,
                 None => Py::new(py, LeafParams::default())?,
             },
+            cover: match cover {
+                Some(v) => v,
+                None => Py::new(py, CoverParams::default())?,
+            },
+            weed: match weed {
+                Some(v) => v,
+                None => Py::new(py, WeedParams::default())?,
+            },
         })
     }
 
     fn __repr__(&self, py: Python<'_>) -> String {
-        format!("{:?}", self.snapshot(py))
+        format!("{:?}", self.fragments(py))
     }
 
     /// Generates the scene and returns it as a JSON document.
@@ -364,7 +457,7 @@ impl PyVineyardParams {
     /// copied out first, so nothing inside touches Python objects and other
     /// threads in a host application like Isaac Sim keep making progress.
     fn generate_scene_json(&self, py: Python<'_>) -> PyResult<String> {
-        let params = self.snapshot(py);
+        let params = self.snapshot(py)?;
         py.detach(|| -> anyhow::Result<String> {
             Ok(serde_json::to_string(&generate_scene(&params)?)?)
         })
@@ -393,7 +486,7 @@ impl PyVineyardParams {
 impl PyVineyardParams {
     /// Copies the fragments out of their Python objects into a plain Rust
     /// aggregate, so the generation call needs no GIL.
-    fn snapshot(&self, py: Python<'_>) -> VineyardParams {
+    fn fragments(&self, py: Python<'_>) -> VineyardParams {
         VineyardParams {
             scene: (*self.scene.borrow(py)).clone(),
             terrain: (*self.terrain.borrow(py)).clone(),
@@ -404,7 +497,31 @@ impl PyVineyardParams {
             vine: (*self.vine.borrow(py)).clone(),
             shoot: (*self.shoot.borrow(py)).clone(),
             leaf: (*self.leaf.borrow(py)).clone(),
+            cover: (*self.cover.borrow(py)).clone(),
+            weed: (*self.weed.borrow(py)).clone(),
         }
+    }
+
+    /// The fragments, checked. The one place a name a Python caller typed is
+    /// rejected: past here an unknown one is read as the default with a
+    /// warning, which is right for a build system and wrong for a caller
+    /// who misspelt a config.
+    fn snapshot(&self, py: Python<'_>) -> PyResult<VineyardParams> {
+        let params = self.fragments(py);
+        named(&params.cover.kind, &cover::Kind::NAMES, "cover.kind")?;
+        named(&params.weed.strip, &weed::Strip::NAMES, "weed.strip")?;
+        Ok(params)
+    }
+}
+
+/// `ValueError` unless `value` is one of `names`.
+fn named(value: &str, names: &[&str], field: &str) -> PyResult<()> {
+    if names.contains(&value) {
+        Ok(())
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{field} is {value:?}, which is none of {names:?}"
+        )))
     }
 }
 
@@ -427,5 +544,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<VineParams>()?;
     m.add_class::<ShootParams>()?;
     m.add_class::<LeafParams>()?;
+    m.add_class::<CoverParams>()?;
+    m.add_class::<WeedParams>()?;
     Ok(())
 }

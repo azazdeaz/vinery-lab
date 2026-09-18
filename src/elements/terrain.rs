@@ -316,6 +316,19 @@ impl Ground {
     pub fn lift(&self, p: Vec2) -> Vec3 {
         p.extend(self.height(p.x, p.y))
     }
+
+    /// The unit surface normal at `(x, y)`, from central differences one grid
+    /// spacing either side. `+Z` on flat ground, and wherever the grid hasn't
+    /// been built yet.
+    pub fn normal(&self, x: f32, y: f32) -> Vec3 {
+        let h = self.finest_spacing();
+        if h <= 0.0 {
+            return Vec3::Z;
+        }
+        let dx = (self.height(x + h, y) - self.height(x - h, y)) / (2.0 * h);
+        let dy = (self.height(x, y + h) - self.height(x, y - h)) / (2.0 * h);
+        Vec3::new(-dx, -dy, 1.0).normalize()
+    }
 }
 
 /// Locates `v` within `axis`, returning the bracketing indices and the
