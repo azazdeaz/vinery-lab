@@ -46,7 +46,7 @@ use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed, placed};
-use crate::ui::{Staged, dropdown};
+use crate::ui::{Staged, Tip, dropdown};
 
 /// The mesh-library prefix the plants are registered under.
 pub const PART: &str = "Weed";
@@ -834,6 +834,7 @@ pub fn ui() -> impl Scene {
         Children [
             dropdown(
                 "Strip",
+                "What is done to the under-vine strip, which is what picks the species growing in it.",
                 &Strip::NAMES,
                 |params| &params.weed.strip,
                 |params, name| params.weed.strip = name.to_string(),
@@ -841,6 +842,7 @@ pub fn ui() -> impl Scene {
             label_small("Strip width"),
             (
                 @FeathersSlider { @min: 0.1, @max: 0.6, @value: 0.3 }
+                Tip("How far the under-vine strip reaches either side of the trunks.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -851,6 +853,7 @@ pub fn ui() -> impl Scene {
             label_small("Weed pressure"),
             (
                 @FeathersSlider { @min: 0.0, @max: 25.0, @value: 6.0 }
+                Tip("Plants per square metre in the strip. Zero is a clean strip; the ceiling is one per slot, twenty-five.")
                 SliderStep(0.5)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -861,6 +864,7 @@ pub fn ui() -> impl Scene {
             label_small("Alley weeds"),
             (
                 @FeathersSlider { @min: 0.0, @max: 5.0, @value: 0.5 }
+                Tip("Plants per square metre in the alley, between the strips — the escapes.")
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -871,6 +875,7 @@ pub fn ui() -> impl Scene {
             label_small("Tall share"),
             (
                 @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.3 }
+                Tip("The share of plants that are tall bolters and broadleaves, against low tufts, mats and rosettes.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -881,6 +886,7 @@ pub fn ui() -> impl Scene {
             label_small("Weed variations"),
             (
                 @FeathersSlider { @min: 1.0, @max: 64.0, @value: 24.0 }
+                Tip("A budget, not a count: how many distinct plant meshes the scene may hold.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -891,6 +897,7 @@ pub fn ui() -> impl Scene {
             label_small("Weed detail"),
             (
                 @FeathersSlider { @min: 4.0, @max: 64.0, @value: 16.0 }
+                Tip("Triangles a leaf is cut into.")
                 SliderStep(2.0)
                 SliderPrecision(0)
                 on(slider_self_update)

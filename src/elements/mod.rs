@@ -36,7 +36,7 @@ pub mod wire;
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 /// Build order. Every layer's build system goes in exactly one of these, and
 /// they run chained in `PreUpdate`.
@@ -136,6 +136,7 @@ pub fn ui() -> impl Scene {
             bevy::feathers::display::label_small("Scene seed"),
             (
                 @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
+                Tip("The one seed the whole scene is generated from. Every layer salts it, so nudging this never re-rolls one layer alone.")
                 bevy::ui_widgets::SliderStep(1.0)
                 bevy::ui_widgets::SliderPrecision(0)
                 on(bevy::ui_widgets::slider_self_update)
@@ -147,6 +148,7 @@ pub fn ui() -> impl Scene {
             bevy::feathers::display::label_small("Season"),
             (
                 @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.5 }
+                Tip("Where in the growing season the scene is: 0 at budbreak, 1 at harvest. Only the weeds read it so far.")
                 bevy::ui_widgets::SliderStep(0.05)
                 bevy::ui_widgets::SliderPrecision(2)
                 on(bevy::ui_widgets::slider_self_update)

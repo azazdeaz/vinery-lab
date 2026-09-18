@@ -69,7 +69,7 @@ use crate::quantize::{Metric, farthest_first};
 use crate::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
 };
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 
 use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
@@ -992,6 +992,7 @@ pub fn ui() -> impl Scene {
             label_small("Trunk height"),
             (
                 @FeathersSlider { @min: 0.3, @max: 1.6, @value: 0.9 }
+                Tip("Ground to head — the height of the fruiting wire. Not the trellis height, which is where the post tops are.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1002,6 +1003,7 @@ pub fn ui() -> impl Scene {
             label_small("Trunk radius"),
             (
                 @FeathersSlider { @min: 0.01, @max: 0.08, @value: 0.035 }
+                Tip("Trunk radius at the base, in metres.")
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
@@ -1012,6 +1014,7 @@ pub fn ui() -> impl Scene {
             label_small("Trunk wobble"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.08, @value: 0.02 }
+                Tip("How far the trunk's axis wanders off vertical, in metres.")
                 SliderStep(0.005)
                 SliderPrecision(3)
                 on(slider_self_update)
@@ -1022,6 +1025,7 @@ pub fn ui() -> impl Scene {
             label_small("Cordons per vine"),
             (
                 @FeathersSlider { @min: 1.0, @max: 2.0, @value: 2.0 }
+                Tip("1 for a unilateral vine, 2 for a bilateral one.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -1032,6 +1036,7 @@ pub fn ui() -> impl Scene {
             label_small("Cordon gap"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.6, @value: 0.15 }
+                Tip("Bare wire left between the cordon tips of neighbouring vines. With the vine spacing, this is what sets how far a cordon reaches.")
                 SliderStep(0.05)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1042,6 +1047,7 @@ pub fn ui() -> impl Scene {
             label_small("Cordon radius"),
             (
                 @FeathersSlider { @min: 0.008, @max: 0.05, @value: 0.022 }
+                Tip("Cordon radius at the head, in metres.")
                 SliderStep(0.002)
                 SliderPrecision(3)
                 on(slider_self_update)
@@ -1052,6 +1058,7 @@ pub fn ui() -> impl Scene {
             label_small("Spur spacing"),
             (
                 @FeathersSlider { @min: 0.05, @max: 0.4, @value: 0.12 }
+                Tip("Target distance between spurs along a cordon.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1062,6 +1069,7 @@ pub fn ui() -> impl Scene {
             label_small("Spur length"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.15, @value: 0.05 }
+                Tip("How far a spur stands off its cordon.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1072,6 +1080,7 @@ pub fn ui() -> impl Scene {
             label_small("Shoots per spur"),
             (
                 @FeathersSlider { @min: 0.0, @max: 3.0, @value: 1.8 }
+                Tip("A fractional count: the whole part is certain, the fraction is the odds of one more. A spur is pruned to two buds, so 1.8 is a healthy vine.")
                 SliderStep(0.1)
                 SliderPrecision(1)
                 on(slider_self_update)
@@ -1082,6 +1091,7 @@ pub fn ui() -> impl Scene {
             label_small("Bark roughness"),
             (
                 @FeathersSlider { @min: 0.0, @max: 0.4, @value: 0.14 }
+                Tip("Depth of the bark ridges, as a fraction of the local radius.")
                 SliderStep(0.01)
                 SliderPrecision(2)
                 on(slider_self_update)
@@ -1092,6 +1102,7 @@ pub fn ui() -> impl Scene {
             label_small("Vine sides"),
             (
                 @FeathersSlider { @min: 3.0, @max: 16.0, @value: 8.0 }
+                Tip("Vertices around each tube. The silhouette — visible on every instance.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -1102,6 +1113,7 @@ pub fn ui() -> impl Scene {
             label_small("Vine detail"),
             (
                 @FeathersSlider { @min: 4.0, @max: 60.0, @value: 20.0 }
+                Tip("Rings per metre along each tube. Barely visible at row distance, so the cheaper of the two detail knobs to turn down.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -1112,6 +1124,7 @@ pub fn ui() -> impl Scene {
             label_small("Vine variations"),
             (
                 @FeathersSlider { @min: 1.0, @max: 8.0, @value: 4.0 }
+                Tip("A budget, not a count: how many distinct vine meshes the clustering may keep. Variety against memory.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)

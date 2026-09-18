@@ -26,7 +26,7 @@
 
 use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
-use crate::ui::Staged;
+use crate::ui::{Staged, Tip};
 use bevy::feathers::controls::FeathersSlider;
 use bevy::feathers::display::label_small;
 use bevy::prelude::*;
@@ -401,6 +401,7 @@ pub fn ui() -> impl Scene {
             label_small("Terrain length"),
             (
                 @FeathersSlider { @min: 5.0, @max: 200.0, @value: 80.0 }
+                Tip("Extent along X, in metres. Rows run along it at orientation 0.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -411,6 +412,7 @@ pub fn ui() -> impl Scene {
             label_small("Terrain width"),
             (
                 @FeathersSlider { @min: 5.0, @max: 200.0, @value: 50.0 }
+                Tip("Extent along Y, in metres.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -421,6 +423,7 @@ pub fn ui() -> impl Scene {
             label_small("Max inclination (deg)"),
             (
                 @FeathersSlider { @min: 0.0, @max: 45.0, @value: 20.0 }
+                Tip("Upper bound on the ground's slope. The amplitude is solved from it, so the same value means the same steepness at any extent.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -431,6 +434,7 @@ pub fn ui() -> impl Scene {
             label_small("Feature size (m)"),
             (
                 @FeathersSlider { @min: 2.0, @max: 60.0, @value: 16.0 }
+                Tip("Distance from one hill to the next. The noise is anchored in world space, so resizing the field uncovers more of the same landscape.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -441,6 +445,7 @@ pub fn ui() -> impl Scene {
             label_small("Terrain detail"),
             (
                 @FeathersSlider { @min: 2.0, @max: 16.0, @value: 8.0 }
+                Tip("Grid samples per feature — how finely the mesh follows the noise.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
