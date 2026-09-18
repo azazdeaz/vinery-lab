@@ -4,7 +4,9 @@
 //! has a size in meters (`feature_size`) and the field is anchored in world
 //! space, so growing the ground uncovers more of the same landscape instead
 //! of stretching one undulation across it, and the amplitude solved from
-//! `max_inclination` holds the steepness at any size. That one grid is both
+//! `max_inclination` holds the steepness at any size. Bumps ride on top of
+//! the hills: a second band of shorter waves, `roughness` meters tall, so a
+//! wheel or a foot has something to ride over. That one grid is both
 //! the mesh handed to the exporter and the [`Ground`] resource, the
 //! height-field sampler [`parcel`](super::parcel) uses to drape row layouts
 //! onto the surface.
@@ -65,7 +67,29 @@ const MIN_FEATURE_SIZE: f64 = 0.5;
 
 /// Cap on grid samples per axis. Fine detail over a large field would
 /// otherwise build a mesh too heavy to rebuild while a slider is dragged.
+///
+/// It is also the ceiling on how short a bump can be: a large field hits the
+/// cap before `detail` reaches a fine spacing, and the roughness band stops
+/// where the grid does. Clod-scale texture needs a small parcel until the
+/// collider's resolution is decoupled from the mesh's.
 const MAX_SAMPLES: usize = 256;
+
+/// Height falloff per octave down the roughness band: half the wavelength,
+/// half the height. That is the `1/f^2` elevation spectrum natural ground
+/// follows, and the one ratio at which every octave adds the same slope, so
+/// no single band dominates the texture.
+const ROUGHNESS_FALLOFF: f64 = 0.5;
+
+/// Grid samples one bump needs. An octave shorter than this has no room to be
+/// anything but per-vertex jitter -- steep facets the surface never meant to
+/// have -- so the band stops above it rather than aliasing below it.
+const SAMPLES_PER_BUMP: f64 = 4.0;
+
+/// Lattice shift between consecutive roughness octaves, in lattice units.
+/// [`perlin`] is exactly zero at every lattice point, and each octave's
+/// lattice contains the one above it, so unshifted octaves would all vanish
+/// together on a regular grid of flat spots.
+const OCTAVE_SHIFT: f64 = 0.37;
 
 #[derive(Resource, Clone, Debug, PartialEq)]
 #[cfg_attr(
@@ -77,17 +101,28 @@ pub struct TerrainParams {
     pub length: f32,
     /// Extent along Y, in meters.
     pub width: f32,
-    /// Upper bound on the ground's slope, in degrees. The elevation amplitude
+    /// Upper bound on the *hills'* slope, in degrees. The elevation amplitude
     /// is solved from this and `feature_size`, so the same value gives the
-    /// same steepness whatever the field's extent or resolution.
+    /// same steepness whatever the field's extent or resolution. This is the
+    /// grade a route has to climb; `roughness` rides on top of it and is not
+    /// counted here, the way a clod does not make a field steep.
     pub max_inclination: f32,
     /// Distance from one hill to the next, in meters. The noise field is
     /// anchored in world space at this size, so changing the extent uncovers
     /// more or less of the same landscape rather than rescaling it.
     pub feature_size: f32,
+    /// Height of the bumps riding on the hills, in meters — the clods, ruts
+    /// and tillage texture a machine rides over rather than climbs. Zero
+    /// leaves the ground as bare hills.
+    pub roughness: f32,
+    /// Longest wavelength in the bump band, in meters. Shorter octaves are
+    /// added below it, down to the finest the grid resolves, so this is the
+    /// coarsest bump rather than the only one.
+    pub roughness_size: f32,
     /// Grid samples per feature — how finely the mesh follows the noise. The
     /// grid steps `feature_size / detail` meters, capped at [`MAX_SAMPLES`]
-    /// samples per axis.
+    /// samples per axis. It also sets how short a bump may get: the roughness
+    /// band stops at the shortest wave this grid can carry.
     pub detail: u32,
 }
 
@@ -98,7 +133,9 @@ impl Default for TerrainParams {
             width: 50.0,
             max_inclination: 20.0,
             feature_size: 16.0,
-            detail: 8,
+            roughness: 0.08,
+            roughness_size: 4.0,
+            detail: 32,
         }
     }
 }
@@ -209,14 +246,61 @@ fn terrain_grid(params: &TerrainParams) -> Ground {
     let slope = params.max_inclination.clamp(0.0, 89.0).to_radians().tan() as f64;
     let amplitude = slope * feature / MAX_NOISE_SLOPE;
 
-    let heights = xs
-        .iter()
-        .flat_map(|&x| {
-            ys.iter()
-                .map(move |&y| (amplitude * perlin(x as f64 / feature, y as f64 / feature)) as f32)
-        })
-        .collect();
+    // Each axis rounds its own spacing to whole spans, so the grid is coarser
+    // than `spacing` on at least one of them. The band follows the coarser, or
+    // the finer axis would carry bumps the other one aliases. Both axes hold
+    // at least two samples, and each is evenly spaced, so one step describes
+    // it.
+    let step = |a: &[f32]| (a[1] - a[0]) as f64;
+    let octaves = roughness_octaves(
+        params.roughness as f64,
+        params.roughness_size as f64,
+        step(&xs).max(step(&ys)),
+    );
+
+    let mut heights = Vec::with_capacity(xs.len() * ys.len());
+    for &x in &xs {
+        for &y in &ys {
+            let (x, y) = (x as f64, y as f64);
+            let mut height = amplitude * perlin(x / feature, y / feature);
+            for (k, &(wave, bump)) in octaves.iter().enumerate() {
+                let shift = k as f64 * OCTAVE_SHIFT;
+                height += bump * perlin(x / wave + shift, y / wave - shift);
+            }
+            heights.push(height as f32);
+        }
+    }
     Ground { xs, ys, heights }
+}
+
+/// The roughness band as `(wavelength, height)` octaves in meters, coarsest
+/// first.
+///
+/// Wavelengths halve from `size` down to the shortest `spacing` can carry, and
+/// heights fall by [`ROUGHNESS_FALLOFF`] each step. The heights are then
+/// scaled to sum to `height`, so the band stays as tall as it was asked for
+/// however many octaves fit — a finer grid adds finer bumps to the same
+/// ground rather than piling more elevation onto it.
+///
+/// Empty when the grid is too coarse for even the first octave: a bump the
+/// mesh cannot carry is not ground, it is noise.
+fn roughness_octaves(height: f64, size: f64, spacing: f64) -> Vec<(f64, f64)> {
+    if height <= 0.0 || spacing <= 0.0 {
+        return Vec::new();
+    }
+    let shortest = spacing * SAMPLES_PER_BUMP;
+    let mut octaves = Vec::new();
+    let (mut wave, mut weight) = (size, 1.0);
+    while wave >= shortest {
+        octaves.push((wave, weight));
+        wave /= 2.0;
+        weight *= ROUGHNESS_FALLOFF;
+    }
+    let total: f64 = octaves.iter().map(|(_, weight)| weight).sum();
+    for (_, weight) in &mut octaves {
+        *weight *= height / total;
+    }
+    octaves
 }
 
 /// Sample coordinates across `extent`, centered on 0 and about `spacing`
@@ -423,7 +507,7 @@ pub fn ui() -> impl Scene {
             label_small("Max inclination (deg)"),
             (
                 @FeathersSlider { @min: 0.0, @max: 45.0, @value: 20.0 }
-                Tip("Upper bound on the ground's slope. The amplitude is solved from it, so the same value means the same steepness at any extent.")
+                Tip("Upper bound on the hills' slope. The amplitude is solved from it, so the same value means the same steepness at any extent. Roughness is not counted in it.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -442,10 +526,32 @@ pub fn ui() -> impl Scene {
                     params.terrain.feature_size = change.value;
                 })
             ),
+            label_small("Roughness (m)"),
+            (
+                @FeathersSlider { @min: 0.0, @max: 0.5, @value: 0.08 }
+                Tip("Height of the bumps riding on the hills: the clods and wheel ruts a machine drives over rather than climbs. Zero leaves bare hills.")
+                SliderStep(0.01)
+                SliderPrecision(2)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.roughness = change.value;
+                })
+            ),
+            label_small("Roughness size (m)"),
+            (
+                @FeathersSlider { @min: 0.5, @max: 20.0, @value: 4.0 }
+                Tip("The coarsest bump, not the only one. Shorter ones are added below it, each half the wavelength and half the height, the way real ground falls off.")
+                SliderStep(0.5)
+                SliderPrecision(1)
+                on(slider_self_update)
+                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
+                    params.terrain.roughness_size = change.value;
+                })
+            ),
             label_small("Terrain detail"),
             (
-                @FeathersSlider { @min: 2.0, @max: 16.0, @value: 8.0 }
-                Tip("Grid samples per feature — how finely the mesh follows the noise.")
+                @FeathersSlider { @min: 2.0, @max: 64.0, @value: 32.0 }
+                Tip("Grid samples per feature — how finely the mesh follows the noise. Also the floor on bump size: the roughness band stops at the shortest wave this grid can carry.")
                 SliderStep(1.0)
                 SliderPrecision(0)
                 on(slider_self_update)
@@ -570,6 +676,9 @@ mod tests {
     /// Elevation used to be capped in meters over a lattice fitted to the
     /// extent, which made the same cap on a smaller field mean steeper
     /// ground; the cap must now hold at any size.
+    ///
+    /// The cap is over the hills, so this measures bare ones — `roughness`
+    /// adds local slope on top of the grade by design.
     #[test]
     fn inclination_bounds_the_slope_at_any_field_size() {
         let steepest = |length, width| {
@@ -577,6 +686,7 @@ mod tests {
                 length,
                 width,
                 max_inclination: 20.0,
+                roughness: 0.0,
                 ..default()
             }))
         };
@@ -610,6 +720,57 @@ mod tests {
         for (x, y) in [(0.0, 0.0), (3.0, -2.0), (-5.0, 4.0)] {
             assert_eq!(large.height(x, y), small.height(x, y), "at ({x}, {y})");
         }
+    }
+
+    /// The band halves from its size down to the shortest wave the grid can
+    /// carry, and the octaves that fit share one height budget.
+    #[test]
+    fn the_roughness_band_halves_down_to_what_the_grid_carries() {
+        // 0.25 m samples carry a 1 m wave at four samples each, nothing shorter.
+        let octaves = roughness_octaves(0.12, 4.0, 0.25);
+        let waves: Vec<f64> = octaves.iter().map(|&(wave, _)| wave).collect();
+        assert_eq!(waves, vec![4.0, 2.0, 1.0]);
+
+        let heights: Vec<f64> = octaves.iter().map(|&(_, height)| height).collect();
+        // As tall as it was asked for, however many octaves fit ...
+        assert!(
+            (heights.iter().sum::<f64>() - 0.12).abs() < 1e-12,
+            "{heights:?}"
+        );
+        // ... and each octave half the one above it.
+        assert!((heights[1] / heights[0] - ROUGHNESS_FALLOFF).abs() < 1e-12);
+
+        // A grid too coarse for the first octave gets no bumps at all, rather
+        // than one aliased into per-vertex jitter.
+        assert!(roughness_octaves(0.12, 4.0, 2.0).is_empty());
+        assert!(roughness_octaves(0.0, 4.0, 0.25).is_empty());
+    }
+
+    /// Bumps ride on the hills rather than replacing them: the ground moves,
+    /// and it moves by no more than the roughness it was given.
+    #[test]
+    fn roughness_perturbs_the_ground_within_its_height() {
+        let ground = |roughness| {
+            terrain_grid(&TerrainParams {
+                length: 20.0,
+                width: 20.0,
+                roughness,
+                ..default()
+            })
+        };
+        let (bare, rough) = (ground(0.0), ground(0.15));
+
+        let worst = bare
+            .heights
+            .iter()
+            .zip(&rough.heights)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f32, f32::max);
+        assert!(worst > 0.01, "the ground is no longer smooth: {worst}");
+        assert!(
+            worst < 0.15,
+            "and the bumps stay within their height: {worst}"
+        );
     }
 
     /// `MAX_NOISE_SLOPE` is measured rather than derived, so it is worth

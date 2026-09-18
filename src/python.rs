@@ -37,13 +37,17 @@ impl TerrainParams {
         width=50.0,
         max_inclination=20.0,
         feature_size=16.0,
-        detail=8,
+        roughness=0.08,
+        roughness_size=4.0,
+        detail=32,
     ))]
     fn py_new(
         length: f32,
         width: f32,
         max_inclination: f32,
         feature_size: f32,
+        roughness: f32,
+        roughness_size: f32,
         detail: u32,
     ) -> Self {
         Self {
@@ -51,6 +55,8 @@ impl TerrainParams {
             width,
             max_inclination,
             feature_size,
+            roughness,
+            roughness_size,
             detail,
         }
     }
