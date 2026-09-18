@@ -97,6 +97,8 @@ fn terrain(p: &TerrainParams, out: &mut Fields) {
     out.float("width", p.width, d.width);
     out.float("max_inclination", p.max_inclination, d.max_inclination);
     out.float("feature_size", p.feature_size, d.feature_size);
+    out.float("roughness", p.roughness, d.roughness);
+    out.float("roughness_size", p.roughness_size, d.roughness_size);
     out.int("detail", p.detail as u64, d.detail as u64);
 }
 

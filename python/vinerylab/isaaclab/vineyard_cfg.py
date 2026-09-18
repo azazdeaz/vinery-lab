@@ -43,18 +43,31 @@ class TerrainCfg:
     0 -- and `width` along Y. The ground is noise sampled over that extent:
     `feature_size` is the distance in meters from one hill to the next and is
     anchored in world space, so a larger field shows more hills rather than
-    larger ones. `max_inclination`, in degrees, caps how steep the ground gets
+    larger ones. `max_inclination`, in degrees, caps how steep the *hills* get
     -- the elevation is solved from it and `feature_size`, so the same angle
-    means the same steepness at any size. `detail` is grid samples per
-    feature, which sets both the mesh density and the collision height field's
-    resolution.
+    means the same steepness at any size.
+
+    `roughness` is the height in meters of the bumps riding on those hills --
+    the clods, ruts and tillage texture a machine drives over rather than
+    climbs, and the reason a wheel or a foot sees anything but a plane. Set it
+    to 0 for bare hills. `roughness_size` is the longest bump wavelength;
+    shorter ones are added below it, each half the wavelength and half the
+    height, which is the spectrum natural ground follows. The band does not
+    count towards `max_inclination`, so adding bumps never flattens the grade.
+
+    `detail` is grid samples per feature, which sets the mesh density, the
+    collision height field's resolution, and how short a bump can get: the
+    roughness band stops at the shortest wave the grid can carry, so bumps
+    below about four grid steps need a higher `detail` to appear at all.
     """
 
     length: float = 80.0
     width: float = 50.0
     max_inclination: float = 20.0
     feature_size: float = 16.0
-    detail: int = 8
+    roughness: float = 0.08
+    roughness_size: float = 4.0
+    detail: int = 32
 
 
 @configclass
