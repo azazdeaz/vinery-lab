@@ -50,8 +50,9 @@ pub const POLE: u32 = 0x8C8981;
 /// — enough to read as a separate thing where one crosses another.
 pub const WIRE: u32 = 0xA9ADAD;
 
-/// Bare cultivated ground between the rows. Dry loam.
-pub const GROUND: u32 = 0x6B5744;
+/// Bare cultivated ground between the rows. Worked loam, dark enough that
+/// anything standing on it reads against it.
+pub const GROUND: u32 = 0x4A3B2D;
 
 /// A living sward: the grass of a grassed alley. Lighter and yellower than a
 /// vine blade, which is what separates the floor from the canopy above it.
