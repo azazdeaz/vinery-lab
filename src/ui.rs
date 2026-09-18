@@ -252,10 +252,14 @@ fn commit(world: &mut World, mut still: Local<Option<f32>>) {
     }
 }
 
-/// Marks the params panel's root node so other systems (e.g. the viewer
-/// camera) can tell whether the pointer is over the panel.
+/// Marks a piece of UI the pointer can be over, so the viewer camera knows to
+/// stop orbiting while it is — see `viewer::sync_camera_enabled_with_ui`.
+///
+/// Goes on whatever node actually takes the hover: the params panel's root,
+/// whose background covers it, but the viewport toolbar's *button*, since a
+/// hovered node blocks its ancestors from counting as hovered.
 #[derive(Component, Clone, Default)]
-pub struct ParamsPanel;
+pub struct BlocksCamera;
 
 fn params_panel_list() -> impl SceneList {
     bsn_list![params_panel()]
@@ -273,7 +277,7 @@ fn params_panel() -> impl Scene {
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,
         }
-        ParamsPanel
+        BlocksCamera
         Interaction
         ThemeBackgroundColor(tokens::WINDOW_BG)
         // `min_height` on both: a flex item refuses to shrink below its own
