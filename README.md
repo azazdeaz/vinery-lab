@@ -10,8 +10,7 @@ This is a parametric vineyard generator. It generates USD scenes for robotics si
 [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/)** — needs WebGPU. It exports the same way the native editor does, by
 copying a config snippet; generating the USD itself stays local.
 
-<img width="2432" height="1087" alt="Screenshot from 2026-09-17 08-13-45" src="https://github.com/user-attachments/assets/434a299c-49b7-4ba7-815d-43a02cdb08f7" />
-
+<img width="2401" height="1073" alt="image" src="https://github.com/user-attachments/assets/3eafecd5-9707-407f-a500-ec52634abfd1" />
 
 
 
