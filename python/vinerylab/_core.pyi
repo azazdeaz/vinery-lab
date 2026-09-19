@@ -204,7 +204,8 @@ class ShootParams:
     shoot positioning, so grown out into the alley, or by hedging, so grown on
     past the top wire. A stray shoot leans out of the canopy, longer than the
     shoots beside it, and is exported as a deformable curve that a physics
-    engine bends.
+    engine bends. Setting `flexible` to False exports it as an ordinary static
+    mesh at the same rest shape instead: the same lean, nothing to simulate.
     """
 
     variations: int
@@ -216,6 +217,7 @@ class ShootParams:
     internode: float
     leaf_droop: float
     stray: float
+    flexible: bool
 
     def __init__(
         self,
@@ -228,6 +230,7 @@ class ShootParams:
         internode: float = 0.07,
         leaf_droop: float = 0.35,
         stray: float = 0.0,
+        flexible: bool = True,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

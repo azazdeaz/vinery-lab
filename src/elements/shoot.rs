@@ -64,6 +64,10 @@
 //! on a moving transform does not. One shared tube per segment also instances,
 //! which a curve deformed per shoot cannot.
 //!
+//! [`ShootParams::flexible`] is what authors the curve at all. With it off a
+//! stray shoot is drawn the way a held one is — one stem, hung with its own
+//! leaves — leaning out of the canopy the same way, with nothing to bend it.
+//!
 //! Same split as one level up: where the nodes are comes from the
 //! **representative**, because a leaf has to sit on the stem that actually got
 //! built, while each leaf's bearing, droop, twist, size and blade are drawn per
@@ -76,10 +80,14 @@
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use bevy::feathers::controls::FeathersSlider;
+use bevy::feathers::controls::{FeathersCheckbox, FeathersSlider};
 use bevy::feathers::display::label_small;
+use bevy::feathers::theme::ThemedText;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
+use bevy::ui::Checked;
+use bevy::ui_widgets::{
+    SliderPrecision, SliderStep, ValueChange, checkbox_self_update, slider_self_update,
+};
 use nalgebra::Point3;
 
 use super::leaf;
@@ -326,8 +334,9 @@ impl ShootConfig {
 
     /// Whether this shoot escaped the trellis.
     ///
-    /// A stray shoot is the one kind exported as a cable rather than a mesh:
-    /// the trellis holds the others still, and nothing holds this one.
+    /// A stray shoot is the one kind exported as a cable rather than a mesh —
+    /// the trellis holds the others still, and nothing holds this one — unless
+    /// [`ShootParams::flexible`] is off, which draws it like the rest.
     pub fn is_stray(&self) -> bool {
         self.pitch > 0.0
     }
@@ -417,8 +426,17 @@ pub struct ShootParams {
     ///
     /// Every stray shoot is exported as a deformable curve rather than a mesh,
     /// a chain of rigid bodies in the simulation, so this is the most expensive
-    /// knob in the scene — see [`CABLE_SEGMENT`] for what one costs.
+    /// knob in the scene — see [`CABLE_SEGMENT`] for what one costs, and
+    /// [`flexible`](Self::flexible) for turning that cost off.
     pub stray: f32,
+    /// Whether a stray shoot is one a solver bends.
+    ///
+    /// On, it is authored as a deformable curve, drawn by a tube on each of
+    /// the rod segments built from it. Off, it is a single static mesh at the
+    /// same rest shape: the same lean out of the canopy, one prim instead of a
+    /// chain of them, and nothing for a solver to pick up. For a backend with
+    /// no rods, or to keep a canopy's look without paying for the bodies.
+    pub flexible: bool,
 }
 
 impl Default for ShootParams {
@@ -433,6 +451,7 @@ impl Default for ShootParams {
             internode: 0.07,
             leaf_droop: 0.35,
             stray: 0.0,
+            flexible: true,
         }
     }
 }
@@ -937,8 +956,9 @@ pub fn stray_pitch(params: &ShootParams, seed: u64, order: u64) -> f32 {
 // ─── Building ───────────────────────────────────────────────────────
 
 /// What a representative is drawn with: one stem for a shoot the trellis
-/// holds, or a tube on each rod segment for a stray one. Never both — the
-/// other would be authored into the scene and referenced by nothing.
+/// holds — or one that strayed with [`ShootParams::flexible`] off — and a tube
+/// on each rod segment for a flexible stray one. Never both: the other would
+/// be authored into the scene and referenced by nothing.
 enum Drawn<G> {
     Stem(G),
     Tubes(Vec<G>),
@@ -952,10 +972,13 @@ struct ShootBuild {
     drawn: Drawn<Mesh>,
 }
 
-fn build_shoot(config: &ShootConfig, seed: u64) -> anyhow::Result<ShootBuild> {
+/// `flexible` is [`ShootParams::flexible`]: with it off, a stray shoot is
+/// built as the mesh a held one is, and the centerline is only what its leaves
+/// are placed along.
+fn build_shoot(config: &ShootConfig, seed: u64, flexible: bool) -> anyhow::Result<ShootBuild> {
     let axis = ShootAxis::new(config, &mut Rng::new(seed));
     let centerline = Centerline::new(&axis);
-    let drawn = if config.is_stray() {
+    let drawn = if config.is_stray() && flexible {
         Drawn::Tubes(
             segment_tubes(&centerline, config.sides as usize)
                 .iter()
@@ -1034,7 +1057,7 @@ pub(crate) fn build(
     // The representatives are independent of each other, so they are grown in
     // parallel and registered serially: `Assets<Mesh>` takes one writer.
     let stems = par_map(&representatives, |index, config| {
-        build_shoot(config, stem_seed(index))
+        build_shoot(config, stem_seed(index), params.flexible)
     });
 
     let mut built: Vec<Built> = Vec::with_capacity(representatives.len());
@@ -1233,6 +1256,16 @@ pub fn ui() -> impl Scene {
                 on(slider_self_update)
                 on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
                     params.shoot.stray = change.value.clamp(0.0, 1.0);
+                })
+            ),
+            (
+                @FeathersCheckbox { @caption: bsn! { Text("Bendable strays") ThemedText } }
+                // Checked, because the params default to bending them.
+                Checked
+                Tip("Export the stray shoots as deformable curves a solver bends. Off, they stand at their rest shape as ordinary meshes — the same lean, none of the bodies.")
+                on(checkbox_self_update)
+                on(|change: On<ValueChange<bool>>, mut params: ResMut<Staged>| {
+                    params.shoot.flexible = change.value;
                 })
             ),
             label_small("Leaf spacing"),
@@ -1692,7 +1725,7 @@ mod tests {
             ShootConfig::new(&params(), 0.0, 0.0, 9.0),
             ShootConfig::new(&params(), 4.0, 4.0, 9.0),
         ] {
-            let built = build_shoot(&config, 1).expect("builds at the stops");
+            let built = build_shoot(&config, 1, true).expect("builds at the stops");
             let points: Vec<[f32; 3]> = match &built.drawn {
                 Drawn::Stem(stem) => positions(stem),
                 Drawn::Tubes(tubes) => tubes.iter().flat_map(&positions).collect(),
@@ -2090,6 +2123,44 @@ mod tests {
                 .all(|(name, _)| !name.starts_with(&format!("{PART}_"))),
             "a stem was built for shoots that never draw one"
         );
+    }
+
+    /// With `flexible` off the same shoots still stray — same pitch, same
+    /// lean out of the canopy — and are drawn the way a held shoot is: one
+    /// stem, no curve for a solver to find, and no rod segments to hang.
+    #[test]
+    fn a_stray_shoot_is_a_plain_mesh_when_nothing_bends_it() {
+        let mut app = testing::grown(VineyardParams {
+            shoot: ShootParams {
+                stray: 1.0,
+                flexible: false,
+                ..default()
+            },
+            ..default()
+        });
+
+        let shoots = organs::<ShootConfig>(app.world_mut());
+        assert!(shoots.len() > 100, "the fixture grew shoots");
+        assert!(shoots.iter().all(|shoot| shoot.config.is_stray()));
+
+        for shoot in &shoots {
+            let entity = testing::prim(app.world_mut(), &shoot.path.split('/').collect::<Vec<_>>())
+                .expect("the shoot is on the scene graph");
+            let children = named_children(app.world_mut(), entity);
+            assert_eq!(
+                children.iter().filter(|(name, _)| name == STEM).count(),
+                1,
+                "{}: draws one stem of its own",
+                shoot.path
+            );
+            assert!(
+                !children
+                    .iter()
+                    .any(|(name, _)| name == CABLE || name.contains("_edge_body_")),
+                "{}: nothing bends it, so it carries no cable",
+                shoot.path
+            );
+        }
     }
 
     /// A replant is a single buried shoot, so it has to come out of this layer

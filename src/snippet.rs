@@ -160,6 +160,7 @@ fn shoot(p: &ShootParams, out: &mut Fields) {
     out.float("internode", p.internode, d.internode);
     out.float("leaf_droop", p.leaf_droop, d.leaf_droop);
     out.float("stray", p.stray, d.stray);
+    out.boolean("flexible", p.flexible, d.flexible);
 }
 
 fn leaf(p: &LeafParams, out: &mut Fields) {
