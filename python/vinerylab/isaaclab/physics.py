@@ -87,19 +87,54 @@ they swing harder than with no damping at all. Damping in this solver softens
 a rod before it slows one.
 """
 
+SHOOT_GROUP = -2
+"""Collision group the rod capsules and the static scene are moved into.
+
+Not a preference. Newton appends one candidate pair per colliding shape pair
+while `Model.finalize` builds `shape_contact_pairs`, and sizes every broad- and
+narrow-phase buffer from that list, so N rod segments cost N(N-1)/2 pairs
+before a step is taken: ten thousand segments is 55 million pairs and 4 GiB.
+Filtering happens as the list is built, not inside a kernel, so a group that
+declines a pair never allocates it.
+
+A *negative* group collides with every group but its own, which is the one
+thing the group algebra can express in O(1) per shape -- an explicit filter
+pair per rod pair is the same quadratic moved onto the host. So this drops
+rod-vs-rod, and keeps rod-vs-robot, since the robot keeps the default group 1
+and positive meets negative.
+
+The static scene joins the same group rather than getting one of its own,
+because two *positive* groups do not collide either: a group that excluded the
+rods would also stop the terrain from carrying the robot. Nothing is lost by
+it. Under `make_coupled_physics_cfg` a static shape belongs to the "rigid"
+entry, so a rod-vs-static pair is counted here and solved by nobody -- the
+shoots already fall through the ground, the posts and the wire.
+
+Measured on a vineyard-shaped rig -- a mesh terrain, 500 static capsules and
+2,002 rod segments -- stepped through the coupled solver: 407 MiB with
+everything colliding, 213 MiB with the rods alone in this group, 125 MiB with
+the static scene in it too.
+"""
+
 
 def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) -> None:
-    """Stiffen every rod joint against gravity and give it damping.
+    """Stiffen every rod joint against gravity, damp it, and stop rods colliding.
 
     Call once from inside the running app and **before the first
-    `SimulationContext.reset()`**: that is what builds the model, and the
-    solver copies a rod's stiffness and damping out of the model when it is
-    constructed and never looks again. The only window to write them is the
+    `SimulationContext.reset()`**: that is what builds the model, and both the
+    stiffnesses and the collision groups are read out of the builder when it is
+    finalized and never looked at again. The only window to write them is the
     builder's -- after the importer has filled it, before it is finalized --
     and Isaac Lab dispatches `MODEL_INIT` in exactly that window.
 
-    Without this a cane swings from its base like a pendulum for as long as
-    the run lasts; see `SHOOT_STIFFEN`.
+    Without the stiffening a cane swings from its base like a pendulum for as
+    long as the run lasts; see `SHOOT_STIFFEN`. Without the grouping the scene
+    pays N(N-1)/2 candidate pairs for collisions it never solves; see
+    `SHOOT_GROUP`.
+
+    Belongs with the config `make_coupled_physics_cfg` builds, which is what
+    makes `SHOOT_GROUP` free: under a single-solver backend the rods really do
+    collide with the ground, and this would drop them through it.
     """
     # Imported here and not at module scope: `newton` brings `pxr` with it, and
     # Kit's own `pxr` wins the import only if nothing loaded the pip one first.
@@ -111,6 +146,11 @@ def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) 
         for joint, kind in enumerate(builder.joint_type):
             if kind != JointType.ROD:
                 continue
+            # Both ends, so a chain's first body is reached too: it is the
+            # first rod joint's parent and no rod joint's child.
+            for body in (builder.joint_parent[joint], builder.joint_child[joint]):
+                for shape in builder.body_shapes[body]:
+                    builder.shape_collision_group[shape] = SHOOT_GROUP
             # A rod's four slots, in the builder's order: stretch, shear, bend,
             # twist.
             dof = builder.joint_qd_start[joint]
@@ -118,6 +158,11 @@ def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) 
                 builder.joint_target_ke[slot] *= stiffen
             for slot in range(dof, dof + 4):
                 builder.joint_target_kd[slot] = damping * builder.joint_target_ke[slot]
+
+        # The static scene. `body_shapes` is keyed by body index and a static
+        # shape has none, so -1 is the whole of it.
+        for shape in builder.body_shapes[-1]:
+            builder.shape_collision_group[shape] = SHOOT_GROUP
 
     NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
 
