@@ -188,6 +188,11 @@ class ShootCfg:
     under the coupled solver `make_coupled_physics_cfg` builds; every other
     backend imports it as an inert curve at its rest shape. Each one is a chain
     of rigid bodies, so this is the most expensive knob here: keep it low.
+
+    `flexible` is what authors that curve. Off, a stray shoot is a static mesh
+    at the same rest shape -- it leans into the alley the same way, and there
+    is nothing for a solver to bend. For a backend with no rods, or a scene
+    that wants the look without the bodies.
     """
 
     variations: int = 4
@@ -199,6 +204,7 @@ class ShootCfg:
     internode: float = 0.07
     leaf_droop: float = 0.35
     stray: float = 0.0
+    flexible: bool = True
 
 
 @configclass
