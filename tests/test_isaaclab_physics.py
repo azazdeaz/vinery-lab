@@ -84,12 +84,21 @@ def builder(monkeypatch) -> object:
     Four slots per rod, starting at the joint's own DoF: a walk that reads the
     start index or the slot count wrong writes into a neighbouring joint
     instead, and nothing about that fails loudly.
+
+    Bodies 0 and 1 are the rod's, carrying shapes 0 and 1; bodies 2 and 3 stand
+    for the robot, carrying shapes 2 and 3; shapes 4 and 5 are the static scene,
+    which is body -1 because a static shape has no body. The other two joints
+    are there to be walked past.
     """
     builder = types.SimpleNamespace(
         joint_type=[JointType.D6, JointType.ROD, JointType.REVOLUTE],
         joint_qd_start=[0, 6, 10],
         joint_target_ke=[1.0] * 6 + [200.0, 100.0, 4.0, 2.0] + [1.0],
         joint_target_kd=[0.0] * 11,
+        joint_parent=[3, 0, 2],
+        joint_child=[2, 1, 3],
+        body_shapes={-1: [4, 5], 0: [0], 1: [1], 2: [2], 3: [3]},
+        shape_collision_group=[1] * 6,
     )
     monkeypatch.setattr(NewtonManager, "_builder", builder, raising=False)
     # `tune_shoots` registers a callback per call, and nothing here deregisters.
@@ -116,3 +125,30 @@ def test_every_rod_slot_takes_damping_from_its_own_stiffness(builder):
     NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
 
     assert builder.joint_target_kd == pytest.approx([0.0] * 6 + [20.0, 10.0, 0.4, 0.2] + [0.0])
+
+
+def test_the_rod_capsules_and_the_static_scene_share_a_group(builder):
+    """The robot has to keep the default group: it is what the rods are left
+    colliding with. A walk that reached its bodies -- following the wrong
+    joints, or a rod joint's own DoF index instead of its bodies -- would take
+    the robot out of the rods' reach and nothing would report it."""
+    physics.tune_shoots()
+    NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
+
+    group = physics.SHOOT_GROUP
+    assert builder.shape_collision_group == [group, group, 1, 1, group, group]
+
+
+def test_the_shoot_group_drops_rod_pairs_and_keeps_the_robot(builder):
+    """Pinned against Newton's own test rather than restated, because the
+    convention is a bare integer sign with nothing to make a change in it
+    fail: were negative groups to start colliding with their own, the scene
+    would still run and quietly cost N(N-1)/2 candidate pairs again."""
+    from newton import ModelBuilder
+
+    collides = ModelBuilder()._test_group_pair
+    robot = 1  # `ModelBuilder.ShapeConfig.collision_group`'s default.
+
+    assert not collides(physics.SHOOT_GROUP, physics.SHOOT_GROUP)
+    assert collides(physics.SHOOT_GROUP, robot)
+    assert collides(robot, physics.SHOOT_GROUP)
