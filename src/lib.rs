@@ -15,6 +15,7 @@ pub mod quantize;
 pub mod record;
 pub mod scene;
 pub mod snippet;
+pub mod stats;
 pub mod ui;
 pub mod viewer;
 
