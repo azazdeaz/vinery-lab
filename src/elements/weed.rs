@@ -30,10 +30,7 @@
 use std::f64::consts::TAU;
 
 use anyhow::Context;
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::Point3;
 
 use super::terrain::Ground;
@@ -44,9 +41,9 @@ use super::util::shapes::{self, bent, lying, standing};
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
+use crate::params::{Choices, Label, Slider};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed, placed};
-use crate::ui::{Staged, Tip, dropdown};
 
 /// The mesh-library prefix the plants are registered under.
 pub const PART: &str = "Weed";
@@ -302,32 +299,53 @@ impl Metric<WeedConfig> for WeedMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// The plants that come up where nothing was sown: in the under-vine strip,
+/// and as escapes in the alley.
+///
+/// `strip` is what is done to the under-vine strip, and it picks the species;
+/// the scene's `season` tilts the mix between the spring and summer flushes
+/// and decides whether a bolter has bolted. Every plant is one mesh:
+/// `variations` is the budget of distinct ones and `detail` the triangles a
+/// leaf is cut into.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct WeedParams {
-    /// One of [`Strip::NAMES`]: what is done to the under-vine strip, which
-    /// picks the species. A name that is none of them is read as the default
-    /// with a warning — see [`strip`](Self::strip).
+    /// What is done to the under-vine strip, by name, which picks the
+    /// species: `herbicide` leaves the annual grasses and tall bolters a spray
+    /// does not kill, `tilled` the annuals that come back from seed, `mown`
+    /// the rosettes and tufts that duck the blade, `untouched` everything.
+    ///
+    /// A name that is none of [`Strip::NAMES`] is read as the default with a
+    /// warning; Python rejects it at the boundary instead.
+    #[reflect(@Choices(&Strip::NAMES))]
     pub strip: String,
     /// How far the under-vine strip reaches either side of the trunks, in
     /// meters.
+    #[reflect(@Slider { min: 0.1, max: 0.6, step: 0.05 })]
     pub strip_width: f32,
     /// Plants per square metre in the strip. Zero is a clean strip; the
     /// ceiling is one plant per slot, twenty-five.
+    #[reflect(@Slider { min: 0.0, max: 25.0, step: 0.5 })]
     pub pressure: f32,
     /// Plants per square metre in the alley, between the strips — the
     /// escapes.
+    #[reflect(@Slider { min: 0.0, max: 5.0, step: 0.1 }, @Label("Alley weeds"))]
     pub alley_pressure: f32,
     /// The share of plants that are tall — bolters and broadleaves — as
-    /// against low tufts, mats and rosettes. `0..=1`.
+    /// against low tufts, mats and rosettes.
+    #[reflect(@Slider { min: 0.0, max: 1.0, step: 0.05 }, @Label("Tall share"))]
     pub tall: f32,
     /// How many distinct plant meshes the scene may hold. A budget, not a
-    /// count; see [`WeedMetric`].
+    /// count.
+    ///
+    /// See [`WeedMetric`] for what it is spent on.
+    #[reflect(@Slider { min: 1.0, max: 64.0, step: 1.0 })]
     pub variations: u32,
     /// Triangles a leaf is cut into.
+    #[reflect(@Slider { min: 4.0, max: 64.0, step: 2.0 })]
     pub detail: u32,
 }
 
@@ -824,89 +842,6 @@ fn surface(index: u64) -> Surface {
         color::srgb(color::WEED),
         &mut Rng::new(color::COLOR_STREAM ^ WEED_SHADE ^ salt(index)),
     ))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            dropdown(
-                "Strip",
-                "What is done to the under-vine strip, which is what picks the species growing in it.",
-                &Strip::NAMES,
-                |params| &params.weed.strip,
-                |params, name| params.weed.strip = name.to_string(),
-            ),
-            label_small("Strip width"),
-            (
-                @FeathersSlider { @min: 0.1, @max: 0.6, @value: 0.3 }
-                Tip("How far the under-vine strip reaches either side of the trunks.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.strip_width = change.value.max(0.0);
-                })
-            ),
-            label_small("Weed pressure"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 25.0, @value: 6.0 }
-                Tip("Plants per square metre in the strip. Zero is a clean strip; the ceiling is one per slot, twenty-five.")
-                SliderStep(0.5)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.pressure = change.value.max(0.0);
-                })
-            ),
-            label_small("Alley weeds"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 5.0, @value: 0.5 }
-                Tip("Plants per square metre in the alley, between the strips — the escapes.")
-                SliderStep(0.1)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.alley_pressure = change.value.max(0.0);
-                })
-            ),
-            label_small("Tall share"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.3 }
-                Tip("The share of plants that are tall bolters and broadleaves, against low tufts, mats and rosettes.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.tall = change.value.clamp(0.0, 1.0);
-                })
-            ),
-            label_small("Weed variations"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 64.0, @value: 24.0 }
-                Tip("A budget, not a count: how many distinct plant meshes the scene may hold.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.variations = change.value.round().max(1.0) as u32;
-                })
-            ),
-            label_small("Weed detail"),
-            (
-                @FeathersSlider { @min: 4.0, @max: 64.0, @value: 16.0 }
-                Tip("Triangles a leaf is cut into.")
-                SliderStep(2.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.weed.detail = change.value.round().max(1.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

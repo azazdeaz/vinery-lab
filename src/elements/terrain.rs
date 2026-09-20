@@ -26,13 +26,10 @@
 //! the [`Ground`] field, and chaining them here guarantees the ordering that
 //! system-ordering-across-elements would only imply.
 
+use crate::params::{Label, Slider};
 use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
-use crate::ui::{Staged, Tip};
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
 use super::Grow;
 use super::util::mesh::MeshData;
@@ -91,38 +88,56 @@ const SAMPLES_PER_BUMP: f64 = 4.0;
 /// together on a regular grid of flat spots.
 const OCTAVE_SHIFT: f64 = 0.37;
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// The ground surface the vineyard stands on: hills the field is laid over,
+/// with tillage bumps riding on them.
+///
+/// `length` runs along X, the direction rows take at orientation 0, and
+/// `width` along Y. The hills are noise anchored in world space at
+/// `feature_size`, so a larger field shows more hills rather than larger ones,
+/// and their grade is capped by `max_inclination`. The bumps are a separate
+/// band, `roughness` tall and `roughness_size` long at the coarsest, that does
+/// not count towards the grade: adding them never flattens a hill.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct TerrainParams {
     /// Extent along X, in meters. Rows run along it at orientation 0.
+    #[reflect(@Slider { min: 5.0, max: 200.0, step: 1.0 })]
     pub length: f32,
     /// Extent along Y, in meters.
+    #[reflect(@Slider { min: 5.0, max: 200.0, step: 1.0 })]
     pub width: f32,
-    /// Upper bound on the *hills'* slope, in degrees. The elevation amplitude
+    /// Upper bound on the hills' slope, in degrees. The elevation amplitude
     /// is solved from this and `feature_size`, so the same value gives the
     /// same steepness whatever the field's extent or resolution. This is the
     /// grade a route has to climb; `roughness` rides on top of it and is not
     /// counted here, the way a clod does not make a field steep.
+    #[reflect(@Slider { min: 0.0, max: 45.0, step: 1.0 }, @Label("Max inclination (deg)"))]
     pub max_inclination: f32,
     /// Distance from one hill to the next, in meters. The noise field is
     /// anchored in world space at this size, so changing the extent uncovers
     /// more or less of the same landscape rather than rescaling it.
+    #[reflect(@Slider { min: 2.0, max: 60.0, step: 1.0 }, @Label("Feature size (m)"))]
     pub feature_size: f32,
     /// Height of the bumps riding on the hills, in meters — the clods, ruts
     /// and tillage texture a machine rides over rather than climbs. Zero
     /// leaves the ground as bare hills.
+    #[reflect(@Slider { min: 0.0, max: 0.5, step: 0.01 }, @Label("Roughness (m)"))]
     pub roughness: f32,
     /// Longest wavelength in the bump band, in meters. Shorter octaves are
     /// added below it, down to the finest the grid resolves, so this is the
     /// coarsest bump rather than the only one.
+    #[reflect(@Slider { min: 0.5, max: 20.0, step: 0.5 }, @Label("Roughness size (m)"))]
     pub roughness_size: f32,
-    /// Grid samples per feature — how finely the mesh follows the noise. The
-    /// grid steps `feature_size / detail` meters, capped at [`MAX_SAMPLES`]
-    /// samples per axis. It also sets how short a bump may get: the roughness
-    /// band stops at the shortest wave this grid can carry.
+    /// Grid samples per feature: how finely the mesh follows the noise. Also
+    /// the collision height field's resolution, and how short a bump may get,
+    /// since the roughness band stops at the shortest wave the grid carries.
+    ///
+    /// The grid steps `feature_size / detail` meters, capped at
+    /// [`MAX_SAMPLES`] samples per axis.
+    #[reflect(@Slider { min: 2.0, max: 64.0, step: 1.0 })]
     pub detail: u32,
 }
 
@@ -476,91 +491,6 @@ fn perlin(x: f64, y: f64) -> f64 {
         lerp(corner(0, 1), corner(1, 1), u),
         v,
     )
-}
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Terrain length"),
-            (
-                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 80.0 }
-                Tip("Extent along X, in metres. Rows run along it at orientation 0.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.length = change.value;
-                })
-            ),
-            label_small("Terrain width"),
-            (
-                @FeathersSlider { @min: 5.0, @max: 200.0, @value: 50.0 }
-                Tip("Extent along Y, in metres.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.width = change.value;
-                })
-            ),
-            label_small("Max inclination (deg)"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 45.0, @value: 20.0 }
-                Tip("Upper bound on the hills' slope. The amplitude is solved from it, so the same value means the same steepness at any extent. Roughness is not counted in it.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.max_inclination = change.value;
-                })
-            ),
-            label_small("Feature size (m)"),
-            (
-                @FeathersSlider { @min: 2.0, @max: 60.0, @value: 16.0 }
-                Tip("Distance from one hill to the next. The noise is anchored in world space, so resizing the field uncovers more of the same landscape.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.feature_size = change.value;
-                })
-            ),
-            label_small("Roughness (m)"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.5, @value: 0.08 }
-                Tip("Height of the bumps riding on the hills: the clods and wheel ruts a machine drives over rather than climbs. Zero leaves bare hills.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.roughness = change.value;
-                })
-            ),
-            label_small("Roughness size (m)"),
-            (
-                @FeathersSlider { @min: 0.5, @max: 20.0, @value: 4.0 }
-                Tip("The coarsest bump, not the only one. Shorter ones are added below it, each half the wavelength and half the height, the way real ground falls off.")
-                SliderStep(0.5)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.roughness_size = change.value;
-                })
-            ),
-            label_small("Terrain detail"),
-            (
-                @FeathersSlider { @min: 2.0, @max: 64.0, @value: 32.0 }
-                Tip("Grid samples per feature — how finely the mesh follows the noise. Also the floor on bump size: the roughness band stops at the shortest wave this grid can carry.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.terrain.detail = change.value.round().max(1.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

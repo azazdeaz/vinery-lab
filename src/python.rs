@@ -2,16 +2,24 @@
 //! (see `crate::elements`); this adds their constructors and the aggregate
 //! Python actually calls.
 //!
+//! A fragment's constructor is keyword-only and generic — `PoleParams(radius=0.05)`
+//! sets fields by name through reflection — so a field added to a struct is
+//! accepted here with nothing to update. The typed signature Python tooling
+//! sees is in `_core.pyi`, generated from the same structs by
+//! [`crate::codegen`].
+//!
 //! Kept deliberately thin — all the real work (spawning the headless app,
 //! authoring the stage) lives in [`crate::generate`] and the element modules,
 //! and is exercised identically by the interactive viewer.
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use bevy::reflect::structs::Struct;
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use crate::elements::SceneParams;
 use crate::elements::VineyardParams;
-use crate::elements::cover::{self, CoverParams};
+use crate::elements::cover::CoverParams;
 use crate::elements::leaf::LeafParams;
 use crate::elements::pole::PoleParams;
 use crate::elements::shoot::ShootParams;
@@ -19,9 +27,10 @@ use crate::elements::terrain::TerrainParams;
 use crate::elements::util::parcel::ParcelParams;
 use crate::elements::util::planting::PlantingParams;
 use crate::elements::vine::VineParams;
-use crate::elements::weed::{self, WeedParams};
+use crate::elements::weed::WeedParams;
 use crate::elements::wire::WireParams;
 use crate::generate::generate_scene;
+use crate::params::{self, Choices};
 
 /// Formats with `{:#}` so `anyhow`'s full context chain reaches the Python
 /// traceback, not just the outermost error message.
@@ -29,337 +38,78 @@ fn to_py_err(err: anyhow::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{err:#}"))
 }
 
-#[pymethods]
-impl TerrainParams {
-    #[new]
-    #[pyo3(signature = (
-        length=80.0,
-        width=50.0,
-        max_inclination=20.0,
-        feature_size=16.0,
-        roughness=0.08,
-        roughness_size=4.0,
-        detail=32,
-    ))]
-    fn py_new(
-        length: f32,
-        width: f32,
-        max_inclination: f32,
-        feature_size: f32,
-        roughness: f32,
-        roughness_size: f32,
-        detail: u32,
-    ) -> Self {
-        Self {
-            length,
-            width,
-            max_inclination,
-            feature_size,
-            roughness,
-            roughness_size,
-            detail,
+/// `Params(**kwargs)`: every keyword names a field of the fragment. An unknown
+/// name, or a value of the wrong type, is the `TypeError` Python would raise.
+fn from_kwargs<T: Struct + Default>(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<T> {
+    let mut params = T::default();
+    let class = std::any::type_name::<T>()
+        .rsplit("::")
+        .next()
+        .unwrap_or_default();
+    for (key, value) in kwargs.into_iter().flat_map(|kwargs| kwargs.iter()) {
+        let name: String = key.extract()?;
+        let Some(field) = params.field_mut(&name) else {
+            return Err(PyTypeError::new_err(format!(
+                "{class}() got an unexpected keyword argument {name:?}"
+            )));
+        };
+        let set = if let Some(f) = field.try_downcast_mut::<f32>() {
+            value.extract().map(|v| *f = v)
+        } else if let Some(i) = field.try_downcast_mut::<u32>() {
+            value.extract().map(|v| *i = v)
+        } else if let Some(i) = field.try_downcast_mut::<u64>() {
+            value.extract().map(|v| *i = v)
+        } else if let Some(b) = field.try_downcast_mut::<bool>() {
+            value.extract().map(|v| *b = v)
+        } else if let Some(s) = field.try_downcast_mut::<String>() {
+            value.extract().map(|v| *s = v)
+        } else {
+            unreachable!("a params field is an f32, u32, u64, bool or String")
+        };
+        set.map_err(|err| PyTypeError::new_err(format!("{class}() argument {name:?}: {err}")))?;
+    }
+    Ok(params)
+}
+
+/// The Python face of every fragment — the keyword-only constructor and a
+/// `__repr__` — and the one list the module registers them from.
+macro_rules! py_params {
+    ($($ty:ident),* $(,)?) => {
+        $(
+            #[pymethods]
+            impl $ty {
+                #[new]
+                #[pyo3(signature = (**kwargs))]
+                fn py_new(kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+                    from_kwargs(kwargs)
+                }
+
+                fn __repr__(&self) -> String {
+                    format!("{self:?}")
+                }
+            }
+        )*
+
+        fn add_fragments(m: &Bound<'_, PyModule>) -> PyResult<()> {
+            $( m.add_class::<$ty>()?; )*
+            Ok(())
         }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
+    };
 }
 
-#[pymethods]
-impl ParcelParams {
-    #[new]
-    #[pyo3(signature = (
-        orientation=0.0,
-        headland=6.0,
-        row_spacing=2.4,
-        vine_spacing=1.2,
-        post_spacing=6.0,
-        min_row_length=10.0,
-        trellis_height=1.8,
-    ))]
-    fn py_new(
-        orientation: f32,
-        headland: f32,
-        row_spacing: f32,
-        vine_spacing: f32,
-        post_spacing: f32,
-        min_row_length: f32,
-        trellis_height: f32,
-    ) -> Self {
-        Self {
-            orientation,
-            headland,
-            row_spacing,
-            vine_spacing,
-            post_spacing,
-            min_row_length,
-            trellis_height,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl PoleParams {
-    #[new]
-    #[pyo3(signature = (radius=0.04, sides=8))]
-    fn py_new(radius: f32, sides: u32) -> Self {
-        Self { radius, sides }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl WireParams {
-    #[new]
-    #[pyo3(signature = (catch_wires=2, radius=0.0015))]
-    fn py_new(catch_wires: u32, radius: f32) -> Self {
-        Self {
-            catch_wires,
-            radius,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl VineParams {
-    #[new]
-    #[pyo3(signature = (
-        variations=4,
-        trunk_height=0.9,
-        trunk_radius=0.035,
-        trunk_wobble=0.02,
-        arms=2,
-        cordon_gap=0.15,
-        cordon_radius=0.022,
-        spur_spacing=0.12,
-        spur_length=0.05,
-        shoots_per_spur=1.8,
-        roughness=0.14,
-        sides=8,
-        detail=20,
-    ))]
-    #[allow(clippy::too_many_arguments)]
-    fn py_new(
-        variations: u32,
-        trunk_height: f32,
-        trunk_radius: f32,
-        trunk_wobble: f32,
-        arms: u32,
-        cordon_gap: f32,
-        cordon_radius: f32,
-        spur_spacing: f32,
-        spur_length: f32,
-        shoots_per_spur: f32,
-        roughness: f32,
-        sides: u32,
-        detail: u32,
-    ) -> Self {
-        Self {
-            variations,
-            trunk_height,
-            trunk_radius,
-            trunk_wobble,
-            arms,
-            cordon_gap,
-            cordon_radius,
-            spur_spacing,
-            spur_length,
-            shoots_per_spur,
-            roughness,
-            sides,
-            detail,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl SceneParams {
-    #[new]
-    #[pyo3(signature = (seed=0, season=0.5))]
-    fn py_new(seed: u64, season: f32) -> Self {
-        Self { seed, season }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl PlantingParams {
-    #[new]
-    #[pyo3(signature = (miss_rate=0.03, young_rate=0.08, young_scale=0.55))]
-    fn py_new(miss_rate: f32, young_rate: f32, young_scale: f32) -> Self {
-        Self {
-            miss_rate,
-            young_rate,
-            young_scale,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl ShootParams {
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (
-        variations=4,
-        length=0.75,
-        radius=0.006,
-        lean=0.06,
-        sides=6,
-        detail=40,
-        internode=0.07,
-        leaf_droop=0.35,
-        stray=0.0,
-        flexible=true,
-    ))]
-    fn py_new(
-        variations: u32,
-        length: f32,
-        radius: f32,
-        lean: f32,
-        sides: u32,
-        detail: u32,
-        internode: f32,
-        leaf_droop: f32,
-        stray: f32,
-        flexible: bool,
-    ) -> Self {
-        Self {
-            variations,
-            length,
-            radius,
-            lean,
-            sides,
-            detail,
-            internode,
-            leaf_droop,
-            stray,
-            flexible,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl LeafParams {
-    #[new]
-    #[pyo3(signature = (variations=40, detail=120, curl=1.0))]
-    fn py_new(variations: u32, detail: u32, curl: f32) -> Self {
-        Self {
-            variations,
-            detail,
-            curl,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl CoverParams {
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (
-        kind="spontaneous",
-        alternate=false,
-        width=0.75,
-        height=0.15,
-        cover=0.7,
-        dryness=0.0,
-        variations=12,
-        detail=600,
-    ))]
-    fn py_new(
-        kind: &str,
-        alternate: bool,
-        width: f32,
-        height: f32,
-        cover: f32,
-        dryness: f32,
-        variations: u32,
-        detail: u32,
-    ) -> Self {
-        Self {
-            kind: kind.to_string(),
-            alternate,
-            width,
-            height,
-            cover,
-            dryness,
-            variations,
-            detail,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[pymethods]
-impl WeedParams {
-    #[new]
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (
-        strip="mown",
-        strip_width=0.3,
-        pressure=6.0,
-        alley_pressure=0.5,
-        tall=0.3,
-        variations=24,
-        detail=16,
-    ))]
-    fn py_new(
-        strip: &str,
-        strip_width: f32,
-        pressure: f32,
-        alley_pressure: f32,
-        tall: f32,
-        variations: u32,
-        detail: u32,
-    ) -> Self {
-        Self {
-            strip: strip.to_string(),
-            strip_width,
-            pressure,
-            alley_pressure,
-            tall,
-            variations,
-            detail,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("{self:?}")
-    }
-}
+py_params!(
+    SceneParams,
+    TerrainParams,
+    ParcelParams,
+    PlantingParams,
+    PoleParams,
+    WireParams,
+    VineParams,
+    ShootParams,
+    LeafParams,
+    CoverParams,
+    WeedParams,
+);
 
 /// The full parameter set, one field per element.
 ///
@@ -511,26 +261,31 @@ impl PyVineyardParams {
         }
     }
 
-    /// The fragments, checked. The one place a name a Python caller typed is
-    /// rejected: past here an unknown one is read as the default with a
-    /// warning, which is right for a build system and wrong for a caller
-    /// who misspelt a config.
+    /// The fragments, checked: every `@Choices` field holds one of its names.
+    ///
+    /// The one place a name a Python caller typed is rejected. Past here an
+    /// unknown one is read as the default with a warning, which is right for
+    /// a build system and wrong for a caller who misspelt a config.
     fn snapshot(&self, py: Python<'_>) -> PyResult<VineyardParams> {
-        let params = self.fragments(py);
-        named(&params.cover.kind, &cover::Kind::NAMES, "cover.kind")?;
-        named(&params.weed.strip, &weed::Strip::NAMES, "weed.strip")?;
-        Ok(params)
-    }
-}
-
-/// `ValueError` unless `value` is one of `names`.
-fn named(value: &str, names: &[&str], field: &str) -> PyResult<()> {
-    if names.contains(&value) {
-        Ok(())
-    } else {
-        Err(PyValueError::new_err(format!(
-            "{field} is {value:?}, which is none of {names:?}"
-        )))
+        let set = self.fragments(py);
+        for fragment in params::fragments() {
+            for field in params::fields(fragment) {
+                let Some(Choices(names)) = field.get_attribute::<Choices>() else {
+                    continue;
+                };
+                let value = params::get(&set, fragment.name(), field.name())
+                    .and_then(|value| value.try_downcast_ref::<String>())
+                    .expect("a @Choices field is a String");
+                if !names.contains(&value.as_str()) {
+                    return Err(PyValueError::new_err(format!(
+                        "{}.{} is {value:?}, which is none of {names:?}",
+                        fragment.name(),
+                        field.name()
+                    )));
+                }
+            }
+        }
+        Ok(set)
     }
 }
 
@@ -544,16 +299,5 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // authored by a different generator are a different scene.
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_class::<PyVineyardParams>()?;
-    m.add_class::<SceneParams>()?;
-    m.add_class::<TerrainParams>()?;
-    m.add_class::<ParcelParams>()?;
-    m.add_class::<PlantingParams>()?;
-    m.add_class::<PoleParams>()?;
-    m.add_class::<WireParams>()?;
-    m.add_class::<VineParams>()?;
-    m.add_class::<ShootParams>()?;
-    m.add_class::<LeafParams>()?;
-    m.add_class::<CoverParams>()?;
-    m.add_class::<WeedParams>()?;
-    Ok(())
+    add_fragments(m)
 }

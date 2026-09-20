@@ -63,6 +63,7 @@ uv run main.py
 ## How it works (main points)
 
  - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class.
+ - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
  - When the simulation starts, the meshes and layouts are generated and cached as a USD file.
  - The cached USD file is then spawned as a regular Isaac Lab USD file asset.

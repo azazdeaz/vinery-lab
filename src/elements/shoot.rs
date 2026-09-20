@@ -80,14 +80,7 @@
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use bevy::feathers::controls::{FeathersCheckbox, FeathersSlider};
-use bevy::feathers::display::label_small;
-use bevy::feathers::theme::ThemedText;
 use bevy::prelude::*;
-use bevy::ui::Checked;
-use bevy::ui_widgets::{
-    SliderPrecision, SliderStep, ValueChange, checkbox_self_update, slider_self_update,
-};
 use nalgebra::Point3;
 
 use super::leaf;
@@ -95,9 +88,9 @@ use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
+use crate::params::{Label, Slider};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
-use crate::ui::{Staged, Tip};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -373,85 +366,109 @@ impl Metric<ShootConfig> for ShootMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// One season's green growth off a spur.
+///
+/// Shoots are shaped here and placed by the vine: how many a spur pushes is
+/// the vine's `shoots_per_spur`, since that is a fact about its pruning rather
+/// than about a shoot. `length` is bud to tip, and whoever places a shoot
+/// varies it a little.
+///
+/// A shoot also carries the canopy, so the two leaf knobs live here rather
+/// than on the leaf: how many leaves a shoot holds and how they hang is a fact
+/// about the shoot. Leaf size is set nowhere; it comes out of each leaf's age,
+/// as a scale on a prototype of fixed area.
+///
+/// `stray` is the share of shoots the trellis failed to hold. A stray shoot
+/// leans out of the canopy, longer than the shoots beside it, and is exported
+/// as a deformable curve a physics engine bends; `flexible` off exports it as
+/// an ordinary static mesh at the same rest shape instead.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct ShootParams {
-    /// How many distinct stem meshes the scene may hold.
-    ///
-    /// A budget, not a count: the shoots are clustered and this is how many
-    /// representatives the clustering may keep — once for the shoots the
-    /// trellis holds and again for the stray ones, which are clustered apart.
-    pub variations: u32,
     /// Bud to tip, in meters — how tall a shoot stands above the spur it grew
     /// from. Whoever places one varies this a little per shoot.
+    #[reflect(@Slider { min: 0.1, max: 1.6, step: 0.05 })]
     pub length: f32,
     /// Radius at the bud, in meters.
+    #[reflect(@Slider { min: 0.002, max: 0.015, step: 0.001 })]
     pub radius: f32,
     /// How far the tip wanders off vertical, in meters.
+    #[reflect(@Slider { min: 0.0, max: 0.25, step: 0.01 })]
     pub lean: f32,
-    /// Vertices around the tube.
-    pub sides: u32,
-    /// Rings per meter along the tube.
+    /// The fraction of shoots the trellis failed to hold: missed by shoot
+    /// positioning, so grown out into the alley, or by hedging, so grown on
+    /// past the top wire. A stray shoot leans out of the canopy and is
+    /// exported as a deformable curve rather than a mesh, which makes this the
+    /// most expensive knob in the scene.
     ///
-    /// Higher here than anywhere else in the scene, and cheaper than it looks:
-    /// a stem is a *shared mesh*, so this buys ring density for the whole
-    /// vineyard at the cost of a handful of meshes. It has to be high because
-    /// stations are spaced by arc length and [`BEND_RADIUS`] packs a quarter
-    /// turn into a few centimeters — at the density a trunk is happy with, the
-    /// bend comes out a chamfer.
-    pub detail: u32,
-    /// Distance between leaf nodes up the shoot, in meters.
+    /// See [`STRAY_PITCH`] for the lean, [`CABLE_SEGMENT`] for what a curve
+    /// costs, and [`flexible`](Self::flexible) for turning that cost off.
+    #[reflect(@Slider { min: 0.0, max: 0.2, step: 0.01 }, @Label("Stray shoots"))]
+    pub stray: f32,
+    /// Whether a stray shoot is exported as a deformable curve a solver bends.
+    /// Off, it is a single static mesh at the same rest shape: the same lean
+    /// out of the canopy, nothing for a solver to pick up. For a backend with
+    /// no rods, or to keep a canopy's look without paying for the bodies.
+    ///
+    /// On, the curve is drawn by a tube on each of the rod segments built
+    /// from it.
+    #[reflect(@Label("Bendable strays"))]
+    pub flexible: bool,
+    /// Distance between leaf nodes up the shoot, in meters — how many leaves
+    /// it carries, said the way a viticulturist would. Zero leaves the shoot
+    /// bare.
     ///
     /// The count-like knob, the way [`shoots_per_spur`] is one level up: how
     /// many leaves a shoot carries is a fact about the shoot rather than about
     /// a leaf, and a spacing says it in the unit a viticulturist would.
     ///
     /// [`shoots_per_spur`]: super::vine::VineParams::shoots_per_spur
+    #[reflect(@Slider { min: 0.0, max: 0.25, step: 0.01 }, @Label("Leaf spacing"))]
     pub internode: f32,
-    /// How far a full-grown blade pitches below horizontal, in radians.
+    /// How far a full-grown blade pitches below horizontal, in radians. The
+    /// small blades at the tip stand nearly straight out.
     ///
     /// Rides on each leaf's own maturity, so the mature blades down the shoot
     /// hang at about this and the small ones at the tip stand nearly straight
     /// out — which is what a petiole holding a tenth of the weight does.
+    #[reflect(@Slider { min: 0.0, max: 1.2, step: 0.05 })]
     pub leaf_droop: f32,
-    /// The fraction of shoots the trellis failed to hold, in `0..=1`.
+    /// Vertices around the tube.
+    #[reflect(@Slider { min: 3.0, max: 12.0, step: 1.0 })]
+    pub sides: u32,
+    /// Rings per meter along the tube. Higher than anywhere else in the scene
+    /// and cheaper than it looks: a stem is a shared mesh, and the bend at the
+    /// tip needs the density.
     ///
-    /// Missed by shoot positioning, so it grew out into the alley, or by
-    /// hedging, so it kept growing past the top wire: either way a stray shoot
-    /// leans out of the canopy, longer than the shoots beside it, and is what a
-    /// machine passing over the row runs into — see [`STRAY_PITCH`].
-    ///
-    /// Every stray shoot is exported as a deformable curve rather than a mesh,
-    /// a chain of rigid bodies in the simulation, so this is the most expensive
-    /// knob in the scene — see [`CABLE_SEGMENT`] for what one costs, and
-    /// [`flexible`](Self::flexible) for turning that cost off.
-    pub stray: f32,
-    /// Whether a stray shoot is one a solver bends.
-    ///
-    /// On, it is authored as a deformable curve, drawn by a tube on each of
-    /// the rod segments built from it. Off, it is a single static mesh at the
-    /// same rest shape: the same lean out of the canopy, one prim instead of a
-    /// chain of them, and nothing for a solver to pick up. For a backend with
-    /// no rods, or to keep a canopy's look without paying for the bodies.
-    pub flexible: bool,
+    /// It has to be high because stations are spaced by arc length and
+    /// [`BEND_RADIUS`] packs a quarter turn into a few centimeters — at the
+    /// density a trunk is happy with, the bend comes out a chamfer.
+    #[reflect(@Slider { min: 8.0, max: 90.0, step: 1.0 })]
+    pub detail: u32,
+    /// How many distinct stem meshes the scene may hold. A budget, not a
+    /// count: the shoots are clustered and this is how many representatives
+    /// the clustering may keep, once for the shoots the trellis holds and
+    /// again for the stray ones, which are clustered apart.
+    #[reflect(@Slider { min: 1.0, max: 8.0, step: 1.0 })]
+    pub variations: u32,
 }
 
 impl Default for ShootParams {
     fn default() -> Self {
         Self {
-            variations: 4,
             length: 0.75,
             radius: 0.006,
             lean: 0.06,
-            sides: 6,
-            detail: 40,
-            internode: 0.07,
-            leaf_droop: 0.35,
             stray: 0.0,
             flexible: true,
+            internode: 0.07,
+            leaf_droop: 0.35,
+            sides: 6,
+            detail: 40,
+            variations: 4,
         }
     }
 }
@@ -1206,125 +1223,6 @@ fn surface(seed: u64) -> Surface {
         color::srgb(color::CANE),
         &mut Rng::new(seed ^ color::COLOR_STREAM),
     ))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Shoot length"),
-            (
-                @FeathersSlider { @min: 0.1, @max: 1.6, @value: 0.75 }
-                Tip("Bud to tip — how tall a shoot stands above the spur it grew from.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.length = change.value;
-                })
-            ),
-            label_small("Shoot radius"),
-            (
-                @FeathersSlider { @min: 0.002, @max: 0.015, @value: 0.006 }
-                Tip("Radius at the bud, in metres.")
-                SliderStep(0.001)
-                SliderPrecision(3)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.radius = change.value;
-                })
-            ),
-            label_small("Shoot lean"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.25, @value: 0.06 }
-                Tip("How far the tip wanders off vertical, in metres.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.lean = change.value;
-                })
-            ),
-            label_small("Stray shoots"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.2, @value: 0.0 }
-                Tip("Fraction of shoots the trellis failed to hold, leaning out of the canopy. Each is exported as a deformable curve, so this is the priciest knob here.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.stray = change.value.clamp(0.0, 1.0);
-                })
-            ),
-            (
-                @FeathersCheckbox { @caption: bsn! { Text("Bendable strays") ThemedText } }
-                // Checked, because the params default to bending them.
-                Checked
-                Tip("Export the stray shoots as deformable curves a solver bends. Off, they stand at their rest shape as ordinary meshes — the same lean, none of the bodies.")
-                on(checkbox_self_update)
-                on(|change: On<ValueChange<bool>>, mut params: ResMut<Staged>| {
-                    params.shoot.flexible = change.value;
-                })
-            ),
-            label_small("Leaf spacing"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.25, @value: 0.07 }
-                Tip("Distance between leaf nodes up the shoot — how many leaves it carries, said the way a viticulturist would.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.internode = change.value.max(0.0);
-                })
-            ),
-            label_small("Leaf droop"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 1.2, @value: 0.35 }
-                Tip("How far a full-grown blade pitches below horizontal, in radians. The small blades at the tip stand nearly straight out.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.leaf_droop = change.value;
-                })
-            ),
-            label_small("Shoot sides"),
-            (
-                @FeathersSlider { @min: 3.0, @max: 12.0, @value: 6.0 }
-                Tip("Vertices around the tube.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.sides = change.value.round().max(3.0) as u32;
-                })
-            ),
-            label_small("Shoot detail"),
-            (
-                @FeathersSlider { @min: 8.0, @max: 90.0, @value: 40.0 }
-                Tip("Rings per metre. High here and cheaper than it looks — a stem is a shared mesh, and the tip bend needs the density.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.detail = change.value.round().max(4.0) as u32;
-                })
-            ),
-            label_small("Shoot variations"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 8.0, @value: 4.0 }
-                Tip("A budget, not a count: how many distinct stem meshes the clustering may keep.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.shoot.variations = change.value.round().max(1.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

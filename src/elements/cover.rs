@@ -32,13 +32,7 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use anyhow::Context;
-use bevy::feathers::controls::{FeathersCheckbox, FeathersSlider};
-use bevy::feathers::display::label_small;
-use bevy::feathers::theme::ThemedText;
 use bevy::prelude::*;
-use bevy::ui_widgets::{
-    SliderPrecision, SliderStep, ValueChange, checkbox_self_update, slider_self_update,
-};
 use nalgebra::Point3;
 
 use super::terrain::Ground;
@@ -48,9 +42,9 @@ use super::util::scatter::jittered_grid;
 use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map, shapes};
 use super::{Grow, Rng, SceneParams, salt};
+use crate::params::{Choices, Label, Slider};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed};
-use crate::ui::{Staged, Tip, dropdown};
 
 /// The mesh-library prefix the tiles are registered under.
 pub const PART: &str = "Sward";
@@ -214,34 +208,56 @@ impl Metric<TileConfig> for TileMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// What grows in the alley between two rows.
+///
+/// `kind` is the regime, by name, and the species are the generator's to pick
+/// from it. The sward is built as half-metre tiles of blades, instanced down
+/// each alley: `variations` is the budget of distinct tile meshes and `detail`
+/// the blades per square metre baked into one.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct CoverParams {
-    /// One of [`Kind::NAMES`]. A name that is none of them is read as the
-    /// default, with a warning — see [`kind`](Self::kind).
+    /// What the alley grows, by name: `none` for a bare or tilled alley,
+    /// `spontaneous` for a sward that came up on its own, ragged and gappy,
+    /// `sown` for a drilled grass sward, one height and dense, or `cereal`
+    /// for a winter rye in drill lines along the alley.
+    ///
+    /// A name that is none of [`Kind::NAMES`] is read as the default, with a
+    /// warning; Python rejects it at the boundary instead.
+    #[reflect(@Choices(&Kind::NAMES))]
     pub kind: String,
-    /// Leave every second alley bare. The commonest permanent arrangement
-    /// in France: the cover on half the alleys, the tractor's tyres on the
-    /// other half.
+    /// Leave every second alley bare: the cover on half the alleys, the
+    /// tractor's tyres on the other half. The commonest permanent arrangement
+    /// in France.
+    #[reflect(@Label("Alternate alleys"))]
     pub alternate: bool,
-    /// How much of the alley's width the cover spans, `0..=1`, centred on
-    /// the alley. Three quarters keeps a band clear of the vines either side.
+    /// How much of the alley's width the cover spans, as a fraction, centred
+    /// on the alley. Three quarters keeps a band clear of the vines either
+    /// side.
+    #[reflect(@Slider { min: 0.1, max: 1.0, step: 0.05 })]
     pub width: f32,
     /// Standing height, in meters: a few centimetres just after mowing,
     /// half a metre when left to head, more for a cereal in spring.
+    #[reflect(@Slider { min: 0.02, max: 1.5, step: 0.01 })]
     pub height: f32,
     /// Fraction of the ground inside the band the cover actually covers.
+    #[reflect(@Slider { min: 0.0, max: 1.0, step: 0.05 }, @Label("Cover density"))]
     pub cover: f32,
     /// `0.0` green, `1.0` straw — a Mediterranean alley in August.
+    #[reflect(@Slider { min: 0.0, max: 1.0, step: 0.05 })]
     pub dryness: f32,
     /// How many distinct tile meshes the scene may hold. A budget, not a
-    /// count; see [`TileMetric`] for what it is spent on.
+    /// count.
+    ///
+    /// See [`TileMetric`] for what it is spent on.
+    #[reflect(@Slider { min: 1.0, max: 64.0, step: 1.0 })]
     pub variations: u32,
     /// Blades per square metre baked into a tile at full cover. The one
     /// knob that trades sward density for triangles.
+    #[reflect(@Slider { min: 50.0, max: 2000.0, step: 50.0 })]
     pub detail: u32,
 }
 
@@ -579,97 +595,6 @@ fn surface(dryness: f32, index: u64) -> Surface {
         base,
         &mut Rng::new(color::COLOR_STREAM ^ SWARD_SHADE ^ salt(index)),
     ))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            dropdown(
-                "Cover kind",
-                "Which sward is sown in the alleys — what is growing there, and how it reads.",
-                &Kind::NAMES,
-                |params| &params.cover.kind,
-                |params, name| params.cover.kind = name.to_string(),
-            ),
-            (
-                @FeathersCheckbox { @caption: bsn! { Text("Alternate alleys") ThemedText } }
-                Tip("Leave every second alley bare: the cover on half of them, the tractor's tyres on the other half.")
-                on(checkbox_self_update)
-                on(|change: On<ValueChange<bool>>, mut params: ResMut<Staged>| {
-                    params.cover.alternate = change.value;
-                })
-            ),
-            label_small("Cover width"),
-            (
-                @FeathersSlider { @min: 0.1, @max: 1.0, @value: 0.75 }
-                Tip("How much of the alley's width the cover spans, centred on the alley. Three quarters keeps a band clear of the vines.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.width = change.value.clamp(0.0, 1.0);
-                })
-            ),
-            label_small("Cover height"),
-            (
-                @FeathersSlider { @min: 0.02, @max: 1.5, @value: 0.15 }
-                Tip("Standing height: a few centimetres just after mowing, half a metre left to head, more for a cereal in spring.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.height = change.value.max(0.01);
-                })
-            ),
-            label_small("Cover density"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.7 }
-                Tip("Fraction of the ground inside the band the cover actually covers.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.cover = change.value.clamp(0.0, 1.0);
-                })
-            ),
-            label_small("Dryness"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.0 }
-                Tip("0 green, 1 straw — a Mediterranean alley in August.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.dryness = change.value.clamp(0.0, 1.0);
-                })
-            ),
-            label_small("Cover variations"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 64.0, @value: 12.0 }
-                Tip("A budget, not a count: how many distinct tile meshes the scene may hold.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.variations = change.value.round().max(1.0) as u32;
-                })
-            ),
-            label_small("Cover detail"),
-            (
-                @FeathersSlider { @min: 50.0, @max: 2000.0, @value: 600.0 }
-                Tip("Blades per square metre baked into a tile at full cover. The one knob that trades sward density for triangles.")
-                SliderStep(50.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.cover.detail = change.value.round().max(1.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

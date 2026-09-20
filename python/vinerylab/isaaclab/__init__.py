@@ -21,6 +21,8 @@ except ImportError as err:  # pragma: no cover - depends on the environment
 
 from .physics import CABLE, make_coupled_physics_cfg, tune_shoots
 from .vineyard import spawn_vineyard
+
+# >>> generated: imports
 from .vineyard_cfg import (
     CoverCfg,
     LeafCfg,
@@ -36,8 +38,14 @@ from .vineyard_cfg import (
     WireCfg,
 )
 
+# <<< generated: imports
+
 __all__ = [
     "CABLE",
+    "make_coupled_physics_cfg",
+    "spawn_vineyard",
+    "tune_shoots",
+    # >>> generated: all
     "CoverCfg",
     "LeafCfg",
     "ParcelCfg",
@@ -50,7 +58,5 @@ __all__ = [
     "VineyardCfg",
     "WeedCfg",
     "WireCfg",
-    "make_coupled_physics_cfg",
-    "tune_shoots",
-    "spawn_vineyard",
+    # <<< generated: all
 ]

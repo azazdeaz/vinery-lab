@@ -50,18 +50,15 @@
 use std::f64::consts::{PI, TAU};
 
 use anyhow::Context;
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
 use super::util::mesh::{MeshData, bend};
 use super::util::outline::{Outline, outline_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng};
+use crate::params::Slider;
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
-use crate::ui::{Staged, Tip};
 
 /// The mesh-library prefix this element registers its blades under.
 pub const PART: &str = "Leaf";
@@ -199,47 +196,61 @@ impl Metric<LeafConfig> for LeafMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// One blade of the canopy.
+///
+/// The blade shapes are drawn rather than generated, one SVG outline each
+/// embedded at build time, so the first five of `variations` go on giving
+/// every drawing a mesh of its own and the rest buys curls of them. Size is
+/// not a parameter: every blade is built at the same area, one full-grown leaf
+/// of about 150 cm², and a leaf's size comes from the scale it is placed at.
+/// Where leaves hang, and how big each one ends up, is the shoot's.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct LeafParams {
-    /// How many distinct blade meshes the scene may hold.
+    /// How many distinct blade meshes the scene may hold. A budget, not a
+    /// count, with a floor under it: the five drawn shapes each get a mesh
+    /// first, and what the rest buys is curls of them.
     ///
-    /// A budget, not a count, and one with a floor under it: the shapes are
-    /// drawn rather than seeded, so the first [`SHAPES`] of it go on giving
-    /// every drawing a mesh of its own. What the rest buys is [`curl`] — the
-    /// same five outlines bent a dozen ways each, which is what keeps a canopy
-    /// from reading as five blades printed over and over.
+    /// The shapes are drawn rather than seeded, so the first [`SHAPES`] of it
+    /// go on giving every drawing a mesh of its own. What the rest buys is
+    /// [`curl`] — the same five outlines bent a dozen ways each, which is what
+    /// keeps a canopy from reading as five blades printed over and over.
+    #[reflect(@Slider { min: 1.0, max: 100.0, step: 1.0 })]
     pub variations: u32,
     /// How finely the inside of a blade is subdivided, as the number of
-    /// triangles its *area* is cut into.
+    /// triangles its area is cut into. The drawn margin costs about 180 on its
+    /// own whatever this is set to.
     ///
     /// A floor rather than an exact count: the drawn margin is honoured
     /// exactly, and tiling that alone already costs about one triangle per
-    /// point of the outline — some 180 of them — before this is consulted at
-    /// all. What it buys past that is vertices across the *middle* of the
-    /// blade, which has none of its own and is what [`curl`] bends.
-    /// The default lands a blade at roughly 350 triangles.
+    /// point of the outline before this is consulted at all. What it buys past
+    /// that is vertices across the *middle* of the blade, which has none of
+    /// its own and is what [`curl`] bends. The default lands a blade at
+    /// roughly 350 triangles.
     ///
     /// It is also the floor on how fine the curl can be: a ruffle whose
     /// wavelength is not a few triangles wide comes out as noise on the mesh
     /// rather than as a wave. The default resolves about three waves across a
     /// blade, which is all [`RUFFLE_WAVELENGTH`] asks for.
+    #[reflect(@Slider { min: 8.0, max: 400.0, step: 8.0 })]
     pub detail: u32,
-    /// How far a blade bends out of the flat shape it was drawn as, as a
-    /// multiplier on the curl at [`curl`]'s own constants. Zero is the
-    /// drawing, flat.
+    /// How far a blade bends out of the flat shape it was drawn as: a trough
+    /// down the midrib, a droop along it and a ruffled margin, all scaled
+    /// together. The middle of a spread, with every leaf drawing its own share
+    /// of it, and some curling the other way. Zero leaves the drawing flat.
     ///
-    /// The middle of a spread rather than the figure every blade takes: each
-    /// leaf draws its own share of it through [`CURL_SPREAD`], and how many of
-    /// those the canopy can hold is [`variations`](Self::variations).
+    /// A multiplier on the curl at [`curl`]'s own constants. Each leaf draws
+    /// its own share of it through [`CURL_SPREAD`], and how many of those the
+    /// canopy can hold is [`variations`](Self::variations).
     ///
     /// What it buys is shading. A flat blade takes one light across its whole
     /// face however it is turned, and a canopy of them reads as a green wall;
     /// a blade with a trough down it catches the sky on one side of the midrib
     /// and not the other.
+    #[reflect(@Slider { min: 0.0, max: 2.0, step: 0.05 })]
     pub curl: f32,
 }
 
@@ -452,49 +463,6 @@ fn surface(outline: u32) -> Surface {
         color::srgb(color::LEAF),
         &mut Rng::new(color::COLOR_STREAM ^ outline as u64),
     ))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Leaf variations"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 100.0, @value: 40.0 }
-                Tip("A budget, not a count. Past the first few drawn outlines, what it buys is curl — the same shapes bent a dozen ways each.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.leaf.variations = change.value.round().max(1.0) as u32;
-                })
-            ),
-            label_small("Leaf detail"),
-            (
-                @FeathersSlider { @min: 8.0, @max: 400.0, @value: 120.0 }
-                Tip("Triangles a blade's area is cut into. Also the floor on how fine the curl can be before it reads as noise.")
-                SliderStep(8.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.leaf.detail = change.value.round().max(1.0) as u32;
-                })
-            ),
-            label_small("Leaf curl"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 2.0, @value: 1.0 }
-                Tip("How far a blade bends out of the flat shape it was drawn as. Zero is flat, and a canopy of flat blades reads as a green wall.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.leaf.curl = change.value.max(0.0);
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]
