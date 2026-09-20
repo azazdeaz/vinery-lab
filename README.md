@@ -2,14 +2,17 @@
 
 [![CI](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml)
 
-## Project description
+# Vinery Lab :grapes:
 
-This is a parametric vineyard generator. It generates USD scenes for robotics simulation. Mainly targeting Isaac Lab.
+Parametric vineyard generator for robotics simulation. Mainly targeting Isaac Lab.
 
-**Try the parameter editor in your browser:
-[azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/)** — needs WebGPU. It exports the same way the native editor does, by
-copying a config snippet; generating the USD itself stays local.
 
+Parameter editor and visualizer app
+<img width="1644" height="982" alt="image" src="https://github.com/user-attachments/assets/be6bdce4-75a4-4abb-b207-81883540ff38" />
+
+> Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower, needs WebGPU, and no wireframe view.
+
+Running the configured scene in Isaac Lab
 <img width="2401" height="1073" alt="image" src="https://github.com/user-attachments/assets/3eafecd5-9707-407f-a500-ec52634abfd1" />
 
 
@@ -19,21 +22,22 @@ copying a config snippet; generating the USD itself stays local.
  - Fully reproducible scene generation
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
- - Every plant, shoot and leaf is an addressable prim, while the meshes behind them are shared
- - Trellis wires: a fruiting wire along the cordons and paired catch wires above it, strung post to post down every row
- - Ships with static colliders — the ground as its own mesh, posts and trunks as capsules; the ground also carries its grid spacing, which Newton collides as a height field
- - Stray shoots — a share of the canopy the trellis failed to hold, leaning out into the alley or over the top wire — are exported as deformable curves a robot pushes aside, simulated by Newton's VBD solver alongside the rigid scene
- - Cover crops and weeds — a spontaneous, sown or drilled cover down the alleys, every second one bare if you like, at whatever height the last mowing left it; and under the vines the weeds a sprayed, hoed, mown or untouched strip actually grows, tilted by the season
+ - Every plant, shoot and leaf is an addressable prim
+ - Flexible stray shoots that the robot can push aside
+ - Cover crops and weeds
 
 ## Upcoming features
- - Optinally use PointInstancer to spawn organs without a unique prim path
+ - Optionally use PointInstancer to spawn organs without a unique prim path
  - Simulate human workers and other safety critical scenarios
+ - Install from PyPI
+ - More detailed cover crop and weed definitions
 
 ## Planned features
  - Reconstruct real vineyard parcels from EU vineyard-register data, public orthophotos, and regional DTMs
  - Support multiple vine-training systems
  - RTK-GNSS data generation
  - GeoJSON and TASKDATA.xml export
+ - **Share what you need for your project :rocket:**
 
 ## Quick commands to demo
 
@@ -62,7 +66,7 @@ uv run main.py
 
 ## How it works (main points)
 
- - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class.
+ - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class. See the [example](examples/isaaclab_demo/main.py#L43).
  - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
  - When the simulation starts, the meshes and layouts are generated and cached as a USD file.
