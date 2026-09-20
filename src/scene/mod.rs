@@ -20,7 +20,7 @@
 //! /Vineyard/Planting/Row_00/Vine_047     Xform, unique
 //!   /Wood                                 -> parts/Vine_3, instanceable
 //!   /Collision                            Capsule, the trunk's proxy
-//!   /Shoot_00                             Xform, unique
+//!   /Shoot_00_0                           Xform, unique
 //!     /Stem                               -> parts/Shoot_11, instanceable
 //!     /Leaf_00                            -> parts/Leaf_2, instanceable
 //! ```

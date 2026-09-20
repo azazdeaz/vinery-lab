@@ -1,118 +1,4 @@
-## Python bindings
-
-No need to install `maturin` yourself — uv fetches it automatically as a
-PEP 517 build backend.
-
-The project uses maturin's *mixed* layout: hand-written Python lives in
-`python/vinerylab/`, and the compiled Rust extension is built into it as the
-`_core` submodule, which `__init__.py` re-exports. `vinerylab.isaaclab` is the
-only part that imports Isaac Lab, so plain `import vinerylab` stays usable
-without it.
-
-### Iterating on the wrapper itself (rebuilds on every change)
-
-    uv venv .venv && source .venv/bin/activate
-    uvx maturin develop --release
-
-### Consuming it as a dependency (e.g. examples/isaaclab_demo)
-
-    cd examples/isaaclab_demo
-    uv sync
-    uv run python main.py
-
-If you only changed Rust source (not pyproject.toml), force a rebuild:
-
-    uv sync --reinstall-package vinerylab
-
-### Build a distributable wheel
-
-    uvx maturin build --release
-
-## Checks
-
-`.github/workflows/ci.yml` runs all of these on every push and pull request:
-
-    cargo fmt --all -- --check
-    cargo clippy --all-targets --features python -- -D warnings
-    cargo test
-    ruff check . && ruff format --check .
-    mypy
-    pytest tests
-
-`--features python` is what puts `src/python.rs` in front of clippy —
-it is out of the default feature set, so a plain `cargo clippy` never sees it.
-
-`cargo test` also fails while the Python stub, the Isaac Lab cfg classes or
-`docs/parameters.md` are stale against the Rust params structs they are
-generated from. `cargo test regen_params -- --ignored` rewrites them — see
-[docs/editing-parameters.md](docs/editing-parameters.md).
-
-Isaac Lab is not installed on the runner, so `tests/test_isaaclab_cfg.py` skips
-itself there. It runs locally, from the demo venv:
-
-    examples/isaaclab_demo/.venv/bin/python -m pytest tests/ -q -s < /dev/null
-
-Capture has to be off: pytest's stdin capture breaks Kit's kernel bootstrap.
-The demo's own tests live beside its code and run the same way:
-
-    examples/isaaclab_demo/.venv/bin/python -m pytest examples/isaaclab_demo -q -s < /dev/null
-
-Formatting and the fast lints are also available as commit hooks:
-
-    uvx pre-commit install
-
-Clippy and the test suites stay out of them — a Bevy rebuild is too slow to sit
-in front of a commit.
-
-## Viewer (interactive)
-
-    cargo run --release
-
-The panel is built from the params structs: one section per fragment of
-`VineyardParams`, one control per field, with the caption, range and tooltip
-read off the field's declaration — see `src/ui.rs` and
-[docs/editing-parameters.md](docs/editing-parameters.md). Sliders write a
-staged copy of the params; a value reaches the live resources once it has held
-still for 150 ms, and re-runs the layers below it. Dragging one is a single
-rebuild rather than one per frame.
-Press `S` to write the scene out as `scene.json`, and build it with:
-
-    python -m vinerylab.usd scene.json scene.usd
-
-`VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
-rebuilt something — see `src/perf.rs`.
-
-`VINERYLAB_RECORD=demo.mp4 cargo run --release` records the window for the
-whole run. One captured frame becomes one video frame, so the stall a rebuild
-causes costs a frame rather than the freeze a screen recorder would keep —
-which is the point of it, for demo videos. Frames are piped to `ffmpeg`, which
-has to be on `PATH`; the extension picks the container. `VINERYLAB_RECORD_FPS`
-sets the rate, 30 by default, and is also how fast the window is sampled. See
-`src/record.rs`.
-
-### Web build
-
-The same viewer, compiled to wasm and published by the manually triggered
-`.github/workflows/playground.yml`. To reproduce what it does locally:
-
-    rustup target add wasm32-unknown-unknown
-    cargo install wasm-bindgen-cli --version 0.2.127   # must match Cargo.lock
-    cargo build --profile wasm-release --target wasm32-unknown-unknown --bin vinerylab
-    mkdir -p site && cp web/index.html site/
-    wasm-bindgen --target web --no-typescript --out-dir site \
-      target/wasm32-unknown-unknown/wasm-release/vinerylab.wasm
-    python3 -m http.server -d site 8000
-
-Serve it rather than opening the file: the module is fetched, and `localhost`
-is a secure context, which both WebGPU and the clipboard require.
-
-Two things differ from the native build. The renderer is WebGPU — the `webgpu`
-feature in `Cargo.toml` is target-gated, and WebGL2 would lose compute shaders,
-which this many meshes need. And the `S` key is compiled out, since there is no
-filesystem to write `scene.json` to; **Copy Isaac Lab cfg** is the whole export
-path on the web.
-
-## Architecture
+# Architecture
 
 The scene is built in Bevy as ordinary meshes and transforms, exported as a
 plain JSON **scene document**, and turned into USD by Python:
@@ -184,12 +70,10 @@ fn reauthor(params: Res<GrapeParams>, mut grapes: Query<&mut GrapeConfig>) { /* 
 fn build(commands: Commands, library: Library, /* ... */) -> Result<()> { /* ... */ }
 ```
 
-Adding an element is one new file, one line in `elements::plugin`, one field in
-`VineyardParams` (with a line each in `apply` and `from_world`), and one line in
-`python.rs`'s `py_params!` list with a `Py<T>` field on the aggregate beside it.
-The panel section, the config snippet, the Python stub, the Isaac Lab cfg class
+Adding an element is one new file and one line in `elements::plugin`. The
+panel section, the config snippet, the Python stub, the Isaac Lab cfg class
 and the docs page all follow from the struct — the params struct is the one
-place a parameter is declared. [docs/editing-parameters.md](docs/editing-parameters.md)
+place a parameter is declared. [editing-parameters.md](editing-parameters.md)
 is the how-to, and `cargo test` fails on whatever was missed.
 
 Everything under `src/elements/` that *isn't* an element lives in
@@ -309,8 +193,7 @@ The catch is that a budget can only buy what the population actually contains.
 Configs that are all identical collapse to one representative however high the
 budget, so each layer needs at least one real per-instance axis: `VINE_VIGOUR`
 (girth, drawn per plant), `SHOOT_VIGOUR` and `SHOOT_SPACING` (length and node
-spacing, drawn per shoot). These are constants for now; range-valued params in
-the editor are what will replace them.
+spacing, drawn per shoot). These are constants for now.
 
 They go in the *config* rather than into a placement scale. A scale would be
 free but invisible to the clustering, so the budget would land on one arbitrary
@@ -399,7 +282,7 @@ clustering. `Prototypes` is a `BTreeMap` for the same reason: a document has to
 come out byte-identical across runs, because a downstream simulator keys its
 cache on those bytes.
 
-### Coordinates
+## Coordinates
 
 The scene is authored **Z-up, meters** — REP-103, which is what both Isaac Lab
 and ROS use. `upAxis` is root-layer-only metadata that does not compose through
@@ -411,7 +294,7 @@ above the scene root carrying `scene::z_up_to_y_up()`. The export walk starts
 *below* it, so the emitted document is Z-up native and no geometry module has
 to know.
 
-### Export
+## Export
 
 `src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
 `SceneDoc`. Unnamed entities and their subtrees are skipped, which is how the
@@ -440,7 +323,7 @@ referenced non-instanceable: a collider inside a prototype is reachable only
 through an instance proxy, and the ground has one instance, so it gives up
 nothing. Everything else stays instanced.
 
-### Python
+## Python bindings
 
 Each element's params fragment is a `#[pyclass]`; `VineyardParams` aggregates
 them as `Py<T>` fields. `Py<T>` is required — a plain field would make the
@@ -448,11 +331,10 @@ getter clone, so `params.leaf.detail = 200` would silently mutate a temporary.
 For the same reason fragments are declared `skip_from_py_object`: they are
 live shared objects, and extracting one by value would hand back a copy.
 
-A fragment's constructor is keyword-only and generic: `PoleParams(radius=0.05)`
-sets fields by name through reflection, so the Rust side has no signature to
-keep in step with the struct. The typed signature Python tooling sees is
-`_core.pyi`, generated from the same structs together with the Isaac Lab cfg
-classes — see `src/codegen.rs`.
+A fragment's constructor is keyword-only and generic, so the Rust side has no
+signature to keep in step with the struct. The typed signature Python tooling
+sees is the generated `_core.pyi` — see
+[editing-parameters.md](editing-parameters.md).
 
 `VineyardParams.write_usd(path)` generates the scene in Rust, serializes the
 document, and hands it to `vinerylab.usd.build_usd` — so `usd-core` is a

@@ -124,4 +124,5 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 
 ## Development
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for implementation details and development guidelines.
+See [AGENTS.md](AGENTS.md) for the repo map, and
+[docs/development.md](docs/development.md) for building and running the checks.

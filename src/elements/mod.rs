@@ -3,7 +3,7 @@
 //! An element holds its params resource, its `plugin` wiring and its build
 //! system; the viewer panel, the config snippet and the Python classes are
 //! read off the params struct (see `docs/editing-parameters.md`). See the
-//! "Elements" section of `DEVELOPMENT.md` for the rules they follow; the
+//! "Elements" section of `docs/architecture.md` for the rules they follow; the
 //! short version is that every element is one layer of the same pipeline:
 //!
 //! 1. **Collect** every config of its own kind, sorted by [`Order`].
