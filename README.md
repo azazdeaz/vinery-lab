@@ -6,15 +6,14 @@
 
 Parametric vineyard generator for robotics simulation. Mainly targeting Isaac Lab.
 
-
-Parameter editor and visualizer app
-<img width="1644" height="982" alt="image" src="https://github.com/user-attachments/assets/be6bdce4-75a4-4abb-b207-81883540ff38" />
-
-> Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower, needs WebGPU, and no wireframe view.
-
 Running the configured scene in Isaac Lab
 <img width="2401" height="1073" alt="image" src="https://github.com/user-attachments/assets/3eafecd5-9707-407f-a500-ec52634abfd1" />
 
+
+Parameter editor and visualizer app
+<img width="1850" height="974" alt="image" src="https://github.com/user-attachments/assets/24ea9490-20b5-49a5-a547-a2f96910a381" />
+
+> Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower, needs WebGPU, and no wireframe view.
 
 
 ## Features
