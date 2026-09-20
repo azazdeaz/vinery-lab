@@ -38,10 +38,7 @@
 //! [`terrain::plugin`]: crate::elements::terrain::plugin
 //! [`elements::plugin`]: crate::elements::plugin
 
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
 use crate::elements::Rng;
 use crate::elements::pole;
@@ -50,8 +47,8 @@ use crate::elements::vine;
 use crate::elements::wire;
 
 use crate::elements::SceneParams;
+use crate::params::{Label, Slider};
 use crate::scene::{Order, PrimRoot, UsdType, placed};
-use crate::ui::{Staged, Tip};
 
 use super::parcel::{ParcelParams, Row, VineyardLayout};
 
@@ -96,7 +93,19 @@ const POLE_TILT: f64 = 0.02;
 /// along its axis, so a trellis stays level over posts that are not.
 pub(crate) const POLE_SINK: f64 = 0.05;
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// What stands on the ground, and where.
+///
+/// Each plant is authored as its own prim, `/Vineyard/Planting/Row_000/Vine_007`,
+/// so a simulator can address one: attach a semantic label, bind a rigid body,
+/// randomize it. A name refers to a planting slot, so a vine skipped by
+/// `miss_rate` leaves a gap in the numbering rather than shifting every name
+/// after it.
+///
+/// A slot that comes out young by `young_rate` is planted as a replant in its
+/// first season, one green shoot out of the bare ground rather than a shrunken
+/// mature vine, and `young_scale` says how much of a full-grown shoot the
+/// youngest of them has put out.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
@@ -105,6 +114,7 @@ pub struct PlantingParams {
     /// Fraction of planting positions left empty. Real vineyards have gaps,
     /// and a perception model trained without them learns that they can't
     /// happen.
+    #[reflect(@Slider { min: 0.0, max: 0.3, step: 0.01 }, @Label("Missing vines"))]
     pub miss_rate: f32,
     /// Fraction of vines that are recent replants rather than mature.
     ///
@@ -112,8 +122,10 @@ pub struct PlantingParams {
     /// shrunk mature vine: in its first season it is one green shoot out of
     /// the ground, and a scaled-down trunk-and-cordons is the one thing it is
     /// certainly not.
+    #[reflect(@Slider { min: 0.0, max: 0.5, step: 0.01 }, @Label("Young vines"))]
     pub young_rate: f32,
     /// How small the youngest replant is, relative to a full-grown shoot.
+    #[reflect(@Slider { min: 0.2, max: 1.0, step: 0.05 }, @Label("Young vine scale"))]
     pub young_scale: f32,
 }
 
@@ -373,47 +385,6 @@ fn young_scale(params: &PlantingParams, age: f64) -> Option<f64> {
         return None;
     }
     Some(young_scale + (1.0 - young_scale) * (age / young_rate))
-}
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Missing vines"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.3, @value: 0.03 }
-                Tip("Fraction of planting positions left empty. A perception model trained without gaps learns that they cannot happen.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.planting.miss_rate = change.value;
-                })
-            ),
-            label_small("Young vines"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.5, @value: 0.08 }
-                Tip("Fraction of vines that are recent replants — one green shoot out of the ground, not a shrunk mature vine.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.planting.young_rate = change.value;
-                })
-            ),
-            label_small("Young vine scale"),
-            (
-                @FeathersSlider { @min: 0.2, @max: 1.0, @value: 0.55 }
-                Tip("How small the youngest replant is, relative to a full-grown shoot.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.planting.young_scale = change.value;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

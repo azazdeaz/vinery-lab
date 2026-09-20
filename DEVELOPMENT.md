@@ -42,6 +42,11 @@ If you only changed Rust source (not pyproject.toml), force a rebuild:
 `--features python` is what puts `src/python.rs` in front of clippy —
 it is out of the default feature set, so a plain `cargo clippy` never sees it.
 
+`cargo test` also fails while the Python stub, the Isaac Lab cfg classes or
+`docs/parameters.md` are stale against the Rust params structs they are
+generated from. `cargo test regen_params -- --ignored` rewrites them — see
+[docs/editing-parameters.md](docs/editing-parameters.md).
+
 Isaac Lab is not installed on the runner, so `tests/test_isaaclab_cfg.py` skips
 itself there. It runs locally, from the demo venv:
 
@@ -63,9 +68,13 @@ in front of a commit.
 
     cargo run --release
 
-Sliders write a staged copy of the params; a value reaches the live resources
-once it has held still for 150 ms, and re-runs the layers below it. Dragging
-one is a single rebuild rather than one per frame — see `src/ui.rs`.
+The panel is built from the params structs: one section per fragment of
+`VineyardParams`, one control per field, with the caption, range and tooltip
+read off the field's declaration — see `src/ui.rs` and
+[docs/editing-parameters.md](docs/editing-parameters.md). Sliders write a
+staged copy of the params; a value reaches the live resources once it has held
+still for 150 ms, and re-runs the layers below it. Dragging one is a single
+rebuild rather than one per frame.
 Press `S` to write the scene out as `scene.json`, and build it with:
 
     python -m vinerylab.usd scene.json scene.usd
@@ -152,9 +161,15 @@ pub struct GrapeConfig { pub radius: f32, pub ripeness: f32, /* ... */ }
 pub struct GrapeMetric;
 impl Metric<GrapeConfig> for GrapeMetric { /* weighted L2 over the fields */ }
 
-#[derive(Resource, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all))]
-pub struct GrapeParams { pub variations: u32, pub radius: f32, /* ... */ }
+/// One berry. The struct's doc comment is the Python class docstring.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "python", pyo3::pyclass(get_all, set_all, skip_from_py_object))]
+pub struct GrapeParams {
+    /// Berry radius, in meters. A field's first paragraph is its tooltip and docstring.
+    #[reflect(@Slider { min: 0.005, max: 0.02, step: 0.001 })]
+    pub radius: f32,
+    /* ... */
+}
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<GrapeParams>().add_systems(PreUpdate, (
@@ -167,14 +182,15 @@ pub fn plugin(app: &mut App) {
 fn reauthor(params: Res<GrapeParams>, mut grapes: Query<&mut GrapeConfig>) { /* ... */ }
 
 fn build(commands: Commands, library: Library, /* ... */) -> Result<()> { /* ... */ }
-
-pub fn ui() -> impl Scene { /* tipped sliders writing into Staged's `grape` field */ }
 ```
 
 Adding an element is one new file, one line in `elements::plugin`, one field in
-`VineyardParams`, one line in `ui::params_panel`, and its params mirrored in
-`snippet.rs`, `python.rs`, `_core.pyi` and `vineyard_cfg.py` — the last four
-each have a test that fails when a field is missed.
+`VineyardParams` (with a line each in `apply` and `from_world`), and one line in
+`python.rs`'s `py_params!` list with a `Py<T>` field on the aggregate beside it.
+The panel section, the config snippet, the Python stub, the Isaac Lab cfg class
+and the docs page all follow from the struct — the params struct is the one
+place a parameter is declared. [docs/editing-parameters.md](docs/editing-parameters.md)
+is the how-to, and `cargo test` fails on whatever was missed.
 
 Everything under `src/elements/` that *isn't* an element lives in
 `src/elements/util/`: the geometry kernels (`strand` skins a polyline of radii
@@ -370,11 +386,11 @@ clears the library.
 
 **A categorical param is a string naming one of the element's fixed list**
 (`CoverParams::kind`, `WeedParams::strip`), parsed once into a Rust enum with
-`ALL`/`NAMES`/`parse`. The name is validated where it enters from Python
-(`python.rs::snapshot` raises `ValueError`); the element itself falls back to
-the default with a warning, because a build system is no place to fail. The
-viewer offers the list as a dropdown (`ui::dropdown`) and only ever writes a
-valid name.
+`ALL`/`NAMES`/`parse`, and declared on the field as `@Choices(&Kind::NAMES)`.
+The name is validated where it enters from Python (`python.rs::snapshot`
+raises `ValueError` for any `@Choices` field); the element itself falls back
+to the default with a warning, because a build system is no place to fail.
+The viewer offers the list as a dropdown and only ever writes a valid name.
 
 **Determinism.** Bevy's query iteration order is not stable across runs and a
 codebook has to be a function of its population alone, so every organ carries a
@@ -431,6 +447,12 @@ them as `Py<T>` fields. `Py<T>` is required — a plain field would make the
 getter clone, so `params.leaf.detail = 200` would silently mutate a temporary.
 For the same reason fragments are declared `skip_from_py_object`: they are
 live shared objects, and extracting one by value would hand back a copy.
+
+A fragment's constructor is keyword-only and generic: `PoleParams(radius=0.05)`
+sets fields by name through reflection, so the Rust side has no signature to
+keep in step with the struct. The typed signature Python tooling sees is
+`_core.pyi`, generated from the same structs together with the Isaac Lab cfg
+classes — see `src/codegen.rs`.
 
 `VineyardParams.write_usd(path)` generates the scene in Rust, serializes the
 document, and hands it to `vinerylab.usd.build_usd` — so `usd-core` is a

@@ -1,9 +1,11 @@
 //! Feathers-based parameter panel, docked full-height down the left edge of
 //! the viewer.
 //!
-//! The panel itself owns no controls — it just stacks the UI fragment each
-//! element publishes next to its own params and author fn, one [`section`]
-//! each. Adding an element to the panel is one line in [`params_panel`].
+//! The panel owns no per-parameter code. It walks [`params::fragments`] and
+//! spawns one [`section`] per fragment holding one control per field: a slider
+//! for a field carrying a `@Slider`, a dropdown for one carrying `@Choices`, a
+//! checkbox for a `bool`. Caption, range and tooltip all come from the field's
+//! declaration, so a parameter added to a struct is in the panel.
 //!
 //! Sliders fire on every [`ValueChange`](bevy::ui_widgets::ValueChange),
 //! including mid-drag, so they write a [`Staged`] copy of the params rather
@@ -14,13 +16,15 @@
 //! Every control carries a [`Tip`] saying what its parameter means; [`tips`]
 //! floats it beside the control while the pointer is over it.
 
+use std::borrow::Cow;
+
 use bevy::clipboard::Clipboard;
 use bevy::feathers::{
     FeathersPlugins,
     containers::{group, group_body, group_header, pane, pane_body, pane_header},
     controls::{
-        ButtonVariant, FeathersButton, FeathersDisclosureToggle, FeathersMenu, FeathersMenuButton,
-        FeathersMenuItem, FeathersMenuPopup,
+        ButtonVariant, FeathersButton, FeathersCheckbox, FeathersDisclosureToggle, FeathersMenu,
+        FeathersMenuButton, FeathersMenuItem, FeathersMenuPopup, FeathersSlider,
     },
     dark_theme::create_dark_theme,
     display::label_small,
@@ -29,23 +33,16 @@ use bevy::feathers::{
 };
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::reflect::{NamedField, PartialReflect, Reflect};
 use bevy::ui::{Checked, OverrideClip};
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
-use bevy::ui_widgets::{Activate, ScrollArea, ValueChange, checkbox_self_update};
+use bevy::ui_widgets::{
+    Activate, Checkbox, ScrollArea, SliderPrecision, SliderStep, ValueChange, checkbox_self_update,
+    slider_self_update,
+};
 
 use crate::elements::{Grow, VineyardParams};
-
-use crate::elements::cover::ui as cover_ui;
-use crate::elements::leaf::ui as leaf_ui;
-use crate::elements::pole::ui as pole_ui;
-use crate::elements::shoot::ui as shoot_ui;
-use crate::elements::terrain::ui as terrain_ui;
-use crate::elements::ui as scene_ui;
-use crate::elements::util::parcel::ui as parcel_ui;
-use crate::elements::util::planting::ui as planting_ui;
-use crate::elements::vine::ui as vine_ui;
-use crate::elements::weed::ui as weed_ui;
-use crate::elements::wire::ui as wire_ui;
+use crate::params::{self, Slider, Widget};
 
 pub fn plugin(app: &mut App) {
     // Every element plugin is added before this one, so the live params are
@@ -54,47 +51,115 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(FeathersPlugins)
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(Staged(live))
-        .add_systems(Startup, params_panel_list.spawn())
+        .add_systems(Startup, spawn_panel)
         .add_systems(PreUpdate, commit.before(Grow::Terrain))
-        .add_systems(Update, (sync_dropdown_captions, tips));
+        .add_systems(Update, (sync_controls, tips));
 }
 
-/// Marks a dropdown's caption, with the read that keeps it current.
-#[derive(Component, Clone, Copy)]
-pub struct DropdownCaption(fn(&VineyardParams) -> &str);
+/// Which field a control edits, by fragment and field name.
+///
+/// The write-back observers reach the params through it, and so does
+/// [`sync_controls`], which is why a dropdown's caption and a checkbox's
+/// check are right however the params came to change.
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct Bound {
+    pub fragment: &'static str,
+    pub field: &'static str,
+}
 
-/// Blank, and only because a scene template constructs its components from
-/// their defaults before patching them; every dropdown patches the read in.
-impl Default for DropdownCaption {
-    fn default() -> Self {
-        Self(|_| "")
+impl Bound {
+    fn get<'a, T: Reflect>(&self, params: &'a VineyardParams) -> Option<&'a T> {
+        params::get(params, self.fragment, self.field)?.try_downcast_ref()
+    }
+
+    fn set<T: PartialReflect>(&self, params: &mut VineyardParams, value: T) {
+        if let Some(field) = params::get_mut(params, self.fragment, self.field) {
+            field.apply(&value);
+        }
+    }
+
+    /// A slider's value, rounded if the field is an integer.
+    fn set_number(&self, params: &mut VineyardParams, value: f32) {
+        if let Some(field) = params::get_mut(params, self.fragment, self.field) {
+            params::set_number(field, value);
+        }
+    }
+}
+
+/// One field's control, chosen by what the field declares.
+fn control(
+    fragment: &'static str,
+    field: &'static NamedField,
+    params: &VineyardParams,
+) -> Box<dyn Scene> {
+    let bound = Bound {
+        fragment,
+        field: field.name(),
+    };
+    let label = params::label(field);
+    // The tooltip is the summary as plain text: the backticks a doc comment
+    // puts around code would only show.
+    let tip: Cow<'static, str> = params::summary(field).replace('`', "").into();
+    match params::widget(field) {
+        Widget::Slider(slider) => {
+            let value = params::get(params, fragment, field.name())
+                .and_then(params::number)
+                .unwrap_or(slider.min);
+            Box::new(slider_control(label, tip, slider, value, bound))
+        }
+        Widget::Dropdown(names) => Box::new(dropdown(label, tip, names, bound)),
+        Widget::Checkbox => Box::new(checkbox(label, tip, bound)),
+    }
+}
+
+fn slider_control(
+    label: String,
+    tip: Cow<'static, str>,
+    slider: Slider,
+    value: f32,
+    bound: Bound,
+) -> impl Scene {
+    // Enough decimals to show one step: 0.005 needs three, 1.0 none.
+    let precision = (-slider.step.log10()).ceil().max(0.0) as i32;
+    bsn! {
+        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
+        Children [
+            label_small(label),
+            (
+                @FeathersSlider { @min: {slider.min}, @max: {slider.max}, @value: value }
+                Tip(tip)
+                SliderStep({slider.step})
+                SliderPrecision(precision)
+                on(slider_self_update)
+                on(move |change: On<ValueChange<f32>>, mut staged: ResMut<Staged>| {
+                    bound.set_number(&mut staged.0, change.value);
+                })
+            ),
+        ]
     }
 }
 
 /// A choice among named options: a menu button showing the current one,
 /// opening onto the rest.
 ///
-/// `read` says which option the params hold and `write` stores a pick; both
-/// address [`Staged`], like a slider does. The caption is not set by the pick
-/// but read back from the params every frame by [`sync_dropdown_captions`],
-/// so it is right however the params came to change and needs no walk from
-/// a menu item back to the button it belongs to.
+/// The caption is not set by the pick but read back from the params every
+/// frame by [`sync_controls`], so it needs no walk from a menu item back to
+/// the button it belongs to.
 pub fn dropdown(
-    label: &'static str,
-    tip: &'static str,
-    options: &'static [&'static str],
-    read: fn(&VineyardParams) -> &str,
-    write: fn(&mut VineyardParams, &'static str),
+    label: String,
+    tip: Cow<'static, str>,
+    names: &'static [&'static str],
+    bound: Bound,
 ) -> impl Scene {
-    let items: Vec<_> = options
+    let items: Vec<_> = names
         .iter()
         .map(|name| {
             let name: &'static str = name;
             bsn! {
                 (
                     @FeathersMenuItem { @caption: bsn! { Text(name) ThemedText } }
-                    on(move |_activate: On<Activate>, mut params: ResMut<Staged>| {
-                        write(&mut params.0, name);
+                    on(move |_activate: On<Activate>, mut staged: ResMut<Staged>| {
+                        bound.set(&mut staged.0, name.to_string());
                     })
                 )
             }
@@ -109,7 +174,7 @@ pub fn dropdown(
                 Children [
                     (
                         @FeathersMenuButton {
-                            @caption: bsn! { (Text("") ThemedText DropdownCaption(read)) }
+                            @caption: bsn! { (Text("") ThemedText Bound { fragment: {bound.fragment}, field: {bound.field} }) }
                         }
                         Node { flex_grow: 1.0 }
                         Tip(tip)
@@ -121,12 +186,45 @@ pub fn dropdown(
     }
 }
 
-/// Shows every dropdown the option its params currently hold.
-fn sync_dropdown_captions(staged: Res<Staged>, mut captions: Query<(&DropdownCaption, &mut Text)>) {
-    for (caption, mut text) in &mut captions {
-        let current = (caption.0)(&staged.0);
-        if text.0 != current {
-            text.0 = current.to_string();
+/// A flag. Whether it starts checked is [`sync_controls`]'s to set, from the
+/// params, the way a dropdown's caption is.
+fn checkbox(label: String, tip: Cow<'static, str>, bound: Bound) -> impl Scene {
+    bsn! {
+        (
+            @FeathersCheckbox { @caption: bsn! { (Text(label) ThemedText) } }
+            Tip(tip)
+            Bound { fragment: {bound.fragment}, field: {bound.field} }
+            on(checkbox_self_update)
+            on(move |change: On<ValueChange<bool>>, mut staged: ResMut<Staged>| {
+                bound.set(&mut staged.0, change.value);
+            })
+        )
+    }
+}
+
+/// Shows every dropdown the name its field holds, and every checkbox its flag.
+fn sync_controls(
+    staged: Res<Staged>,
+    mut commands: Commands,
+    mut captions: Query<(&Bound, &mut Text)>,
+    checkboxes: Query<(Entity, &Bound, Has<Checked>), With<Checkbox>>,
+) {
+    for (bound, mut text) in &mut captions {
+        if let Some(name) = bound.get::<String>(&staged.0)
+            && text.0 != *name
+        {
+            text.0 = name.clone();
+        }
+    }
+    for (entity, bound, checked) in &checkboxes {
+        match bound.get::<bool>(&staged.0) {
+            Some(true) if !checked => {
+                commands.entity(entity).insert(Checked);
+            }
+            Some(false) if checked => {
+                commands.entity(entity).remove::<Checked>();
+            }
+            _ => {}
         }
     }
 }
@@ -136,8 +234,8 @@ fn sync_dropdown_captions(staged: Res<Staged>, mut captions: Query<(&DropdownCap
 /// Goes on the control rather than on its caption: every feathers slider,
 /// checkbox and menu button already carries [`Hovered`], so a tip is the whole
 /// per-parameter cost of a tooltip — no wrapper node, no lookup table.
-#[derive(Component, Clone, Copy, Default)]
-pub struct Tip(pub &'static str);
+#[derive(Component, Clone, Default)]
+pub struct Tip(pub Cow<'static, str>);
 
 /// Floats a control's [`Tip`] above it rather than beside it.
 ///
@@ -168,7 +266,7 @@ fn tips(
         match (hovered.get(), card) {
             (true, None) => {
                 commands
-                    .spawn_scene(tip_popup(tip.0, above))
+                    .spawn_scene(tip_popup(tip.0.clone(), above))
                     .insert(ChildOf(control));
             }
             (false, Some(card)) => commands.entity(card).despawn(),
@@ -180,7 +278,7 @@ fn tips(
 /// The card itself. [`Popover`] anchors it to the control it is a child of and
 /// flips it to whichever of the two sides has room, so it clears the panel's
 /// right edge.
-fn tip_popup(text: &'static str, above: bool) -> impl Scene {
+fn tip_popup(text: Cow<'static, str>, above: bool) -> impl Scene {
     let sides = if above {
         [PopoverSide::Top, PopoverSide::Bottom]
     } else {
@@ -274,11 +372,23 @@ pub struct BlocksCamera;
 /// [`stats`](crate::stats).
 pub const PANEL_WIDTH: f32 = 260.0;
 
-fn params_panel_list() -> impl SceneList {
-    bsn_list![params_panel()]
+/// Spawns the panel, seeded from the staged params so every control starts
+/// at the value it edits.
+fn spawn_panel(world: &mut World) -> Result {
+    let params = world.resource::<Staged>().0.clone();
+    world.spawn_scene(params_panel(&params))?;
+    Ok(())
 }
 
-fn params_panel() -> impl Scene {
+fn params_panel(params: &VineyardParams) -> impl Scene {
+    let sections: Vec<Box<dyn Scene>> = params::fragments()
+        .map(|fragment| {
+            let controls: Vec<Box<dyn Scene>> = params::fields(fragment)
+                .map(|field| control(fragment.name(), field, params))
+                .collect();
+            Box::new(section(params::label(fragment), controls)) as Box<dyn Scene>
+        })
+        .collect();
     bsn! {
         Node {
             position_type: PositionType::Absolute,
@@ -309,19 +419,7 @@ fn params_panel() -> impl Scene {
                         overflow: Overflow::scroll_y(),
                     }
                     ScrollArea
-                    Children [
-                        section("Scene", bsn_list![scene_ui()]),
-                        section("Terrain", bsn_list![terrain_ui()]),
-                        section("Parcel", bsn_list![parcel_ui()]),
-                        section("Pole", bsn_list![pole_ui()]),
-                        section("Wire", bsn_list![wire_ui()]),
-                        section("Vine", bsn_list![vine_ui()]),
-                        section("Shoot", bsn_list![shoot_ui()]),
-                        section("Leaf", bsn_list![leaf_ui()]),
-                        section("Planting", bsn_list![planting_ui()]),
-                        section("Cover", bsn_list![cover_ui()]),
-                        section("Weeds", bsn_list![weed_ui()]),
-                    ]
+                    Children [ {sections} ]
                 ),
                 // Outside the scroll area, so it stays reachable however far
                 // down the panel is scrolled.
@@ -338,7 +436,7 @@ fn params_panel() -> impl Scene {
 ///
 /// The group's children are `[header, body]` in that order, and the toggle
 /// sits in the header — [`fold_section`] walks that shape.
-fn section(title: &'static str, body: impl SceneList) -> impl Scene {
+fn section(title: impl Into<String>, body: impl SceneList) -> impl Scene {
     bsn! {
         group()
         Children [
@@ -510,28 +608,29 @@ mod tests {
 
     fn one_dropdown() -> impl SceneList {
         bsn_list![dropdown(
-            "Kind",
-            "Which sward is sown in the alleys.",
+            "Kind".into(),
+            "Which sward is sown in the alleys.".into(),
             &crate::elements::cover::Kind::NAMES,
-            |params| &params.cover.kind,
-            |params, name| params.cover.kind = name.to_string(),
+            Bound {
+                fragment: "cover",
+                field: "kind",
+            },
         )]
     }
 
     /// The caption a dropdown shows, in a world with the params it reads.
     fn caption(world: &mut World) -> String {
         world
-            .query_filtered::<&Text, With<DropdownCaption>>()
+            .query_filtered::<&Text, With<Bound>>()
             .single(world)
             .expect("one caption")
             .0
             .clone()
     }
 
-    /// A dropdown's two halves, neither of which a compile can check: the
-    /// caption follows the params, and activating an item writes them.
-    #[test]
-    fn a_dropdown_shows_the_current_choice_and_writes_a_pick() {
+    /// Everything a control's scene touches while spawning, and nothing else:
+    /// no window, no renderer, no theme.
+    fn control_app<L: SceneList>(scene: fn() -> L) -> App {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -541,10 +640,18 @@ mod tests {
         .init_asset::<bevy::text::Font>()
         .init_asset::<Image>()
         .insert_resource(Staged(VineyardParams::default()))
-        .add_systems(Startup, one_dropdown.spawn())
-        .add_systems(Update, sync_dropdown_captions);
+        .add_systems(Startup, scene.spawn())
+        .add_systems(Update, sync_controls);
         app.update();
         app.update();
+        app
+    }
+
+    /// A dropdown's two halves, neither of which a compile can check: the
+    /// caption follows the params, and activating an item writes them.
+    #[test]
+    fn a_dropdown_shows_the_current_choice_and_writes_a_pick() {
+        let mut app = control_app(one_dropdown);
         assert_eq!(
             caption(app.world_mut()),
             "spontaneous",
@@ -576,6 +683,35 @@ mod tests {
         assert_eq!(caption(app.world_mut()), "sown", "and the caption follows");
     }
 
+    fn one_checkbox() -> impl SceneList {
+        bsn_list![checkbox(
+            "Bendable strays".into(),
+            "Whether a stray shoot bends.".into(),
+            Bound {
+                fragment: "shoot",
+                field: "flexible",
+            },
+        )]
+    }
+
+    /// A checkbox starts as its flag reads and follows it, since nothing in
+    /// the template knows the default.
+    #[test]
+    fn a_checkbox_shows_its_flag() {
+        let mut app = control_app(one_checkbox);
+        let checked = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<Has<Checked>, With<Bound>>()
+                .single(app.world())
+                .expect("one checkbox")
+        };
+        assert!(checked(&mut app), "the default is on");
+
+        app.world_mut().resource_mut::<Staged>().shoot.flexible = false;
+        app.update();
+        assert!(!checked(&mut app), "and it follows the params");
+    }
+
     /// A tip appears while the pointer is over its control and leaves with it.
     ///
     /// `Hovered` is immutable, so the pointer crossing a control shows up here
@@ -592,7 +728,7 @@ mod tests {
         .add_systems(Update, tips);
         let control = app
             .world_mut()
-            .spawn((Tip("Post radius."), Hovered(false)))
+            .spawn((Tip("Post radius.".into()), Hovered(false)))
             .id();
 
         let cards = |app: &mut App| {
@@ -616,13 +752,10 @@ mod tests {
         assert_eq!(cards(&mut app), 0, "the pointer leaves");
     }
 
-    /// Every control in the panel carries a tip.
-    ///
-    /// The tips are a copy of the field list, the way `snippet.rs` keeps one,
-    /// and they go in by hand at each control: add a slider without a tip and
-    /// the two counts part company here rather than in the running panel.
+    /// The panel spawns one tipped control per parameter, and nothing else
+    /// that takes input: the walk over the fragments reaches every field.
     #[test]
-    fn every_control_in_the_panel_carries_a_tip() {
+    fn the_panel_spawns_one_tipped_control_per_parameter() {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -632,7 +765,7 @@ mod tests {
         .init_asset::<bevy::text::Font>()
         .init_asset::<Image>()
         .insert_resource(Staged(VineyardParams::default()))
-        .add_systems(Startup, params_panel_list.spawn());
+        .add_systems(Startup, spawn_panel);
         app.update();
 
         let world = app.world_mut();
@@ -642,7 +775,7 @@ mod tests {
             .query_filtered::<(), (
                 Or<(
                     With<bevy::ui_widgets::Slider>,
-                    With<bevy::ui_widgets::Checkbox>,
+                    With<Checkbox>,
                     With<bevy::ui_widgets::MenuButton>,
                 )>,
                 Without<FeathersDisclosureToggle>,
@@ -650,7 +783,10 @@ mod tests {
             .iter(world)
             .count();
         let tipped = world.query_filtered::<(), With<Tip>>().iter(world).count();
-        assert!(controls > 50, "the whole panel spawned, not a fragment");
-        assert_eq!(tipped, controls, "a control was added without a Tip");
+        let fields: usize = params::fragments()
+            .map(|fragment| params::fields(fragment).count())
+            .sum();
+        assert_eq!(controls, fields, "one control per field");
+        assert_eq!(tipped, controls, "every control carries a tip");
     }
 }

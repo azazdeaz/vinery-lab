@@ -6,8 +6,10 @@
 //! interactive viewer ([`viewer::run`]) or headlessly from Python ([`python`],
 //! behind the `python` feature).
 
+pub mod codegen;
 pub mod elements;
 pub mod generate;
+pub mod params;
 pub mod perf;
 pub mod quantize;
 // Pipes frames to an `ffmpeg` child process, which the web has neither of.

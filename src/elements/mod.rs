@@ -1,9 +1,10 @@
 //! Elements — the things a vineyard is made of, one module each.
 //!
-//! An element holds its params resource, its `plugin` wiring, its build system
-//! and its UI fragment. See the "Elements" section of `README.md` for the rules
-//! they follow; the short version is that every element is one layer of the
-//! same pipeline:
+//! An element holds its params resource, its `plugin` wiring and its build
+//! system; the viewer panel, the config snippet and the Python classes are
+//! read off the params struct (see `docs/editing-parameters.md`). See the
+//! "Elements" section of `DEVELOPMENT.md` for the rules they follow; the
+//! short version is that every element is one layer of the same pipeline:
 //!
 //! 1. **Collect** every config of its own kind, sorted by [`Order`].
 //! 2. **Cluster** them to `params.variations` representatives.
@@ -36,7 +37,7 @@ pub mod wire;
 use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 
-use crate::ui::{Staged, Tip};
+use crate::params::{Label, Slider};
 
 /// Build order. Every layer's build system goes in exactly one of these, and
 /// they run chained in `PreUpdate`.
@@ -94,28 +95,32 @@ pub fn plugin(app: &mut App) {
     ));
 }
 
-/// Scene-wide parameters, owned by no element.
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// Scene-wide parameters, owned by no element: one seed and one date for
+/// everything on the ground.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct SceneParams {
-    /// The one seed the whole scene is generated from.
+    /// The one seed the whole scene is generated from. Every layer salts it
+    /// with a constant of its own, so nudging one layer's knobs never re-rolls
+    /// another: a new seed is a different vineyard, not a different trunk on
+    /// the same one.
     ///
-    /// Every layer salts it with a constant of its own before drawing, so that
-    /// nudging one never re-rolls another — see [`salt`] and the `*_STREAM`
-    /// constants each element keeps. One seed rather than one per element
-    /// because a scene is reproduced as a whole: a downstream simulator keys
-    /// its cache on the params, and "which of three seeds moved" is not a
-    /// question anyone was asking.
+    /// See [`salt`] and the `*_STREAM` constants each element keeps. One seed
+    /// rather than one per element because a scene is reproduced as a whole:
+    /// a downstream simulator keys its cache on the params, and "which of
+    /// three seeds moved" is not a question anyone was asking.
+    #[reflect(@Slider { min: 0.0, max: 64.0, step: 1.0 })]
     pub seed: u64,
     /// Where in the growing season the scene is: `0.0` at budbreak, `1.0` at
-    /// harvest.
+    /// harvest. Today only the weeds read it, for which species are up and
+    /// whether a bolter has bolted; the canopy does not yet.
     ///
     /// Scene-wide rather than an element's, because it is one date for
-    /// everything on the ground. Today only the weeds read it — which species
-    /// are up, and whether a bolter has bolted; the canopy does not yet.
+    /// everything on the ground.
+    #[reflect(@Slider { min: 0.0, max: 1.0, step: 0.05 })]
     pub season: f32,
 }
 
@@ -128,46 +133,13 @@ impl Default for SceneParams {
     }
 }
 
-/// The scene-wide fragment's slice of the params panel.
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            bevy::feathers::display::label_small("Scene seed"),
-            (
-                @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 64.0, @value: 0.0 }
-                Tip("The one seed the whole scene is generated from. Every layer salts it, so nudging this never re-rolls one layer alone.")
-                bevy::ui_widgets::SliderStep(1.0)
-                bevy::ui_widgets::SliderPrecision(0)
-                on(bevy::ui_widgets::slider_self_update)
-                on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
-                    mut params: ResMut<Staged>| {
-                    params.scene.seed = change.value.round().max(0.0) as u64;
-                })
-            ),
-            bevy::feathers::display::label_small("Season"),
-            (
-                @bevy::feathers::controls::FeathersSlider { @min: 0.0, @max: 1.0, @value: 0.5 }
-                Tip("Where in the growing season the scene is: 0 at budbreak, 1 at harvest. Only the weeds read it so far.")
-                bevy::ui_widgets::SliderStep(0.05)
-                bevy::ui_widgets::SliderPrecision(2)
-                on(bevy::ui_widgets::slider_self_update)
-                on(|change: On<bevy::ui_widgets::ValueChange<f32>>,
-                    mut params: ResMut<Staged>| {
-                    params.scene.season = change.value.clamp(0.0, 1.0);
-                })
-            ),
-        ]
-    }
-}
-
 /// A plain snapshot of every element's params.
 ///
 /// The world stores each fragment as its own resource so change detection is
 /// per-element; this aggregate is the whole parameter set as one value, for
 /// everything that has to hold one — Python calls, headless generation, and
 /// the viewer panel's [`Staged`] copy.
-#[derive(Clone, Debug, Default)]
+#[derive(Reflect, Clone, Debug, Default, PartialEq)]
 pub struct VineyardParams {
     pub scene: SceneParams,
     pub terrain: terrain::TerrainParams,
@@ -179,6 +151,7 @@ pub struct VineyardParams {
     pub shoot: shoot::ShootParams,
     pub leaf: leaf::LeafParams,
     pub cover: cover::CoverParams,
+    #[reflect(@Label("Weeds"))]
     pub weed: weed::WeedParams,
 }
 
@@ -293,6 +266,17 @@ impl Rng {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `apply` reaches every fragment: a set with every field moved lands in
+    /// a bare world and reads back out whole. A fragment `apply` skipped would
+    /// be missing from the world, which `from_world` panics on.
+    #[test]
+    fn apply_and_from_world_round_trip_every_fragment() {
+        let params = crate::params::nudged();
+        let mut world = World::new();
+        params.apply(&mut world);
+        assert_eq!(VineyardParams::from_world(&world), params);
+    }
 
     fn draws(seed: u64, n: usize) -> Vec<f64> {
         let mut rng = Rng::new(seed);

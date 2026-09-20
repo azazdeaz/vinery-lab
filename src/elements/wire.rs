@@ -40,12 +40,9 @@
 //!
 //! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
 
+use crate::params::Slider;
 use crate::scene::{Library, Surface, configs_changed};
-use crate::ui::{Staged, Tip};
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
 use super::Grow;
 use super::pole;
@@ -98,18 +95,31 @@ pub struct WireConfig {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// The wires strung from post to post, and what the vines are trained onto.
+///
+/// One fruiting wire on the post axis at the vines' `trunk_height`, the head
+/// height the cordons are tied along, and above it `catch_wires` levels of
+/// pairs, one wire either side of the post, that the season's shoots grow up
+/// between. The levels are spread evenly from the fruiting wire to just under
+/// the parcel's `trellis_height`, so the top pair is the wire a hedger cuts to.
+///
+/// Each wire spans one panel, post to post, so a run follows the ground the
+/// way the posts do. There is no `variations`: a trellis is strung from one
+/// reel of wire, and every span is the same mesh stretched to its own length.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct WireParams {
-    /// Levels of catch wires above the fruiting wire. Each level is a *pair*,
-    /// one wire either side of the post, and the shoots grow up between them —
+    /// Levels of catch wires above the fruiting wire. Each level is a pair,
+    /// one wire either side of the post, and the shoots grow up between them;
     /// two pairs is the usual vertical-shoot-positioned trellis.
+    #[reflect(@Slider { min: 0.0, max: 4.0, step: 1.0 })]
     pub catch_wires: u32,
     /// Wire radius, in meters. The default is the 3 mm high-tensile steel a
     /// trellis is strung with.
+    #[reflect(@Slider { min: 0.001, max: 0.004, step: 0.0005 })]
     pub radius: f32,
 }
 
@@ -205,38 +215,6 @@ pub fn build(
 /// No per-span shade: a trellis is strung from one reel of wire.
 fn surface() -> Surface {
     material::POLE.surface(color::srgb(color::WIRE))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Catch wires"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 4.0, @value: 2.0 }
-                Tip("Levels of catch wire above the fruiting wire. Each level is a pair, one either side of the post, with the shoots between them.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.wire.catch_wires = change.value.round().max(0.0) as u32;
-                })
-            ),
-            label_small("Wire radius"),
-            (
-                @FeathersSlider { @min: 0.001, @max: 0.004, @value: 0.0015 }
-                Tip("Wire radius. The default is the 3 mm high-tensile steel a trellis is strung with.")
-                SliderStep(0.0005)
-                SliderPrecision(4)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.wire.radius = change.value;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

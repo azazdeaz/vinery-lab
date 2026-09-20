@@ -28,45 +28,52 @@
 
 use bevy::color::palettes::basic::{GRAY, YELLOW};
 use bevy::color::palettes::css::{LIMEGREEN, ORANGE};
-use bevy::feathers::controls::{FeathersCheckbox, FeathersSlider};
-use bevy::feathers::display::label_small;
-use bevy::feathers::theme::ThemedText;
 use bevy::prelude::*;
-use bevy::ui_widgets::{
-    SliderPrecision, SliderStep, ValueChange, checkbox_self_update, slider_self_update,
-};
 
 use crate::elements::terrain::{Ground, TerrainParams};
-use crate::ui::{Staged, Tip};
+use crate::params::Slider;
 
 /// How vineyard rows are laid out across the terrain.
-#[derive(Resource, Clone, Debug, PartialEq)]
+///
+/// Solves the positions the planting puts a vine and a post at. `vine_spacing`
+/// also sizes the cordons the vines build, and `trellis_height` is how tall
+/// the posts stand.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct ParcelParams {
     /// Row direction, in degrees counter-clockwise from +X.
+    #[reflect(@Slider { min: -90.0, max: 90.0, step: 1.0 })]
     pub orientation: f32,
     /// Inset from the terrain's edge left unplanted, in meters — the
     /// turning area machinery needs at each end of a row.
+    #[reflect(@Slider { min: 0.0, max: 20.0, step: 0.5 })]
     pub headland: f32,
     /// Distance between neighbouring row centerlines, in meters.
+    #[reflect(@Slider { min: 0.8, max: 6.0, step: 0.1 })]
     pub row_spacing: f32,
     /// Distance between neighbouring vines along a row, in meters.
+    #[reflect(@Slider { min: 0.5, max: 3.0, step: 0.1 })]
     pub vine_spacing: f32,
     /// Target distance between posts along a row, in meters. Panel count is
     /// solved from this and the row's actual length, so real post spacing
     /// comes out close to this value rather than exactly equal to it.
+    #[reflect(@Slider { min: 2.0, max: 12.0, step: 0.5 })]
     pub post_spacing: f32,
     /// Rows shorter than this, after clipping to the headland-inset
     /// rectangle, are dropped rather than planted.
+    #[reflect(@Slider { min: 0.0, max: 50.0, step: 1.0 })]
     pub min_row_length: f32,
-    /// Height of the trellis above the ground, in meters. Not consumed by
-    /// the solver — it is how tall [`pole`] builds its posts, and how tall
-    /// the layout gizmo draws them.
+    /// Height of the trellis above the ground, in meters: how tall the posts
+    /// stand, and what the top catch wires hang just under.
+    ///
+    /// Not consumed by the layout solver itself — it is how tall [`pole`]
+    /// builds its posts, and how tall the layout gizmo draws them.
     ///
     /// [`pole`]: crate::elements::pole
+    #[reflect(@Slider { min: 0.5, max: 3.0, step: 0.1 })]
     pub trellis_height: f32,
 }
 
@@ -441,88 +448,6 @@ fn sample_row(row: &Row, ground: &Ground) -> Vec<Vec3> {
             ground.lift(row.start + dir * t)
         })
         .collect()
-}
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Row orientation"),
-            (
-                @FeathersSlider { @min: -90.0, @max: 90.0, @value: 0.0 }
-                Tip("Row direction, in degrees counter-clockwise from +X.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.orientation = change.value;
-                })
-            ),
-            label_small("Headland"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 20.0, @value: 6.0 }
-                Tip("Inset from the terrain's edge left unplanted — the turning area machinery needs at each end of a row.")
-                SliderStep(0.5)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.headland = change.value;
-                })
-            ),
-            label_small("Row spacing"),
-            (
-                @FeathersSlider { @min: 0.8, @max: 6.0, @value: 2.4 }
-                Tip("Distance between neighbouring row centrelines, in metres.")
-                SliderStep(0.1)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.row_spacing = change.value;
-                })
-            ),
-            label_small("Vine spacing"),
-            (
-                @FeathersSlider { @min: 0.5, @max: 3.0, @value: 1.2 }
-                Tip("Distance between neighbouring vines along a row, in metres.")
-                SliderStep(0.1)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.vine_spacing = change.value;
-                })
-            ),
-            label_small("Post spacing"),
-            (
-                @FeathersSlider { @min: 2.0, @max: 12.0, @value: 6.0 }
-                Tip("Target distance between posts. Panel count is solved from it and the row's real length, so the spacing lands close rather than exact.")
-                SliderStep(0.5)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.post_spacing = change.value;
-                })
-            ),
-            label_small("Trellis height"),
-            (
-                @FeathersSlider { @min: 0.5, @max: 3.0, @value: 1.8 }
-                Tip("Height of the posts above the ground. Not the fruiting wire — that is the vine's trunk height.")
-                SliderStep(0.1)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.parcel.trellis_height = change.value;
-                })
-            ),
-            (
-                @FeathersCheckbox { @caption: bsn! { Text("Show layout") ThemedText } }
-                Tip("Draw the solved row and post layout over the scene.")
-                on(checkbox_self_update)
-                on(|change: On<ValueChange<bool>>, mut show: ResMut<ShowLayout>| {
-                    show.0 = change.value;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

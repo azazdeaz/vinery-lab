@@ -36,13 +36,10 @@
 //! [`ParcelParams::trellis_height`]: super::util::parcel::ParcelParams::trellis_height
 //! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
 
+use crate::params::Slider;
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
-use crate::ui::{Staged, Tip};
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 
 use super::Grow;
 use super::util::mesh::{MeshData, cylinder_mesh};
@@ -128,18 +125,30 @@ impl Metric<PoleConfig> for PoleMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// One trellis post: a plain grey cylinder.
+///
+/// How tall a post is comes from the parcel's `trellis_height`, since the
+/// posts are what hold the wires up there, and where the posts stand from its
+/// `post_spacing`, so neither is here.
+///
+/// There is no `variations` either. A post is a manufactured object, and the
+/// only variety a row of them shows is in how each was driven: a centimeter
+/// off line, a degree off plumb, a few centimeters deeper. That is applied per
+/// placement and needs no geometry of its own.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct PoleParams {
-    /// Post radius, in meters — so the default is the 8 cm round softwood
-    /// post that is the commonest thing in a European vineyard. A steel
-    /// profile post is nearer half as thick.
+    /// Post radius, in meters. The default is the 8 cm round softwood post
+    /// that is the commonest thing in a European vineyard; a steel profile
+    /// post is nearer half as thick.
+    #[reflect(@Slider { min: 0.01, max: 0.1, step: 0.005 })]
     pub radius: f32,
     /// Vertices around the post. The silhouette, and the only detail knob a
     /// straight tube has.
+    #[reflect(@Slider { min: 3.0, max: 16.0, step: 1.0 })]
     pub sides: u32,
 }
 
@@ -214,38 +223,6 @@ pub fn build(
 /// No per-post shade: a row of posts off the same pallet is one colour.
 fn surface() -> Surface {
     material::POLE.surface(color::srgb(color::POLE))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Pole radius"),
-            (
-                @FeathersSlider { @min: 0.01, @max: 0.1, @value: 0.04 }
-                Tip("Post radius. The default is the 8 cm round softwood post commonest in a European vineyard; a steel profile is half as thick.")
-                SliderStep(0.005)
-                SliderPrecision(3)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.pole.radius = change.value;
-                })
-            ),
-            label_small("Pole sides"),
-            (
-                @FeathersSlider { @min: 3.0, @max: 16.0, @value: 8.0 }
-                Tip("Vertices around the post — the silhouette, and the only detail knob a straight tube has.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.pole.sides = change.value.round().max(3.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

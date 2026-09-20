@@ -58,18 +58,15 @@
 
 use std::f64::consts::{PI, TAU};
 
-use bevy::feathers::controls::FeathersSlider;
-use bevy::feathers::display::label_small;
 use bevy::prelude::*;
-use bevy::ui_widgets::{SliderPrecision, SliderStep, ValueChange, slider_self_update};
 use nalgebra::{Point3, Vector3};
 
 use super::shoot;
+use crate::params::{Label, Slider};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
 };
-use crate::ui::{Staged, Tip};
 
 use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
@@ -330,56 +327,78 @@ impl Metric<VineConfig> for VineMetric {
 
 // ─── Params ─────────────────────────────────────────────────────────
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+/// The permanent woody framework of a grapevine.
+///
+/// A trunk rising to the head, one or two cordons running along the fruiting
+/// wire from there, and the spurs pruned back onto them. `arms` is 1 for a
+/// unilateral vine or 2 for a bilateral one; how far each cordon reaches is
+/// solved from the parcel's `vine_spacing` and `cordon_gap` rather than set
+/// directly.
+///
+/// Shape only: where vines stand, and which ones are missing or young, is the
+/// planting's.
+#[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct VineParams {
-    /// How many distinct vine meshes the scene may hold.
-    ///
-    /// A budget, not a count: the plants are clustered and this is how many
-    /// representatives the clustering may keep. Lower it to trade variety for
-    /// memory, raise it to spend memory on variety.
-    pub variations: u32,
-    /// Ground to head, in meters — the height of the fruiting wire. Not the
-    /// same thing as [`ParcelParams::trellis_height`], which is where the tops
-    /// of the posts are.
+    /// Ground to head, in meters: the height of the fruiting wire. Not the
+    /// trellis height, which is where the tops of the posts are.
+    #[reflect(@Slider { min: 0.3, max: 1.6, step: 0.05 })]
     pub trunk_height: f32,
     /// Trunk radius at the base, in meters.
+    #[reflect(@Slider { min: 0.01, max: 0.08, step: 0.005 })]
     pub trunk_radius: f32,
     /// How far the trunk's axis wanders off vertical, in meters.
+    #[reflect(@Slider { min: 0.0, max: 0.08, step: 0.005 })]
     pub trunk_wobble: f32,
     /// Cordons per vine: 1 for a unilateral vine, 2 for a bilateral one.
+    #[reflect(@Slider { min: 1.0, max: 2.0, step: 1.0 }, @Label("Cordons per vine"))]
     pub arms: u32,
     /// Bare wire left between the cordon tips of neighbouring vines, in
     /// meters. Together with the parcel's vine spacing this is what sets how
-    /// far a cordon reaches — see [`cordon_reach`].
+    /// far a cordon reaches.
+    ///
+    /// See [`cordon_reach`].
+    #[reflect(@Slider { min: 0.0, max: 0.6, step: 0.05 })]
     pub cordon_gap: f32,
     /// Cordon radius at the head, in meters.
+    #[reflect(@Slider { min: 0.008, max: 0.05, step: 0.002 })]
     pub cordon_radius: f32,
     /// Target distance between spurs along a cordon, in meters.
+    #[reflect(@Slider { min: 0.05, max: 0.4, step: 0.01 })]
     pub spur_spacing: f32,
     /// How far a spur stands off its cordon, in meters.
+    #[reflect(@Slider { min: 0.0, max: 0.15, step: 0.01 })]
     pub spur_length: f32,
     /// Shoots per spur, as a fractional count: the whole part is certain and
     /// the fraction is the odds of one more. A spur is pruned to two buds, so
     /// `1.8` — two shoots four times in five, one otherwise — is what a
     /// healthy spur-pruned vine looks like.
+    #[reflect(@Slider { min: 0.0, max: 3.0, step: 0.1 })]
     pub shoots_per_spur: f32,
     /// Depth of the bark ridges, as a fraction of the local radius.
+    #[reflect(@Slider { min: 0.0, max: 0.4, step: 0.01 }, @Label("Bark roughness"))]
     pub roughness: f32,
-    /// Vertices around each tube. The silhouette — visible on every instance.
+    /// Vertices around each tube. The silhouette, visible on every instance.
+    #[reflect(@Slider { min: 3.0, max: 16.0, step: 1.0 })]
     pub sides: u32,
     /// Rings per meter along each tube. Barely visible at row distance, so
     /// this is the cheaper of the two detail knobs to turn down.
+    #[reflect(@Slider { min: 4.0, max: 60.0, step: 1.0 })]
     pub detail: u32,
+    /// How many distinct vine meshes the scene may hold. A budget, not a
+    /// count: the plants are clustered and this is how many representatives
+    /// the clustering may keep. Lower it to trade variety for memory, raise it
+    /// to spend memory on variety.
+    #[reflect(@Slider { min: 1.0, max: 8.0, step: 1.0 })]
+    pub variations: u32,
 }
 
 impl Default for VineParams {
     fn default() -> Self {
         Self {
-            variations: 4,
             trunk_height: 0.9,
             trunk_radius: 0.035,
             trunk_wobble: 0.02,
@@ -392,6 +411,7 @@ impl Default for VineParams {
             roughness: 0.14,
             sides: 8,
             detail: 20,
+            variations: 4,
         }
     }
 }
@@ -981,159 +1001,6 @@ fn surface(seed: u64) -> Surface {
         color::srgb(color::WOOD),
         &mut Rng::new(seed ^ color::COLOR_STREAM),
     ))
-}
-
-// ─── UI ─────────────────────────────────────────────────────────────
-
-pub fn ui() -> impl Scene {
-    bsn! {
-        Node { flex_direction: FlexDirection::Column, row_gap: px(4) }
-        Children [
-            label_small("Trunk height"),
-            (
-                @FeathersSlider { @min: 0.3, @max: 1.6, @value: 0.9 }
-                Tip("Ground to head — the height of the fruiting wire. Not the trellis height, which is where the post tops are.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.trunk_height = change.value;
-                })
-            ),
-            label_small("Trunk radius"),
-            (
-                @FeathersSlider { @min: 0.01, @max: 0.08, @value: 0.035 }
-                Tip("Trunk radius at the base, in metres.")
-                SliderStep(0.005)
-                SliderPrecision(3)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.trunk_radius = change.value;
-                })
-            ),
-            label_small("Trunk wobble"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.08, @value: 0.02 }
-                Tip("How far the trunk's axis wanders off vertical, in metres.")
-                SliderStep(0.005)
-                SliderPrecision(3)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.trunk_wobble = change.value;
-                })
-            ),
-            label_small("Cordons per vine"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 2.0, @value: 2.0 }
-                Tip("1 for a unilateral vine, 2 for a bilateral one.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.arms = change.value.round().clamp(1.0, 2.0) as u32;
-                })
-            ),
-            label_small("Cordon gap"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.6, @value: 0.15 }
-                Tip("Bare wire left between the cordon tips of neighbouring vines. With the vine spacing, this is what sets how far a cordon reaches.")
-                SliderStep(0.05)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.cordon_gap = change.value;
-                })
-            ),
-            label_small("Cordon radius"),
-            (
-                @FeathersSlider { @min: 0.008, @max: 0.05, @value: 0.022 }
-                Tip("Cordon radius at the head, in metres.")
-                SliderStep(0.002)
-                SliderPrecision(3)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.cordon_radius = change.value;
-                })
-            ),
-            label_small("Spur spacing"),
-            (
-                @FeathersSlider { @min: 0.05, @max: 0.4, @value: 0.12 }
-                Tip("Target distance between spurs along a cordon.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.spur_spacing = change.value;
-                })
-            ),
-            label_small("Spur length"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.15, @value: 0.05 }
-                Tip("How far a spur stands off its cordon.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.spur_length = change.value;
-                })
-            ),
-            label_small("Shoots per spur"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 3.0, @value: 1.8 }
-                Tip("A fractional count: the whole part is certain, the fraction is the odds of one more. A spur is pruned to two buds, so 1.8 is a healthy vine.")
-                SliderStep(0.1)
-                SliderPrecision(1)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.shoots_per_spur = change.value;
-                })
-            ),
-            label_small("Bark roughness"),
-            (
-                @FeathersSlider { @min: 0.0, @max: 0.4, @value: 0.14 }
-                Tip("Depth of the bark ridges, as a fraction of the local radius.")
-                SliderStep(0.01)
-                SliderPrecision(2)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.roughness = change.value;
-                })
-            ),
-            label_small("Vine sides"),
-            (
-                @FeathersSlider { @min: 3.0, @max: 16.0, @value: 8.0 }
-                Tip("Vertices around each tube. The silhouette — visible on every instance.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.sides = change.value.round().max(3.0) as u32;
-                })
-            ),
-            label_small("Vine detail"),
-            (
-                @FeathersSlider { @min: 4.0, @max: 60.0, @value: 20.0 }
-                Tip("Rings per metre along each tube. Barely visible at row distance, so the cheaper of the two detail knobs to turn down.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.detail = change.value.round().max(4.0) as u32;
-                })
-            ),
-            label_small("Vine variations"),
-            (
-                @FeathersSlider { @min: 1.0, @max: 8.0, @value: 4.0 }
-                Tip("A budget, not a count: how many distinct vine meshes the clustering may keep. Variety against memory.")
-                SliderStep(1.0)
-                SliderPrecision(0)
-                on(slider_self_update)
-                on(|change: On<ValueChange<f32>>, mut params: ResMut<Staged>| {
-                    params.vine.variations = change.value.round().max(1.0) as u32;
-                })
-            ),
-        ]
-    }
 }
 
 #[cfg(test)]

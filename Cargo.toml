@@ -16,7 +16,15 @@ name = "vinerylab"
 path = "src/main.rs"
 
 [dependencies]
-bevy = {version = "0.19.1", features = ["bevy_feathers", "ghost_nodes", "bevy_ui_debug"]}
+# `reflect_documentation` keeps the params structs' doc comments readable at
+# run time, which is where the viewer's tooltips and the generated Python docs
+# come from — see `src/params.rs`.
+bevy = { version = "0.19.1", features = [
+    "bevy_feathers",
+    "ghost_nodes",
+    "bevy_ui_debug",
+    "reflect_documentation",
+] }
 anyhow = "1"
 # The export document crosses into Python as JSON — see `src/scene/doc.rs`.
 serde = { version = "1", features = ["derive"] }
