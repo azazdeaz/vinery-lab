@@ -139,6 +139,13 @@ fn sync_dropdown_captions(staged: Res<Staged>, mut captions: Query<(&DropdownCap
 #[derive(Component, Clone, Copy, Default)]
 pub struct Tip(pub &'static str);
 
+/// Floats a control's [`Tip`] above it rather than beside it.
+///
+/// For a row of controls along the bottom of the window, where beside means
+/// over the neighbouring one.
+#[derive(Component, Clone, Copy, Default)]
+pub struct TipAbove;
+
 /// The card [`tips`] spawns, so it can find it again to take it down.
 #[derive(Component, Clone, Default)]
 struct TipPopup;
@@ -150,10 +157,10 @@ struct TipPopup;
 /// spawned on enter and despawned on leave, and none exist in between.
 fn tips(
     mut commands: Commands,
-    crossed: Query<(Entity, &Hovered, &Tip), Changed<Hovered>>,
+    crossed: Query<(Entity, &Hovered, &Tip, Has<TipAbove>), Changed<Hovered>>,
     shown: Query<(Entity, &ChildOf), With<TipPopup>>,
 ) {
-    for (control, hovered, tip) in &crossed {
+    for (control, hovered, tip, above) in &crossed {
         let card = shown
             .iter()
             .find(|(_, of)| of.parent() == control)
@@ -161,7 +168,7 @@ fn tips(
         match (hovered.get(), card) {
             (true, None) => {
                 commands
-                    .spawn_scene(tip_popup(tip.0))
+                    .spawn_scene(tip_popup(tip.0, above))
                     .insert(ChildOf(control));
             }
             (false, Some(card)) => commands.entity(card).despawn(),
@@ -171,8 +178,21 @@ fn tips(
 }
 
 /// The card itself. [`Popover`] anchors it to the control it is a child of and
-/// flips it to whichever side has room, so it clears the panel's right edge.
-fn tip_popup(text: &'static str) -> impl Scene {
+/// flips it to whichever of the two sides has room, so it clears the panel's
+/// right edge.
+fn tip_popup(text: &'static str, above: bool) -> impl Scene {
+    let sides = if above {
+        [PopoverSide::Top, PopoverSide::Bottom]
+    } else {
+        [PopoverSide::Right, PopoverSide::Left]
+    };
+    let positions = sides
+        .map(|side| PopoverPlacement {
+            side,
+            align: PopoverAlign::Start,
+            gap: 8.0,
+        })
+        .to_vec();
     bsn! {
         Node {
             // `position_popover` sets this itself, but only after a frame of
@@ -194,18 +214,7 @@ fn tip_popup(text: &'static str) -> impl Scene {
         // read as a hover leave — which would flicker the card away.
         Pickable::IGNORE
         Popover {
-            positions: vec![
-                PopoverPlacement {
-                    side: PopoverSide::Right,
-                    align: PopoverAlign::Start,
-                    gap: 8.0,
-                },
-                PopoverPlacement {
-                    side: PopoverSide::Left,
-                    align: PopoverAlign::Start,
-                    gap: 8.0,
-                },
-            ],
+            positions: {positions},
             window_margin: 10.0,
         }
         Children [ label_small(text) ]
@@ -261,6 +270,10 @@ fn commit(world: &mut World, mut still: Local<Option<f32>>) {
 #[derive(Component, Clone, Default)]
 pub struct BlocksCamera;
 
+/// How wide the params panel is. The footer starts where it ends — see
+/// [`stats`](crate::stats).
+pub const PANEL_WIDTH: f32 = 260.0;
+
 fn params_panel_list() -> impl SceneList {
     bsn_list![params_panel()]
 }
@@ -272,7 +285,7 @@ fn params_panel() -> impl Scene {
             top: px(0),
             left: px(0),
             bottom: px(0),
-            width: px(260),
+            width: px(PANEL_WIDTH),
             display: Display::Flex,
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Stretch,

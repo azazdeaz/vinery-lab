@@ -10,8 +10,6 @@
 //! ordinary Y-up world.
 
 use bevy::camera::Exposure;
-use bevy::feathers::controls::{ButtonVariant, FeathersToolButton};
-use bevy::feathers::theme::ThemedText;
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::light::{
@@ -19,13 +17,12 @@ use bevy::light::{
     atmosphere::ScatteringMedium, light_consts::lux,
 };
 use bevy::pbr::AtmosphereSettings;
-use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+use bevy::pbr::wireframe::WireframePlugin;
 use bevy::prelude::*;
-use bevy::ui_widgets::Activate;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::elements::util::parcel;
-use crate::ui::{BlocksCamera, Tip};
+use crate::ui::BlocksCamera;
 
 /// Where the save key writes the scene document.
 #[cfg(not(target_arch = "wasm32"))]
@@ -54,12 +51,13 @@ pub fn run() {
         crate::scene::plugin,
         crate::elements::plugin,
         crate::ui::plugin,
+        crate::stats::plugin,
         // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
         // headless generation path's `MinimalPlugins` doesn't provide —
         // see `parcel::debug_plugin`'s docs for why it's kept separate
         // from `crate::elements::plugin`.
         parcel::debug_plugin,
-        // Drives the toolbar's wireframe button. Requests no wgpu feature of
+        // Drives the footer's wireframe checkbox. Requests no wgpu feature of
         // its own: `WgpuSettings` defaults to `Functionality`, which already
         // enables everything the adapter supports, and a plugin that asks for
         // `POLYGON_MODE_LINE` outright would take down an adapter without it.
@@ -67,7 +65,7 @@ pub fn run() {
         // and draws nothing.
         WireframePlugin::default(),
     ))
-    .add_systems(Startup, (setup, view_toolbar_list.spawn()))
+    .add_systems(Startup, setup)
     .add_systems(Update, sync_camera_enabled_with_ui);
 
     // No filesystem on the web, and this system's `Err` would take the app
@@ -159,45 +157,6 @@ fn save_scene_on_key(world: &mut World) -> Result<()> {
     std::fs::write(SCENE_PATH, crate::scene::export::scene_json(world)?)?;
     info!("saved {SCENE_PATH} — build it with `python -m vinerylab.usd {SCENE_PATH} scene.usd`");
     Ok(())
-}
-
-/// The viewport's own controls, floated over the top-right corner the way a 3D
-/// editor keeps its shading buttons: these say how the scene is *drawn*, which
-/// is not what the params panel is for — it says what the scene *is*.
-fn view_toolbar_list() -> impl SceneList {
-    bsn_list![(
-        Node { position_type: PositionType::Absolute, top: px(8), right: px(8) }
-        Children [ wireframe_button() ]
-    )]
-}
-
-/// Lit while wireframes are on, the way a mode button in an editor is.
-fn wireframe_button() -> impl Scene {
-    bsn! {
-        @FeathersToolButton {
-            // Spelled out rather than an icon: Fira Sans, which Feathers
-            // renders its text in, has no glyph that reads as a wireframe.
-            @caption: bsn! { (Text("Wireframe") ThemedText) },
-            @variant: ButtonVariant::Plain,
-        }
-        Tip("Draw every mesh as its edges.")
-        // On the button rather than on the toolbar node above it: the button
-        // is the node the pointer actually hovers.
-        BlocksCamera
-        Interaction
-        on(|activate: On<Activate>,
-            mut config: ResMut<WireframeConfig>,
-            mut variants: Query<&mut ButtonVariant>| {
-            config.global = !config.global;
-            if let Ok(mut variant) = variants.get_mut(activate.entity) {
-                *variant = if config.global {
-                    ButtonVariant::Primary
-                } else {
-                    ButtonVariant::Plain
-                };
-            }
-        })
-    }
 }
 
 /// Disables orbit/pan/zoom while the pointer is over the UI, so dragging a
