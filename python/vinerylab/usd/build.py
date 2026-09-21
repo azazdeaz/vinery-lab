@@ -172,6 +172,12 @@ GEOM = "Geom"
 """Name of the `Mesh` inside a part. See the module docstring for why a part
 wraps its mesh rather than being one."""
 
+HEIGHT_FIELD = "newton:heightfield:resolution"
+"""Marks the ground mesh, and the spacing a backend rasterizes it at.
+
+The one part a scene has at most one of, so it is also how `ground.py` finds
+the surface again without going by name."""
+
 NON_TRANSFORMABLE = frozenset({"Scope"})
 """Prim types the generator emits that cannot carry an xform op stack.
 
@@ -350,9 +356,7 @@ def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
     if resolution := part.get("heightfield_resolution"):
         # Newton rasterizes this collider into a height field at this spacing.
         # Backends that read the triangles ignore the attribute.
-        mesh.GetPrim().CreateAttribute(
-            "newton:heightfield:resolution", Sdf.ValueTypeNames.Float
-        ).Set(resolution)
+        mesh.GetPrim().CreateAttribute(HEIGHT_FIELD, Sdf.ValueTypeNames.Float).Set(resolution)
 
     return mesh
 

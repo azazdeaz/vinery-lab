@@ -27,8 +27,26 @@ def block(*ends: tuple[float, float]) -> list[np.ndarray]:
     return [posts(first, last, index * SPACING) for index, (first, last) in enumerate(ends)]
 
 
+class Slope:
+    """Ground climbing at `gradient` along the AB line, for the scene's own
+    `vinerylab.usd.Ground`."""
+
+    def __init__(self, gradient: float = 0.0):
+        self.gradient = gradient
+
+    def height(self, x: float, y: float) -> float:
+        return self.gradient * x
+
+
+def test_waypoint_heights_are_read_off_the_ground():
+    """Not off the posts, which stop where the run-out into the headland begins."""
+    passes = route._passes(block((0.0, 60.0), (0.0, 60.0)), A, AB, Slope(0.1))
+
+    assert np.allclose(passes[0][:, 2], 0.1 * passes[0][:, 0])
+
+
 def test_a_pass_runs_the_row_it_straddles():
-    passes = route._passes(block((0.0, 60.0), (0.0, 60.0)), A, AB)
+    passes = route._passes(block((0.0, 60.0), (0.0, 60.0)), A, AB, Slope())
 
     assert np.allclose(passes[0][:, 1], 0.0), "the first pass is on the first row"
     assert np.allclose(passes[1][:, 1], SPACING), "the second is one row spacing over"
@@ -39,7 +57,7 @@ def test_a_pass_runs_the_row_it_straddles():
 
 def test_alternate_passes_run_the_other_way():
     """One continuous path, so no drive back to the start between rows."""
-    passes = route._passes(block((0.0, 60.0), (0.0, 60.0), (0.0, 60.0)), A, AB)
+    passes = route._passes(block((0.0, 60.0), (0.0, 60.0), (0.0, 60.0)), A, AB, Slope())
 
     assert passes[0][0, 0] < passes[0][-1, 0]
     assert passes[1][0, 0] > passes[1][-1, 0]
@@ -54,7 +72,7 @@ def test_a_pass_clears_its_neighbours_end_posts(swapped: bool):
     if swapped:
         ends.reverse()
 
-    passes = route._passes(block(*ends), A, AB)
+    passes = route._passes(block(*ends), A, AB, Slope())
 
     for leg in passes:
         assert leg[:, 0].min() <= 0.0 - route.RUNOUT

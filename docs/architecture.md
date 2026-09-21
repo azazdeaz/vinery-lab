@@ -14,7 +14,7 @@ params → Bevy entities (Transform, Mesh3d, Name, UsdReference)
 Rust owns the *scene* — what geometry exists, where it goes, what references
 what. Python owns *USD* — prim types, schemas, composition arcs, stage
 metadata. `src/scene/doc.rs` is the whole contract between them, and
-`build.py`'s module docstring is the only place USD knowledge lives.
+`build.py`'s module docstring is where every USD rule is written down.
 
 There is no intermediate representation on the Rust side and no second scene
 graph: the entities the viewer draws are the entities the export walks, so
@@ -322,6 +322,12 @@ exact triangle mesh legal for the ground. A part carrying a collider is
 referenced non-instanceable: a collider inside a prototype is reachable only
 through an instance proxy, and the ground has one instance, so it gives up
 nothing. Everything else stays instanced.
+
+Reading the ground back out is `vinerylab.usd.Ground`: a consumer that places
+anything on the terrain after the fact — a robot, above all — needs the height
+the generator placed the vines and posts against, and gets it by interpolating
+the same grid. It finds the surface by its height-field attribute rather than
+by name, that being the one part a scene has at most one of.
 
 ## Python bindings
 

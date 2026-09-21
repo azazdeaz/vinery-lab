@@ -12,6 +12,8 @@ has no alternative to.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import torch
 
@@ -20,6 +22,9 @@ from isaaclab.utils.math import wrap_to_pi, yaw_quat
 
 from straddler import DRIVE_JOINTS, STEER_JOINTS, Straddler
 from route import STRIDE
+
+if TYPE_CHECKING:  # `vinerylab.usd` pulls in `pxr`; see `route.row_route` for why that waits
+    from vinerylab.usd import Ground
 
 # 200 Hz physics under a 50 Hz controller. The gantry is stiff and slow; the
 # rate matters only to the steering joints, which have to swing 90 degrees at
@@ -31,18 +36,26 @@ CRUISE_SPEED = 1.2  # m/s commanded towards the target
 LOOKAHEAD = 1.5 * STRIDE  # see `_advance` for why this is longer than a stride
 YAW_GAIN = 2.0  # rad/s of yaw command per rad of heading error
 MAX_YAW_RATE = 0.4  # rad/s
-SPAWN_CLEARANCE = 0.05  # m the wheels are held off the ground on a (re)spawn
+SPAWN_CLEARANCE = 0.05  # m the lowest wheel is held off the ground on a (re)spawn
 CREEPING = 1e-3  # m/s below which a wheel is not asked to point anywhere
 
 
 class Driver:
     """Drives `robot` along `route`, holding `heading`, one waypoint at a time."""
 
-    def __init__(self, route: np.ndarray, heading: float, machine: Straddler, robot: Articulation):
+    def __init__(
+        self,
+        route: np.ndarray,
+        heading: float,
+        machine: Straddler,
+        robot: Articulation,
+        ground: Ground,
+    ):
         self.route = route
         self.heading = heading
         self.machine = machine
         self.robot = robot
+        self.ground = ground
         self.waypoints = torch.tensor(route, dtype=torch.float32, device=robot.device)
         # Where each wheel sits in the base frame, for the kinematics below.
         self.corners = torch.tensor(machine.corners, dtype=torch.float32, device=robot.device)
@@ -81,7 +94,7 @@ class Driver:
             [
                 [
                     *here[:2],
-                    here[2] + SPAWN_CLEARANCE,
+                    spawn_height(self.ground, here[:2], self.heading, self.machine),
                     0.0,
                     0.0,
                     np.sin(self.heading / 2),
@@ -135,6 +148,30 @@ class Driver:
                 (YAW_GAIN * error).clamp(-MAX_YAW_RATE, MAX_YAW_RATE),
             ]
         )
+
+
+def spawn_height(ground: Ground, xy: np.ndarray, heading: float, machine: Straddler) -> float:
+    """Where to put the root so no wheel starts inside the terrain.
+
+    The machine goes down level, and its wheels reach `track` across and
+    `wheelbase` along, so the ground under all four decides the height and the
+    highest of them sets it: `base_link`'s origin is the wheel bottoms' own
+    height. A wheel spawned below the surface is pushed back out as an impulse,
+    and on ground that slopes under the machine it is one corner's wheel rather
+    than four -- which is a moment on something this tall, not a shove.
+
+    The route's own height is the ground on the row line, between the wheels;
+    it is what the camera looks at, not what the machine stands on.
+    """
+    cos, sin = np.cos(heading), np.sin(heading)
+    corners = np.asarray(machine.corners)
+    wheels = xy + np.column_stack(
+        [
+            cos * corners[:, 0] - sin * corners[:, 1],
+            sin * corners[:, 0] + cos * corners[:, 1],
+        ]
+    )
+    return float(max(ground.height(x, y) for x, y in wheels)) + SPAWN_CLEARANCE
 
 
 def swerve(
