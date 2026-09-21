@@ -6,6 +6,7 @@ entirely where that isn't installed.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -16,6 +17,27 @@ from straddler import Straddler  # noqa: E402
 MACHINE = Straddler()
 CORNERS = torch.tensor(MACHINE.corners)
 STRAIGHT = torch.zeros(4)
+
+
+class Slope:
+    """Ground climbing at 10% towards +y, for the scene's own
+    `vinerylab.usd.Ground`."""
+
+    def height(self, x: float, y: float) -> float:
+        return 0.1 * y
+
+
+# Facing along the rows, the machine's wheels reach `track` across the slope;
+# facing across them, `wheelbase`. Whichever is uphill sets the spawn.
+@pytest.mark.parametrize(
+    "heading, uphill", [(0.0, MACHINE.track / 2), (np.pi / 2, MACHINE.wheelbase / 2)]
+)
+def test_the_spawn_clears_the_highest_ground_under_any_wheel(heading, uphill):
+    """A wheel set down inside the terrain is thrown back out, and on ground
+    that slopes under the machine that is one corner rather than four."""
+    height = driver.spawn_height(Slope(), np.zeros(2), heading, MACHINE)
+
+    assert height == pytest.approx(0.1 * uphill + driver.SPAWN_CLEARANCE)
 
 
 def swerve(vx: float, vy: float, wz: float, current: torch.Tensor = STRAIGHT):

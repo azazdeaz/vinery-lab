@@ -32,7 +32,7 @@ from vinerylab.isaaclab import (
 from driver import DECIMATION, SIM_DT, Driver
 from newton_patches import fix_heightfield_offsets
 from route import row_route
-from straddler import Straddler, straddler_cfg
+from straddler import Straddler, set_finish, straddler_cfg
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
@@ -106,7 +106,11 @@ def design_scene(machine: Straddler) -> Articulation:
     # the posts and trunks as capsules.
     VINEYARD_CFG.func(VINEYARD_PATH, VINEYARD_CFG)
 
-    return Articulation(straddler_cfg(machine, ROBOT_PATH))
+    robot = Articulation(straddler_cfg(machine, ROBOT_PATH))
+    # The URDF gave its materials their colours; the rest of the surface has
+    # nowhere in a URDF to come from, so it is set on the spawned prims.
+    set_finish(ROBOT_PATH)
+    return robot
 
 
 def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, driver: Driver):
@@ -135,7 +139,7 @@ def main():
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it on exit.
     with launch_simulation(sim_cfg, args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)
-        route, heading = row_route(VINEYARD_CFG)
+        route, heading, ground = row_route(VINEYARD_CFG)
         # The robot is sized to the field it works: a leg in each alley, and
         # the frame over the trellis wire.
         machine = Straddler.for_vineyard(VINEYARD_CFG)
@@ -154,7 +158,7 @@ def main():
         # Now we are ready!
         print(f"[INFO]: Setup complete, {len(route)} waypoints to drive...")
         # Run the simulator
-        run_simulator(sim, robot, Driver(route, heading, machine, robot))
+        run_simulator(sim, robot, Driver(route, heading, machine, robot, ground))
 
 
 if __name__ == "__main__":

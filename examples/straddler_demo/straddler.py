@@ -1,12 +1,11 @@
 """A straddling field robot, generated at the size the vineyard asks for.
 
-The robot is a portal: a rectangular top frame carried on four legs with a
-swerve module at the foot of each. It drives with a leg in the alley either
-side of a vine row and the trellis passing under the frame, which leaves two
-dimensions deciding whether it can work a block at all -- the track it stands
-on and the opening it carries over the row. `Straddler.for_vineyard` takes
-both from the vineyard to be worked; `dataclasses.replace` moves any of the
-rest.
+The robot is a portal: a flat roof carried on four legs with a swerve module
+at the foot of each. It drives with a leg in the alley either side of a vine
+row and the trellis passing under the frame, which leaves two dimensions
+deciding whether it can work a block at all -- the track it stands on and the
+opening it carries over the row. `Straddler.for_vineyard` takes both from the
+vineyard to be worked; `dataclasses.replace` moves any of the rest.
 
 The proportions are the commercial portals': 0.10-0.25 m of structure between
 a wheel centre and the opening, tracks of 1.1-2.0 m, and openings 1.4-2.35 m
@@ -66,8 +65,22 @@ DRIVE_EFFORT_PER_KG = 0.5
 standing on it. A drive this stiff with no ceiling explodes on the first step,
 and a continuous joint carries no limit of its own to fall back on."""
 
-MATERIALS = {"frame": "0.88 0.88 0.86 1", "tire": "0.05 0.05 0.05 1"}
-"""Colours, as URDF rgba. Painted frame, and rubber where it touches the ground."""
+MATERIALS = {"frame": "0.82 0.80 0.75 1", "tire": "0.05 0.05 0.05 1"}
+"""Colours, as URDF rgba. Painted frame, and rubber where it touches the ground.
+
+These are sRGB; the importer converts them to the linear values the renderer
+works in, so they are picked the way a colour is picked rather than the way a
+reflectance is. The frame is a broken white rather than a true one: paint that
+returns nine tenths of the light falling on it does not exist, and under an
+open sky a surface that bright renders as a hole with no shape in it.
+"""
+
+ROUGHNESS = {"frame": 0.55, "tire": 0.9}
+"""How rough each material is. See `set_finish`.
+
+Weathered machine enamel, and rubber -- which is rougher than almost anything
+else on a vehicle.
+"""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,11 +111,8 @@ class Straddler:
 
     wheel_radius: float = 0.2
     wheel_width: float = 0.15
-    beam_width: float = 0.12
-    """Square section of the top frame's beams."""
-
-    overhang: float = 0.25
-    """How far the top frame reaches past the axles, front and rear."""
+    roof_thickness: float = 0.12
+    """The slab across the top. Its corners sit on the legs', so nothing overhangs."""
 
     mass: float = 160.0
     """The whole machine, and what the actuators are sized from.
@@ -228,6 +238,28 @@ def straddler_cfg(machine: Straddler, prim_path: str) -> ArticulationCfg:
     )
 
 
+def set_finish(prim_path: str) -> None:
+    """Give a spawned machine's materials their surface response.
+
+    A URDF material carries a colour and nothing else, so every material the
+    importer builds from one comes out at its default roughness of 0.5 -- a
+    half gloss that reads as wet plastic on paint and as polished rubber on a
+    tyre. The importer writes each as a `UsdPreviewSurface` with its roughness
+    exposed on the material prim, which is where this sets it.
+
+    Call once the articulation is built, since that is what spawns the asset.
+    """
+    stage = sim_utils.get_current_stage()
+    for name, roughness in ROUGHNESS.items():
+        material = stage.GetPrimAtPath(f"{prim_path}/Materials/{name}")
+        if not material.IsValid():
+            raise RuntimeError(
+                f"{prim_path} has no material {name!r} to finish:"
+                " the URDF importer no longer lays materials out where this expects them"
+            )
+        material.GetAttribute("inputs:roughness").Set(roughness)
+
+
 ##
 # URDF generation.
 ##
@@ -254,7 +286,7 @@ def _write_urdf(machine: Straddler) -> str:
 def urdf(machine: Straddler) -> str:
     """`machine` as a URDF document.
 
-    `base_link` is the whole frame -- top beams and legs both, since nothing
+    `base_link` is the whole frame -- the roof and the legs both, since nothing
     between them moves -- with its origin on the ground at the centre of the
     wheelbase. Each wheel then hangs off it through a steering joint about the
     vertical and a drive joint about the wheel's own axis, the two crossing at
@@ -262,28 +294,22 @@ def urdf(machine: Straddler) -> str:
     """
     leg = 2 * machine.leg_thickness
     leg_height = machine.clear_height - machine.wheel_radius
-    length = machine.wheelbase + 2 * machine.overhang
-    beams = [
-        # Two rails along the rows, over the legs, and two across the ends.
-        *((0.0, sign * machine.track / 2, length, machine.beam_width) for sign in (1, -1)),
-        *((sign * (length / 2), 0.0, machine.beam_width, machine.track) for sign in (1, -1)),
-    ]
-    frame = (
-        "\n".join(
+    # One slab over the four legs, flush with their outer faces.
+    length, width = machine.wheelbase + leg, machine.track + leg
+    frame = "\n".join(
+        [
             _box(
-                f"{x} {y} {machine.clear_height + machine.beam_width / 2}",
-                f"{along} {across} {machine.beam_width}",
-            )
-            for x, y, along, across in beams
-        )
-        + "\n"
-        + "\n".join(
-            _box(
-                f"{x} {y} {machine.wheel_radius + leg_height / 2}",
-                f"{leg} {leg} {leg_height}",
-            )
-            for x, y in machine.corners
-        )
+                f"0 0 {machine.clear_height + machine.roof_thickness / 2}",
+                f"{length} {width} {machine.roof_thickness}",
+            ),
+            *(
+                _box(
+                    f"{x} {y} {machine.wheel_radius + leg_height / 2}",
+                    f"{leg} {leg} {leg_height}",
+                )
+                for x, y in machine.corners
+            ),
+        ]
     )
     modules = "\n".join(
         _module(machine, steer, drive, corner, x, y)
@@ -301,7 +327,7 @@ def urdf(machine: Straddler) -> str:
     <inertial>
       <origin xyz="0 0 {machine.clear_height}"/>
       <mass value="{machine.frame_mass}"/>
-{_box_inertia(machine.frame_mass, length, machine.track, machine.beam_width)}
+{_box_inertia(machine.frame_mass, length, width, machine.roof_thickness)}
     </inertial>
   </link>
 {modules}

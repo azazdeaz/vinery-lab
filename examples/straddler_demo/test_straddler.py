@@ -106,6 +106,23 @@ def test_the_opening_it_advertises_is_the_opening_it_builds(built):
         ), "a part is either outside the opening or above it"
 
 
+def test_the_roof_is_one_slab_resting_on_the_legs(built):
+    """A table top, not a frame: nothing spans the four posts but the one box."""
+    leg = 2 * MACHINE.leg_thickness
+    above = [
+        part
+        for part in built.find("./link[@name='base_link']").iter("collision")
+        if float(part.find("origin").get("xyz").split()[2]) > MACHINE.clear_height
+    ]
+
+    assert len(above) == 1, "one roof, not four beams"
+    assert above[0].find("origin").get("xyz").startswith("0 0 "), "centred on the machine"
+    length, width, _ = (float(v) for v in above[0].find("./geometry/box").get("size").split())
+    assert (length, width) == pytest.approx((MACHINE.wheelbase + leg, MACHINE.track + leg)), (
+        "the roof's corners land on the legs'"
+    )
+
+
 def test_the_steering_axis_runs_through_the_wheel_centre(built):
     """What makes a module a swerve module rather than a castor."""
     for steer, drive, (x, y) in zip(

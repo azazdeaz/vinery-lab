@@ -52,7 +52,8 @@ that need it skip themselves; run those from a demo venv — see
 
 | Path | What it is |
 | --- | --- |
-| [usd/build.py](python/vinerylab/usd/build.py) | the only module that knows USD; scene document to stage |
+| [usd/build.py](python/vinerylab/usd/build.py) | scene document to stage; where every USD rule is written down |
+| [usd/ground.py](python/vinerylab/usd/ground.py) | `Ground`: the terrain height under any (x, y), read back off a stage |
 | [isaaclab/vineyard_cfg.py](python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
 | [isaaclab/vineyard.py](python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
 | [isaaclab/physics.py](python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
