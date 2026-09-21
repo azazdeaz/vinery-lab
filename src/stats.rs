@@ -19,6 +19,7 @@ use bevy::mesh::Indices;
 use bevy::pbr::wireframe::WireframeConfig;
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
+use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{ValueChange, checkbox_self_update};
 
 use crate::elements::util::parcel::ShowLayout;
@@ -232,16 +233,30 @@ fn layout_checkbox() -> impl Scene {
     }
 }
 
+/// Drawing a mesh as its edges needs the wgpu feature `POLYGON_MODE_LINE`,
+/// which WebGPU does not expose — see [`crate::viewer`]. The web build gets the
+/// control disabled, so it reads as unavailable rather than doing nothing when
+/// clicked. An `Option<impl Scene>` resolving to `None` adds nothing, which is
+/// how a component is left off a template.
 fn wireframe_checkbox() -> impl Scene {
-    bsn! {
-        @FeathersCheckbox { @caption: bsn! { (Text("Wireframe") ThemedText) } }
-        Tip("Draw every mesh as its edges.")
-        TipAbove
-        on(checkbox_self_update)
-        on(|change: On<ValueChange<bool>>, mut config: ResMut<WireframeConfig>| {
-            config.global = change.value;
-        })
-    }
+    let web = cfg!(target_arch = "wasm32");
+    let tip = if web {
+        "Draw every mesh as its edges. Native builds only: the web backend has no line polygon mode."
+    } else {
+        "Draw every mesh as its edges."
+    };
+    (
+        bsn! {
+            @FeathersCheckbox { @caption: bsn! { (Text("Wireframe") ThemedText) } }
+            Tip({tip})
+            TipAbove
+            on(checkbox_self_update)
+            on(|change: On<ValueChange<bool>>, mut config: ResMut<WireframeConfig>| {
+                config.global = change.value;
+            })
+        },
+        web.then_some(bsn! { InteractionDisabled }),
+    )
 }
 
 #[cfg(test)]
