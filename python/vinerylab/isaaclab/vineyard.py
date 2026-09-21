@@ -16,20 +16,24 @@ form and roughly 4x faster for USD to parse.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import tempfile
 from typing import TYPE_CHECKING
 
 from filelock import FileLock
+from isaaclab.sim import SimulationContext
 from isaaclab.sim.utils import clone
 
 import vinerylab
 import vinerylab._core
 
+from .physics import has_flexible_shoots, steps_rods, tune_shoots
 from .vineyard_cfg import FRAGMENTS
 
 if TYPE_CHECKING:
@@ -39,6 +43,8 @@ if TYPE_CHECKING:
 
 SCENE_SUFFIX = ".usd"
 """Extension the cached scene is written with -- see the module docstring."""
+
+logger = logging.getLogger(__name__)
 
 
 @clone
@@ -55,6 +61,11 @@ def spawn_vineyard(
     ``{ENV_REGEX_NS}/Vineyard`` spawns once and is copied to every matching
     parent -- the generation cost is paid once regardless of ``num_envs``.
 
+    The vineyard is checked against the physics backend in force. Where
+    nothing steps a rod, a stray shoot authored flexible is spawned static
+    instead -- the same lean, as one mesh -- and where something does, the
+    rods are tuned for it; see :func:`for_backend`.
+
     Args:
         prim_path: The prim path or pattern to spawn the vineyard at.
         cfg: The configuration instance.
@@ -70,9 +81,35 @@ def spawn_vineyard(
     # of `pxr` only wins the import if nothing loaded the pip one before Kit started.
     from isaaclab.sim.spawners.from_files.from_files import _spawn_from_usd_file
 
+    cfg = for_backend(cfg)
     return _spawn_from_usd_file(
         prim_path, resolve_usd_path(cfg), cfg, translation, orientation, **kwargs
     )
+
+
+def for_backend(cfg: VineyardCfg) -> VineyardCfg:
+    """The cfg to spawn under the physics backend in force.
+
+    With flexible shoots and a backend that steps a rod, `cfg` itself, and the
+    rods are tuned for it (`tune_shoots`). With one that cannot -- MJWarp
+    refuses a model holding a rod, PhysX ignores the curve -- a copy with
+    `ShootCfg.flexible` off: the strays keep their lean as static meshes, and
+    the copy is its own scene in the cache. `cfg` itself again with nothing to
+    decide, as when no simulation is running.
+    """
+    sim = SimulationContext.instance()
+    if sim is None or not has_flexible_shoots(cfg):
+        return cfg
+    physics = sim.cfg.physics
+    if steps_rods(physics):
+        tune_shoots()
+        return cfg
+    solver = getattr(physics, "solver_cfg", physics)
+    logger.warning(
+        "%s cannot bend a rod: the vineyard's stray shoots are spawned static.",
+        type(solver).__name__,
+    )
+    return dataclasses.replace(cfg, shoot=dataclasses.replace(cfg.shoot, flexible=False))
 
 
 def resolve_usd_path(cfg: VineyardCfg) -> str:

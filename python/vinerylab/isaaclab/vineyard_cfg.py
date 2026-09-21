@@ -472,11 +472,12 @@ class VineyardCfg(FileCfg):
     There is no `usd_path`: the fragments below are what identifies the asset,
     and the file backing it is an implementation detail of the cache.
 
-    A stray shoot (`ShootCfg.stray`) is authored as a deformable curve and
-    bends **only** under the coupled solver `make_coupled_physics_cfg` builds;
-    every other backend imports it as an inert curve at its rest shape. Each
-    one is a chain of rigid bodies, so keep the share low, or set
-    `ShootCfg.flexible` off to export the same lean as a static mesh.
+    A stray shoot (`ShootCfg.stray`) is authored as a deformable curve, and
+    bends under the coupled solver `make_physics_cfg_newton` builds for a
+    vineyard that has any. Under a backend that cannot step one it is spawned
+    as a static mesh at the same lean instead. Each curve is a chain of rigid
+    bodies, so keep the share low, or set `ShootCfg.flexible` off to spawn the
+    meshes under every backend.
     """
 
     func: Callable | str = "{DIR}.vineyard:spawn_vineyard"

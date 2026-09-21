@@ -5,8 +5,9 @@ and the walking from `driver`.
 
 The physics backend and the viewer are command-line choices, e.g.
 `--physics newton_mjwarp --viz newton`; `--help` lists the full launcher set.
-`--physics newton_flexible` adds the coupled solver that bends the vineyard's
-flexible shoots -- see `vinerylab.isaaclab.physics`.
+The default backend is Newton coupled with VBD, which bends the vineyard's
+flexible shoots -- see `vinerylab.isaaclab.physics`. Under any other the stray
+shoots are spawned static.
 """
 
 import argparse
@@ -14,7 +15,7 @@ import argparse
 import numpy as np
 
 import isaaclab.sim as sim_utils
-from isaaclab.app import add_launcher_args, launch_simulation, make_physics_cfg
+from isaaclab.app import add_launcher_args, launch_simulation
 from isaaclab.assets import Articulation
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
@@ -23,8 +24,7 @@ from vinerylab.isaaclab import (
     ShootCfg,
     TerrainCfg,
     VineyardCfg,
-    make_coupled_physics_cfg,
-    tune_shoots,
+    make_physics_cfg_newton,
 )
 
 from driver import DECIMATION, SIM_DT, Driver
@@ -44,8 +44,8 @@ VINEYARD_CFG = VineyardCfg(
     terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=1.7),
     # A few stray shoots reaching into the alley for the robot to push
-    # through. They bend under `--physics newton_flexible` and under nothing
-    # else.
+    # through. They bend under the default backend, and are spawned static
+    # under any other.
     shoot=ShootCfg(stray=0.05),
 )
 
@@ -57,9 +57,6 @@ ROBOT_PATH = "/World/Robot"
 # solver that bends them.
 ROBOT_CONTACT = [rf"{ROBOT_PATH}/.*_(THIGH|SHANK|FOOT)"]
 
-FLEXIBLE = "newton_flexible"
-"""The one backend that bends the flexible shoots. See `physics_cfg`."""
-
 
 def parse_args() -> argparse.Namespace:
     """This script's arguments, on top of Isaac Lab's launcher ones."""
@@ -68,10 +65,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--physics",
-        default=FLEXIBLE,
         help=(
-            "Physics backend: physx, isaacsim_physx, newton_mjwarp, newton_vbd, "
-            f"ovphysx, or {FLEXIBLE} to bend the vineyard's flexible shoots."
+            "An Isaac Lab backend in place of the default: physx, isaacsim_physx, "
+            "ovphysx or newton_mjwarp. None of them bends a shoot; the strays spawn static."
         ),
     )
     # Adds --device, --visualizer/--viz, --livestream and the rest; it wants the
@@ -83,15 +79,8 @@ def parse_args() -> argparse.Namespace:
     # A single articulation steps faster on the CPU under PhysX; Newton is a
     # GPU solver. Either way, an explicit --device wins.
     if not getattr(args, "device_explicit", False):
-        args.device = "cpu" if "physx" in args.physics else "cuda:0"
+        args.device = "cpu" if "physx" in (args.physics or "") else "cuda:0"
     return args
-
-
-def physics_cfg(name: str):
-    """The physics config for a backend name, including our own."""
-    if name == FLEXIBLE:
-        return make_coupled_physics_cfg(VINEYARD_PATH, ROBOT_PATH, ROBOT_CONTACT)
-    return make_physics_cfg(name)
 
 
 def design_scene() -> Articulation:
@@ -128,22 +117,18 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, route: 
 def main():
     args_cli = parse_args()
     sim_cfg = sim_utils.SimulationCfg(
-        dt=SIM_DT, device=args_cli.device, physics=physics_cfg(args_cli.physics)
+        dt=SIM_DT,
+        device=args_cli.device,
+        physics=make_physics_cfg_newton(VINEYARD_CFG, ROBOT_PATH, ROBOT_CONTACT),
     )
-    flexible = args_cli.physics == FLEXIBLE
-    # The launcher rebuilds the physics config from this argument, and knows
-    # only Isaac Lab's own backend names; cleared, it keeps the one built above.
-    args_cli.physics = None
-    # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it on exit.
+    # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it
+    # on exit. An explicit --physics replaces the config built above.
     with launch_simulation(sim_cfg, args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)
         route = alley_route(VINEYARD_CFG)
         robot = design_scene()
         # Look down the first alley from behind the robot's start.
         sim.set_camera_view(eye=(route[0] + [4.0, 4.0, 3.0]).tolist(), target=route[0].tolist())
-        # The shoots are built with the reset, and want their rods tuned first.
-        if flexible:
-            tune_shoots()
         # Play the simulator
         sim.reset()
         fix_heightfield_offsets()
