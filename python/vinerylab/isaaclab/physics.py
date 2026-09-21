@@ -1,28 +1,43 @@
-"""Physics for a vineyard whose shoots bend.
+"""Newton physics for a generated vineyard.
 
-A flexible shoot is imported as a **rod**: one capsule rigid body per segment,
-joined by spring joints and clamped to the wood it grew from. Only Newton's VBD
-solver steps one, and a quadruped needs MuJoCo, so the two run side by side as
-named entries of a coupled solver with the robot's own bodies handed across as
-proxies.
+Nothing in a vineyard is a rigid body except a flexible shoot, imported as a
+**rod**: one capsule rigid body per segment, joined by spring joints and
+clamped to the wood it grew from. Only Newton's VBD solver steps one, and a
+robot needs MuJoCo, so a scene with any runs the two side by side as named
+entries of a coupled solver with the robot's own bodies handed across as
+proxies. A scene without runs plain MJWarp, which cannot build a model that
+holds a rod at all.
+
+`make_physics_cfg_newton` picks between the two from the vineyard's cfg. The
+choice is provisional -- Isaac Lab's `--physics` override, a Hydra preset or a
+plain edit can each replace it before the scene is built -- so `spawn_vineyard`
+checks the vineyard against the backend in force when it runs: the strays are
+spawned static where nothing steps a rod, and the rods are tuned where
+something does.
 
 Everything a caller cannot know -- what the cable prims are called, what the
 rod bodies end up labelled, which entry has to own the ground -- is decided
 here. What a caller *does* know, the robot and the parts of it a shoot may
-touch, are the two arguments.
+touch, are the arguments.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from isaaclab.physics import PhysicsEvent
+from isaaclab.physics import PhysicsCfg, PhysicsEvent
 from isaaclab_contrib.coupling import (
     CouplerEntryCfg,
     CouplerProxyCfg,
     CouplerProxyMappingCfg,
 )
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, VBDSolverCfg
+
+if TYPE_CHECKING:
+    from isaaclab.physics.physics_manager import CallbackHandle
+
+    from .vineyard_cfg import VineyardCfg
 
 CABLE = "Cable"
 """The prim name every flexible organ's curve takes.
@@ -106,9 +121,10 @@ and positive meets negative.
 The static scene joins the same group rather than getting one of its own,
 because two *positive* groups do not collide either: a group that excluded the
 rods would also stop the terrain from carrying the robot. Nothing is lost by
-it. Under `make_coupled_physics_cfg` a static shape belongs to the "rigid"
-entry, so a rod-vs-static pair is counted here and solved by nobody -- the
-shoots already fall through the ground, the posts and the wire.
+it. Under the coupled config `make_physics_cfg_newton` builds a static shape
+belongs to the "rigid" entry, so a rod-vs-static pair is counted here and
+solved by nobody -- the shoots already fall through the ground, the posts and
+the wire.
 
 Measured on a vineyard-shaped rig -- a mesh terrain, 500 static capsules and
 2,002 rod segments -- stepped through the coupled solver: 407 MiB with
@@ -117,29 +133,44 @@ the static scene in it too.
 """
 
 
-def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) -> None:
+_tuning: CallbackHandle | None = None
+"""The registration `tune_shoots` made, while it stands."""
+
+
+def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) -> CallbackHandle:
     """Stiffen every rod joint against gravity, damp it, and stop rods colliding.
 
-    Call once from inside the running app and **before the first
-    `SimulationContext.reset()`**: that is what builds the model, and both the
-    stiffnesses and the collision groups are read out of the builder when it is
-    finalized and never looked at again. The only window to write them is the
-    builder's -- after the importer has filled it, before it is finalized --
-    and Isaac Lab dispatches `MODEL_INIT` in exactly that window.
+    `spawn_vineyard` calls this when it spawns rods under a solver that steps
+    them, so a script calls it only to change the numbers: from inside the
+    running app and **before the first `SimulationContext.reset()`**. That is
+    what builds the model, and both the stiffnesses and the collision groups
+    are read out of the builder when it is finalized and never looked at
+    again. The only window to write them is the builder's -- after the
+    importer has filled it, before it is finalized -- and Isaac Lab dispatches
+    `MODEL_INIT` in exactly that window.
+
+    Registers once. While the registration stands -- the manager drops it when
+    the simulation stops -- a further call returns it unchanged, rather than
+    multiplying the joints a second time.
 
     Without the stiffening a cane swings from its base like a pendulum for as
     long as the run lasts; see `SHOOT_STIFFEN`. Without the grouping the scene
     pays N(N-1)/2 candidate pairs for collisions it never solves; see
     `SHOOT_GROUP`.
 
-    Belongs with the config `make_coupled_physics_cfg` builds, which is what
-    makes `SHOOT_GROUP` free: under a single-solver backend the rods really do
-    collide with the ground, and this would drop them through it.
+    `SHOOT_GROUP` is free under the coupled config `make_physics_cfg_newton`
+    builds, where a rod-vs-static pair is solved by nobody anyway. Under VBD on
+    its own it costs the rods their contact with the ground, the posts and the
+    wire -- which they hang clear of.
     """
+    global _tuning
     # Imported here and not at module scope: `newton` brings `pxr` with it, and
     # Kit's own `pxr` wins the import only if nothing loaded the pip one first.
     from isaaclab_newton.physics import NewtonManager
     from newton import JointType
+
+    if _tuning is not None and _tuning.id in NewtonManager._callbacks:
+        return _tuning
 
     def tune(_payload) -> None:
         builder = NewtonManager._builder
@@ -164,19 +195,45 @@ def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) 
         for shape in builder.body_shapes[-1]:
             builder.shape_collision_group[shape] = SHOOT_GROUP
 
-    NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
+    _tuning = NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
+    return _tuning
 
 
-def make_coupled_physics_cfg(
-    vineyard: str,
+def has_flexible_shoots(vineyard: VineyardCfg) -> bool:
+    """Whether the vineyard authors a flexible shoot: a stray one, with
+    `ShootCfg.flexible` on.
+
+    `stray` is a share drawn shoot by shoot, so a parcel small enough can draw
+    none; the coupled solver then refuses an entry that owns no body, at
+    reset, with its own error. Set `stray` to zero for such a scene.
+    """
+    # ponytail: read off the cfg, as the scene itself is only generated inside
+    # the app, after the physics config was built.
+    return vineyard.shoot.flexible and vineyard.shoot.stray > 0.0
+
+
+def steps_rods(physics: PhysicsCfg | None) -> bool:
+    """Whether a physics config steps a rod: it has a VBD solver, on its own or
+    as an entry of a coupled one. PhysX ignores a rod's curve schema, and
+    MJWarp cannot build a model that holds one."""
+    solver = getattr(physics, "solver_cfg", None)
+    entries = getattr(solver, "entries", None)
+    solvers = [entry.solver_cfg for entry in entries] if entries is not None else [solver]
+    return any(isinstance(each, VBDSolverCfg) for each in solvers)
+
+
+def make_physics_cfg_newton(
+    vineyard: VineyardCfg,
     robot: str,
     contact_bodies: Sequence[str],
     substeps: int = SUBSTEPS,
 ) -> NewtonCfg:
-    """MuJoCo for the robot, VBD for the vineyard's flexible shoots.
+    """Newton for a vineyard: plain MJWarp, or -- for a vineyard with flexible
+    shoots -- MuJoCo for the robot coupled with VBD for the shoots.
 
     Args:
-        vineyard: Prim path the vineyard was spawned at, as a regex.
+        vineyard: The vineyard to be spawned. Only whether it has flexible
+            shoots is read; see `has_flexible_shoots`.
         robot: Prim path of the articulation MuJoCo steps, as a regex.
         contact_bodies: Robot bodies a shoot may touch, as full-label regexes.
             These are handed to the VBD half as proxies, and **nothing outside
@@ -184,9 +241,10 @@ def make_coupled_physics_cfg(
             straight through one.
 
     Returns:
-        A physics config to hand to `SimulationCfg(physics=...)`. The shoots
-        also want `tune_shoots` called once the app is up.
+        A physics config to hand to `SimulationCfg(physics=...)`.
     """
+    if not has_flexible_shoots(vineyard):
+        return NewtonCfg()
     return NewtonCfg(
         solver_cfg=CouplerProxyCfg(
             entries=[
@@ -205,7 +263,8 @@ def make_coupled_physics_cfg(
                 CouplerEntryCfg(
                     name="shoots",
                     solver_cfg=VBDSolverCfg(),
-                    bodies=[rf"{vineyard}/.*/{CABLE}{_ROD_BODY_SUFFIX}"],
+                    # Under any path: only the rod importer labels a body so.
+                    bodies=[rf".*/{CABLE}{_ROD_BODY_SUFFIX}"],
                     substeps=SHOOT_SUBSTEPS,
                 ),
             ],

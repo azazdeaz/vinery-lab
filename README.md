@@ -51,9 +51,14 @@ cd examples/isaaclab_demo/
 uv run main.py
 ```
 
-The same demo on the PhysX backend (it doesn't support flexible shoots)
+The same demo on the PhysX backend (the stray shoots spawn static there)
 ```bash
 uv run main.py --physics physx
+```
+
+The same demo on MJWarp alone, the fastest of the backends (the stray shoots spawn static there too)
+```bash
+uv run main.py --physics newton_mjwarp
 ```
 
 Drive a straddling robot down every row

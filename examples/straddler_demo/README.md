@@ -11,11 +11,10 @@ The first run generates the vineyard and converts the robot, and caches both;
 later runs start straight up. `--help` lists the launcher's options —
 `--physics` picks the backend and `--viz` the viewer.
 
-The default backend is `newton_flexible`, the coupled solver that bends the
-vineyard's flexible shoots, and it is the only one that runs this scene as
-configured: the others build a flexible shoot as a chain of rigid bodies, and
-`newton_mjwarp` fails to assemble a model with those in it. Set
-`ShootCfg(stray=0.0)` in `main.py` before reaching for another backend.
+The default backend is Newton coupled with VBD, the one solver that bends the
+vineyard's flexible shoots as the frame pushes through them. Any other --
+`--physics newton_mjwarp` for the robot alone at near real time, or a PhysX
+backend -- spawns the stray shoots static, at the same lean.
 
 ## What it shows
 
