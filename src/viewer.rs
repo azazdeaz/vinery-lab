@@ -9,7 +9,7 @@
 //! [`scene::z_up_to_y_up`](crate::scene)), so the camera below works in Bevy's
 //! ordinary Y-up world.
 
-use bevy::camera::Exposure;
+use bevy::camera::{Exposure, SubCameraView};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::light::{
@@ -22,7 +22,7 @@ use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
 use crate::elements::util::parcel;
-use crate::ui::BlocksCamera;
+use crate::ui::{BlocksCamera, PANEL_WIDTH};
 
 /// Where the save key writes the scene document.
 #[cfg(not(target_arch = "wasm32"))]
@@ -66,7 +66,10 @@ pub fn run() {
         WireframePlugin::default(),
     ))
     .add_systems(Startup, setup)
-    .add_systems(Update, sync_camera_enabled_with_ui);
+    .add_systems(
+        Update,
+        (sync_camera_enabled_with_ui, center_view_beside_panel),
+    );
 
     // No filesystem on the web, and this system's `Err` would take the app
     // down rather than log it: a `BevyError` defaults to `Severity::Panic`.
@@ -159,6 +162,36 @@ fn save_scene_on_key(world: &mut World) -> Result<()> {
     Ok(())
 }
 
+/// Centres the scene in the strip of window the params panel leaves free.
+///
+/// The camera keeps rendering the whole window: shrinking its `viewport` would
+/// shrink the panel with it, since Bevy lays UI out inside the viewport of the
+/// camera it targets. The sub view instead widens the frustum by the panel's
+/// width and shows only the left part of it, which slides the image right by
+/// half a panel — putting whatever the camera looks at in the middle of what
+/// is actually visible. Scale is untouched: only the ratios between
+/// `full_size`, `size` and `offset` matter, and the heights match.
+fn center_view_beside_panel(
+    window: Single<&Window>,
+    mut camera: Single<&mut Camera, With<Camera3d>>,
+) {
+    let view = sub_view(window.width(), window.height());
+    // Only on a real change — every write marks `Camera` changed, which
+    // re-extracts it into the render world.
+    if camera.sub_camera_view != Some(view) {
+        camera.sub_camera_view = Some(view);
+    }
+}
+
+/// The sub view for a window this big, in logical pixels.
+fn sub_view(width: f32, height: f32) -> SubCameraView {
+    SubCameraView {
+        full_size: UVec2::new((width + PANEL_WIDTH) as u32, height as u32),
+        offset: Vec2::ZERO,
+        size: UVec2::new(width as u32, height as u32),
+    }
+}
+
 /// Disables orbit/pan/zoom while the pointer is over the UI, so dragging a
 /// slider there doesn't also drag the camera underneath it.
 fn sync_camera_enabled_with_ui(
@@ -170,5 +203,31 @@ fn sync_camera_enabled_with_ui(
         .any(|interaction| *interaction != Interaction::None);
     for mut camera in &mut cameras {
         camera.enabled = !over_panel;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::camera::{CameraProjection, PerspectiveProjection};
+
+    /// What the camera looks at lands in the middle of the strip of window the
+    /// panel leaves free, not in the middle of the window.
+    #[test]
+    fn the_sub_view_centers_the_scene_beside_the_panel() {
+        let (width, height) = (1600.0, 900.0);
+        let projection = PerspectiveProjection {
+            aspect_ratio: width / height,
+            ..default()
+        };
+        let clip_from_view = projection.get_clip_from_view_for_sub(&sub_view(width, height));
+        // A point down the camera's axis: view space looks along -Z.
+        let ndc = clip_from_view.project_point3(Vec3::new(0.0, 0.0, -100.0));
+        let on_screen = Vec2::new(ndc.x + 1.0, 1.0 - ndc.y) / 2.0 * Vec2::new(width, height);
+        assert!(
+            (on_screen.x - (PANEL_WIDTH + width) / 2.0).abs() < 1.0,
+            "{on_screen}"
+        );
+        assert!((on_screen.y - height / 2.0).abs() < 1.0, "{on_screen}");
     }
 }
