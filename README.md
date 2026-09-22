@@ -4,17 +4,20 @@
 
 # Vinery Lab :grapes:
 
-Parametric vineyard generator for robotics simulation. Mainly targeting Isaac Lab.
+Open-source parametric vineyard generator for developing and testing vineyard robots.
 
-Running the configured scene in Isaac Lab
-<img width="2401" height="1073" alt="image" src="https://github.com/user-attachments/assets/3eafecd5-9707-407f-a500-ec52634abfd1" />
+![Configured scene in Isaac Lab](https://github.com/user-attachments/assets/3eafecd5-9707-407f-a500-ec52634abfd1)
+*Configured scene in Isaac Lab*
 
-
-Parameter editor and visualizer app
-<img width="2236" height="1039" alt="image" src="https://github.com/user-attachments/assets/37b38b86-edd5-49aa-8c8d-58143415bb86" />
+<br>
 
 
-> Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower, needs WebGPU, and no wireframe view.
+![Configured scene in Isaac Lab](https://github.com/user-attachments/assets/37b38b86-edd5-49aa-8c8d-58143415bb86)
+*Standalone parameter editor and visualizer app*
+
+
+> Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower and needs WebGPU.
+
 
 
 ## Features
@@ -37,16 +40,27 @@ Parameter editor and visualizer app
  - Support multiple vine-training systems
  - RTK-GNSS data generation
  - GeoJSON and TASKDATA.xml export
+ - Complete example projects demonstrating task executions
  - **Share what you need for your project :rocket:**
+
 
 ## Parameter editor app
 
 Run the parameter editor
+
+> Requires [Rust](https://www.rust-lang.org/tools/install) installed
+
 ```bash
 cargo run --release
 ```
 
-## Examples
+This should bring up the preview app to configure the vineyard
+
+https://github.com/user-attachments/assets/c00b227f-74c6-4446-bd41-2c487d7f5605
+
+
+
+## Isaac Lab examples
 
 Navigate the rows with a quadruped. See its [README](examples/isaaclab_demo/README.md) for more detail.
 ```bash
@@ -73,10 +87,11 @@ uv run main.py
 
 ## How it works (main points)
 
- - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object, which is a standard Isaac Lab FileCfg config class. See the [example](examples/isaaclab_demo/main.py#L43).
+ - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object,
+ which is a standard Isaac Lab `FileCfg` config class. See the [example](examples/isaaclab_demo/main.py#L43).
  - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
- - When the simulation starts, the meshes and layouts are generated and cached as a USD file.
+ - When the simulation starts, the meshes and layouts are generated a USD file and cached for the next run.
  - The cached USD file is then spawned as a regular Isaac Lab USD file asset.
 
 
@@ -102,27 +117,6 @@ VINEYARD_CFG.func("/World/Vineyard", VINEYARD_CFG)
 # or a manager-based scene config
 vineyard = AssetBaseCfg(prim_path="/World/Vineyard", spawn=VINEYARD_CFG)
 ```
-
-
-https://github.com/user-attachments/assets/09b202da-6a36-403b-b541-5625c0605ce7
-
-
-> The scene is generated on first use and cached as a USD file keyed on those
-parameters, so only the first run pays for it — and an env regex prim path
-(`{ENV_REGEX_NS}/Vineyard`) generates once and clones, whatever `num_envs` is.
-`VineyardCfg` is a `FileCfg`, so `scale`, `semantic_tags`, `rigid_props`,
-`collision_props` and visual materials all work on it as they would on a
-`UsdFileCfg`. See `examples/isaaclab_demo/main.py`.
-
-> The scene arrives solid: the ground collides as its own mesh, and every post
-and trunk carries a capsule. Nothing else does — a robot walks through the
-canopy — and nothing is a rigid body, so a vineyard stands where it was put.
-
-> Cached scenes live in `$VINERYLAB_CACHE_DIR`, else
-`$XDG_CACHE_HOME/vinerylab/scenes`, else `~/.cache/vinerylab/scenes`; set
-`cache_dir` on the cfg to override, or `force_regenerate=True` while iterating
-on the generator itself.
-
 
 ## License
 
