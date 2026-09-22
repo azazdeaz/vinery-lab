@@ -25,9 +25,14 @@ STRIDE = 0.5  # m between waypoints
 RUNOUT = 4.0  # m a pass carries on past the end posts, into the headland
 
 
-def row_route(cfg: VineyardCfg) -> tuple[np.ndarray, float, Ground]:
+def row_route(cfg: VineyardCfg, start_row: int = 0) -> tuple[np.ndarray, float, Ground]:
     """Waypoints straddling every row of `cfg`'s vineyard, the row heading, and
     a height lookup for the ground they run over.
+
+    `start_row` picks the row the drive begins on, numbered as the scene names
+    them -- `Row_000` first -- and counting from the last row if negative. The
+    route is a closed loop, so this only rotates it: every row is driven
+    whichever one it starts on. See `_loop`.
 
     Read off the trellis posts of the cached scene. Every row is parallel to
     every other by construction, so the first row's posts give an AB line the
@@ -81,14 +86,32 @@ def row_route(cfg: VineyardCfg) -> tuple[np.ndarray, float, Ground]:
     ab /= np.linalg.norm(ab)
 
     passes = _passes(rows, a, ab, ground)
-    # Each pass joined to the next by a straight leg through the headland.
-    route = [passes[0]]
-    for leg in passes[1:]:
-        route += [_between(route[-1][-1], leg[0]), leg]
-    route = np.concatenate(route)
-    # Driven back the way it came, so that the loop at the far side of the
-    # block is another headland turn rather than a drive across every row.
-    return np.concatenate([route, route[::-1]]), float(np.arctan2(ab[1], ab[0])), ground
+    return _loop(passes, start_row), float(np.arctan2(ab[1], ab[0])), ground
+
+
+def _loop(passes: list[np.ndarray], start_row: int) -> np.ndarray:
+    """The whole block as one closed route, beginning on `start_row`.
+
+    Each pass is joined to the next by a straight leg through the headland,
+    and the whole block is then driven back the way it came -- so its far side
+    is another headland turn rather than a drive across every row, and the
+    route ends where it began.
+
+    Being closed is what makes a start row cheap. `Driver` follows the
+    waypoints cyclically, so starting on a given row is a rotation of the same
+    loop, and drops nothing out of it.
+    """
+    if not -len(passes) <= start_row < len(passes):
+        raise ValueError(f"no row {start_row}: the vineyard has {len(passes)} rows")
+
+    parts = [passes[0]]
+    for run in passes[1:]:
+        parts += [_between(parts[-1][-1], run[0]), run]
+    # `parts` alternates pass, joining leg, so the even offsets into the
+    # concatenation are where each row's own pass begins.
+    starts = np.cumsum([0] + [len(part) for part in parts])[:-1:2]
+    route = np.concatenate(parts)
+    return np.roll(np.concatenate([route, route[::-1]]), -starts[start_row], axis=0)
 
 
 def _passes(

@@ -5,8 +5,9 @@ a leg in the alley either side and the trellis passing under its frame. The
 vineyard and the robot are set up here; the robot itself is in `straddler`,
 the route in `route` and the driving in `driver`.
 
-The physics backend and the viewer are command-line choices, e.g.
-`--physics newton_mjwarp --viz newton`; `--help` lists the full launcher set.
+The row the drive starts on, the physics backend and the viewer are
+command-line choices, e.g. `--row 3 --physics newton_mjwarp --viz newton`;
+`--help` lists the full launcher set.
 The default backend is Newton coupled with VBD, which bends the vineyard's
 flexible shoots -- see `vinerylab.isaaclab.physics`. Under any other the stray
 shoots are spawned static.
@@ -61,6 +62,16 @@ def parse_args() -> argparse.Namespace:
     """This script's arguments, on top of Isaac Lab's launcher ones."""
     parser = argparse.ArgumentParser(
         description="This script drives a straddling robot down the rows of a generated vineyard."
+    )
+    parser.add_argument(
+        "--row",
+        type=int,
+        default=0,
+        help=(
+            "The row to start the drive on, numbered as the scene names them -- Row_000 "
+            "first -- and counting from the last row if negative. Every row is driven "
+            "whichever one it starts on; this only picks where it begins."
+        ),
     )
     parser.add_argument(
         "--physics",
@@ -127,14 +138,18 @@ def main():
     # on exit. An explicit --physics replaces the config built above.
     with launch_simulation(sim_cfg, args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)
-        route, heading, ground = row_route(VINEYARD_CFG)
+        route, heading, ground = row_route(VINEYARD_CFG, args_cli.row)
         # The robot is sized to the field it works: a leg in each alley, and
         # the frame over the trellis wire.
         machine = Straddler.for_vineyard(VINEYARD_CFG)
         robot = design_scene(machine)
-        # Look down the first row from behind the robot's start.
+        # Behind the robot at its start, looking the way it drives off. Taken
+        # from the route rather than from `heading`, which is the row direction
+        # only: alternate passes run down it backwards, and so does a start row
+        # chosen with --row.
+        back = route[0, :2] - route[1, :2]
         sim.set_camera_view(
-            eye=(route[0] + [-6.0 * np.cos(heading), -6.0 * np.sin(heading), 4.0]).tolist(),
+            eye=(route[0] + [*(6.0 * back / np.linalg.norm(back)), 4.0]).tolist(),
             target=route[0].tolist(),
         )
         # Play the simulator

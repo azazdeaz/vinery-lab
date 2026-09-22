@@ -3,13 +3,21 @@
 A portal field robot driving every row of a generated vineyard: a leg in the
 alley either side of the row, the trellis passing under its frame.
 
+## Requirements
+ - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
+ - [Isaac Sim 6.1](https://docs.isaacsim.omniverse.nvidia.com/6.1.0/installation/requirements.html) compatible hardware
+ - [Rust](https://www.rust-lang.org/tools/install) installed (this demo builds the scene generator from source)
+
+## Running the demo
+
 ```bash
 uv run main.py
 ```
 
 The first run generates the vineyard and converts the robot, and caches both;
 later runs start straight up. `--help` lists the launcher's options —
-`--physics` picks the backend and `--viz` the viewer.
+`--row` picks the row it starts on, `--physics` the backend and `--viz` the
+viewer.
 
 The default backend is Newton coupled with VBD, the one solver that bends the
 vineyard's flexible shoots as the frame pushes through them. Any other --
@@ -29,6 +37,10 @@ The route is read off the generated scene's own trellis posts, so it re-solves
 whenever the vineyard parameters change. So does the robot: `for_vineyard`
 takes the track from the row spacing and the frame height from the trellis
 height, and the robot is built at that size.
+
+The route closes on itself — down every row, then back the way it came — so
+`--row` rotates where the drive begins rather than shortening it, and the
+whole block is covered whichever row it starts on.
 
 ## The robot
 
