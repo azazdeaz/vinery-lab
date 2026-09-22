@@ -13,6 +13,9 @@
 //! once the slider has stopped moving, which is what keeps the drag itself
 //! smooth: one rebuild per drag instead of one per frame.
 //!
+//! A click that is not a drag turns a slider into a text field instead, the
+//! way Blender's sliders do — see [`open_field`] and [`close_fields`].
+//!
 //! Every control carries a [`Tip`] saying what its parameter means; [`tips`]
 //! floats it beside the control while the pointer is over it.
 
@@ -24,21 +27,27 @@ use bevy::feathers::{
     containers::{group, group_body, group_header, pane, pane_body, pane_header},
     controls::{
         ButtonVariant, FeathersButton, FeathersCheckbox, FeathersDisclosureToggle, FeathersMenu,
-        FeathersMenuButton, FeathersMenuItem, FeathersMenuPopup, FeathersSlider,
+        FeathersMenuButton, FeathersMenuItem, FeathersMenuPopup, FeathersSlider, FeathersTextInput,
+        FeathersTextInputContainer,
     },
     dark_theme::create_dark_theme,
     display::label_small,
     theme::{ThemeBackgroundColor, ThemeBorderColor, ThemedText, UiTheme},
     tokens,
 };
+use bevy::input::ButtonState;
+use bevy::input::keyboard::KeyboardInput;
+use bevy::input_focus::{AutoFocus, FocusedInput, InputFocus};
+use bevy::picking::events::{Click, DragEnd, Pointer};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::reflect::{NamedField, PartialReflect, Reflect};
+use bevy::text::{EditableText, EditableTextFilter};
 use bevy::ui::{Checked, OverrideClip};
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use bevy::ui_widgets::{
-    Activate, Checkbox, ScrollArea, SliderPrecision, SliderStep, ValueChange, checkbox_self_update,
-    slider_self_update,
+    Activate, Checkbox, ScrollArea, SelectAllOnFocus, SliderDragState, SliderPrecision,
+    SliderRange, SliderStep, SliderValue, ValueChange, checkbox_self_update, slider_self_update,
 };
 
 use crate::elements::{Grow, VineyardParams};
@@ -53,7 +62,7 @@ pub fn plugin(app: &mut App) {
         .insert_resource(Staged(live))
         .add_systems(Startup, spawn_panel)
         .add_systems(PreUpdate, commit.before(Grow::Terrain))
-        .add_systems(Update, (sync_controls, tips));
+        .add_systems(Update, (sync_controls, tips, close_fields));
 }
 
 /// Which field a control edits, by fragment and field name.
@@ -134,9 +143,201 @@ fn slider_control(
                 on(move |change: On<ValueChange<f32>>, mut staged: ResMut<Staged>| {
                     bound.set_number(&mut staged.0, change.value);
                 })
+                on(open_field_on_click)
+                on(open_field_after_drag)
             ),
         ]
     }
+}
+
+// ─── Typing a number in place of a slider ───────────────────────────
+
+/// A text field standing in for a slider: which slider, so the number can be
+/// handed back to it and the slider shown again.
+///
+/// Sits on the field's editable text rather than on its frame, since that is
+/// the entity the keyboard focus lands on.
+#[derive(Component, Clone, Copy)]
+struct NumberField(Entity);
+
+impl Default for NumberField {
+    /// Never a real field: `bsn!` needs a default to build the template from,
+    /// and [`number_field`] names the slider on every one it spawns.
+    fn default() -> Self {
+        Self(Entity::PLACEHOLDER)
+    }
+}
+
+/// How far the pointer may travel between press and release and still be
+/// typing rather than dragging.
+///
+/// Picking starts a drag on the first pixel of movement, so without a few
+/// pixels of slop — Blender's is three — a click off a real mouse would
+/// almost never register as one.
+const CLICK_SLOP: f32 = 4.0;
+
+/// A press and release that never moved. Picking sends `Click` before
+/// `DragEnd`, so a drag still reads as dragging here and is left to
+/// [`open_field_after_drag`], which is the half that knows how far it went.
+fn open_field_on_click(
+    click: On<Pointer<Click>>,
+    dragged: Query<&SliderDragState>,
+    sliders: Query<(&SliderValue, &SliderPrecision, &ChildOf)>,
+    nodes: Query<&mut Node>,
+    commands: Commands,
+) {
+    if dragged.get(click.entity).is_ok_and(|drag| drag.dragging) {
+        return;
+    }
+    open_field(click.entity, &sliders, nodes, commands);
+}
+
+/// A drag that went nowhere: a click a real mouse smudged.
+///
+/// The smudge has already nudged the value, which the field then starts from
+/// — a pixel's worth, and about to be typed over anyway.
+fn open_field_after_drag(
+    drag: On<Pointer<DragEnd>>,
+    sliders: Query<(&SliderValue, &SliderPrecision, &ChildOf)>,
+    nodes: Query<&mut Node>,
+    commands: Commands,
+) {
+    if drag.distance.length() <= CLICK_SLOP {
+        open_field(drag.entity, &sliders, nodes, commands);
+    }
+}
+
+/// Turns a slider into a text field standing in its place, the way Blender's
+/// sliders do. A bare press moves nothing on its own — a feathers slider is
+/// `TrackClick::Drag` — so there is no value change to undo.
+fn open_field(
+    slider: Entity,
+    sliders: &Query<(&SliderValue, &SliderPrecision, &ChildOf)>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    let Ok((value, precision, of)) = sliders.get(slider) else {
+        return;
+    };
+    // Folded away rather than despawned: the slider keeps its place in the
+    // row, and bringing it back is one `display` away. Folded already means a
+    // field is standing in for it, and a second one would fight the first.
+    let Ok(mut node) = nodes.get_mut(slider) else {
+        return;
+    };
+    if node.display == Display::None {
+        return;
+    }
+    node.display = Display::None;
+    let text = format!("{:.*}", precision.0.max(0) as usize, value.0);
+    commands
+        .spawn_scene(number_field(slider, text))
+        .insert(ChildOf(of.parent()));
+}
+
+/// The field itself: born holding the slider's value, with the keyboard and
+/// the whole number selected, so it can be typed straight over.
+fn number_field(slider: Entity, text: String) -> impl Scene {
+    bsn! {
+        @FeathersTextInputContainer
+        Children [(
+            @FeathersTextInput
+            EditableText::new(text)
+            // A float and nothing else: digits, a point, a sign, an exponent.
+            EditableTextFilter::new(|c| {
+                c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')
+            })
+            SelectAllOnFocus
+            AutoFocus
+            NumberField(slider)
+            // The pointer is over the field the moment it stands in for the
+            // slider, but picking only agrees a frame later — without this,
+            // `close_fields` reads the click that opened it as a click away.
+            Hovered(true)
+            on(field_keys)
+        )]
+    }
+}
+
+/// Escape drops the edit; Enter hands it over by letting go of the keyboard,
+/// which is what [`close_fields`] watches for.
+fn field_keys(
+    key: On<FocusedInput<KeyboardInput>>,
+    fields: Query<(&NumberField, &ChildOf)>,
+    mut focus: ResMut<InputFocus>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    if key.input.state != ButtonState::Pressed {
+        return;
+    }
+    let Ok((field, of)) = fields.get(key.event_target()) else {
+        return;
+    };
+    match key.input.key_code {
+        KeyCode::Enter | KeyCode::NumpadEnter => focus.clear(),
+        KeyCode::Escape => {
+            close_field(field, of.parent(), &mut nodes, &mut commands);
+            focus.clear();
+        }
+        _ => {}
+    }
+}
+
+/// Hands a field's number to its slider and puts the slider back, once the
+/// field has lost the keyboard or the pointer has pressed somewhere else.
+///
+/// The number goes through the slider's own [`ValueChange`], which is what
+/// keeps a typed value on the same path as a dragged one: it reaches
+/// [`Staged`] and moves the bar without this knowing how either is done.
+///
+/// Anything that does not parse is dropped, the way Escape drops an edit.
+fn close_fields(
+    focus: Res<InputFocus>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    fields: Query<(Entity, &NumberField, &ChildOf, &Hovered, &EditableText)>,
+    sliders: Query<(&SliderRange, &SliderPrecision)>,
+    mut nodes: Query<&mut Node>,
+    mut commands: Commands,
+) {
+    for (entity, field, of, hovered, edit) in &fields {
+        let pressed_away = mouse.just_pressed(MouseButton::Left) && !hovered.get();
+        if focus.get() == Some(entity) && !pressed_away {
+            continue;
+        }
+        if let Ok(typed) = edit.value().to_string().trim().parse::<f32>()
+            && let Ok((range, precision)) = sliders.get(field.0)
+        {
+            commands.trigger(ValueChange {
+                source: field.0,
+                value: round(range.clamp(typed), precision.0),
+                is_final: true,
+            });
+        }
+        close_field(field, of.parent(), &mut nodes, &mut commands);
+    }
+}
+
+/// To the slider's own precision, as dragging it rounds.
+///
+/// A typed number that skipped this would leave the bar and the label showing
+/// one value while an integer parameter held the rounded other.
+fn round(value: f32, precision: i32) -> f32 {
+    let factor = 10f32.powi(precision);
+    (value * factor).round() / factor
+}
+
+/// Takes a field down and shows its slider again.
+fn close_field(
+    field: &NumberField,
+    frame: Entity,
+    nodes: &mut Query<&mut Node>,
+    commands: &mut Commands,
+) {
+    if let Ok(mut node) = nodes.get_mut(field.0) {
+        node.display = Display::Flex;
+    }
+    commands.entity(frame).despawn();
 }
 
 /// A choice among named options: a menu button showing the current one,
@@ -532,6 +733,10 @@ fn copy_cfg_button() -> impl Scene {
 mod tests {
     use super::*;
     use crate::elements::SceneParams;
+    use bevy::camera::NormalizedRenderTarget;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::pointer::{Location, PointerButton, PointerId};
+    use bevy::window::WindowRef;
     use core::time::Duration;
 
     /// One frame, `by` after the last.
@@ -671,9 +876,13 @@ mod tests {
         ))
         .init_asset::<bevy::text::Font>()
         .init_asset::<Image>()
+        // What a number field needs around it: somewhere for `AutoFocus` to
+        // put the keyboard, and a mouse for `close_fields` to read.
+        .init_resource::<InputFocus>()
+        .init_resource::<ButtonInput<MouseButton>>()
         .insert_resource(Staged(VineyardParams::default()))
         .add_systems(Startup, scene.spawn())
-        .add_systems(Update, sync_controls);
+        .add_systems(Update, (sync_controls, close_fields));
         app.update();
         app.update();
         app
@@ -742,6 +951,153 @@ mod tests {
         app.world_mut().resource_mut::<Staged>().shoot.flexible = false;
         app.update();
         assert!(!checked(&mut app), "and it follows the params");
+    }
+
+    fn one_slider() -> impl SceneList {
+        bsn_list![slider_control(
+            "Season".into(),
+            "Where in the growing season the scene is.".into(),
+            Slider {
+                min: 0.0,
+                max: 1.0,
+                step: 0.05,
+            },
+            0.5,
+            Bound {
+                fragment: "scene",
+                field: "season",
+            },
+        )]
+    }
+
+    fn the_slider(world: &mut World) -> Entity {
+        world
+            .query_filtered::<Entity, With<bevy::ui_widgets::Slider>>()
+            .single(world)
+            .expect("one slider")
+    }
+
+    /// A press and release on a slider, as picking delivers one: `moved` is
+    /// how far the pointer travelled in between, `None` for not at all.
+    fn release(world: &mut World, slider: Entity, moved: Option<Vec2>) {
+        if moved.is_some() {
+            world
+                .entity_mut(slider)
+                .get_mut::<SliderDragState>()
+                .expect("a slider requires one")
+                .dragging = true;
+        }
+        let window = world.spawn(Window::default()).id();
+        let at = Location {
+            target: NormalizedRenderTarget::Window(
+                WindowRef::Entity(window)
+                    .normalize(None)
+                    .expect("an explicit window normalizes"),
+            ),
+            position: Vec2::ZERO,
+        };
+        // Picking sends `Click` first, and `DragEnd` after it and only if a
+        // drag had started.
+        world.trigger(Pointer::new(
+            PointerId::Mouse,
+            at.clone(),
+            Click {
+                button: PointerButton::Primary,
+                hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+                duration: Duration::ZERO,
+                count: 1,
+            },
+            slider,
+        ));
+        if let Some(distance) = moved {
+            world.trigger(Pointer::new(
+                PointerId::Mouse,
+                at,
+                DragEnd {
+                    button: PointerButton::Primary,
+                    distance,
+                },
+                slider,
+            ));
+        }
+        world.flush();
+    }
+
+    /// Whether a field is standing in for the slider right now.
+    fn editing(world: &mut World) -> bool {
+        world
+            .query_filtered::<(), With<NumberField>>()
+            .iter(world)
+            .next()
+            .is_some()
+    }
+
+    /// What separates typing from dragging: a click opens a field, and so
+    /// does a press a mouse smudged by a pixel or two, but a real drag leaves
+    /// the slider to be dragged.
+    #[test]
+    fn a_click_opens_a_field_where_a_drag_leaves_the_slider_alone() {
+        for (moved, opens) in [
+            (None, true),
+            (Some(Vec2::new(2.0, 1.0)), true),
+            (Some(Vec2::new(30.0, 0.0)), false),
+        ] {
+            let mut app = control_app(one_slider);
+            let world = app.world_mut();
+            let slider = the_slider(world);
+
+            release(world, slider, moved);
+            assert_eq!(editing(world), opens, "moved: {moved:?}");
+            assert_eq!(
+                world.entity(slider).get::<Node>().expect("a node").display,
+                if opens { Display::None } else { Display::Flex },
+                "the slider folds away only while a field stands in for it",
+            );
+        }
+    }
+
+    /// A typed number reaches its parameter, clamped to the slider's range
+    /// and rounded to its precision, and the slider comes back showing it.
+    #[test]
+    fn a_typed_number_lands_on_its_parameter_and_the_slider_returns() {
+        for (typed, landed) in [("0.9", 0.9), ("0.937", 0.94), ("5", 1.0)] {
+            let mut app = control_app(one_slider);
+            let world = app.world_mut();
+            let slider = the_slider(world);
+            release(world, slider, None);
+
+            let text = world
+                .query_filtered::<Entity, With<NumberField>>()
+                .single(world)
+                .expect("the click opened one field");
+            world.entity_mut(text).insert(EditableText::new(typed));
+
+            // What every way out of a field comes down to: the keyboard has
+            // gone somewhere else.
+            world.resource_mut::<InputFocus>().clear();
+            app.update();
+
+            assert_eq!(app.world().resource::<Staged>().scene.season, landed);
+            assert_eq!(
+                app.world()
+                    .entity(slider)
+                    .get::<SliderValue>()
+                    .expect("a value")
+                    .0,
+                landed,
+                "and the bar agrees with the parameter",
+            );
+            assert!(!editing(app.world_mut()), "the field is gone");
+            assert_eq!(
+                app.world()
+                    .entity(slider)
+                    .get::<Node>()
+                    .expect("a node")
+                    .display,
+                Display::Flex,
+                "and the slider is showing again",
+            );
+        }
     }
 
     /// A tip appears while the pointer is over its control and leaves with it.
