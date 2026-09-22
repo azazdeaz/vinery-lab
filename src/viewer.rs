@@ -9,7 +9,6 @@
 //! [`scene::z_up_to_y_up`](crate::scene)), so the camera below works in Bevy's
 //! ordinary Y-up world.
 
-use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::{Exposure, SubCameraView};
 #[cfg(not(target_arch = "wasm32"))]
 use bevy::input::common_conditions::input_just_pressed;
@@ -131,15 +130,6 @@ fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) 
         // the camera stops down to meet it. Tied to the light's illuminance
         // below: raise one and this has to follow.
         Exposure { ev100: 13.0 },
-        // `AtmosphereSettings` requires `Hdr`, and MSAA resolves an HDR target
-        // in linear light: a leaf edge against a sky thousands of times
-        // brighter averages to the sky, so the edge stays hard however many
-        // samples it takes. TAA blends *tonemapped* frames instead, which is
-        // why it fixes what more samples cannot — and it filters the two
-        // things MSAA never sees at all: wires thinner than a pixel, and the
-        // specular sparkle the sky lights every leaf with.
-        Msaa::Off,
-        TemporalAntiAliasing::default(),
     ));
     commands.spawn((
         DirectionalLight {
