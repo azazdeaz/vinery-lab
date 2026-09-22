@@ -81,6 +81,10 @@ read off the field's declaration — see `src/ui.rs` and
 staged copy of the params; a value reaches the live resources once it has held
 still for 150 ms, and re-runs the layers below it. Dragging one is a single
 rebuild rather than one per frame.
+
+Clicking a slider without dragging it turns it into a text field, as Blender's
+sliders do: the number starts selected, `Enter` or clicking away applies it,
+`Escape` drops it. A typed value is clamped to the slider's range.
 Press `S` to write the scene out as `scene.json`, and build it with:
 
     python -m vinerylab.usd scene.json scene.usd
