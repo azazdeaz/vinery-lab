@@ -381,12 +381,15 @@ fn spawn_panel(world: &mut World) -> Result {
 }
 
 fn params_panel(params: &VineyardParams) -> impl Scene {
+    // Only the first fragment — Scene — starts unfolded; the rest would be
+    // forty-odd sliders deep.
     let sections: Vec<Box<dyn Scene>> = params::fragments()
-        .map(|fragment| {
+        .enumerate()
+        .map(|(i, fragment)| {
             let controls: Vec<Box<dyn Scene>> = params::fields(fragment)
                 .map(|field| control(fragment.name(), field, params))
                 .collect();
-            Box::new(section(params::label(fragment), controls)) as Box<dyn Scene>
+            Box::new(section(params::label(fragment), i == 0, controls)) as Box<dyn Scene>
         })
         .collect();
     bsn! {
@@ -431,12 +434,18 @@ fn params_panel(params: &VineyardParams) -> impl Scene {
 
 /// One element's fragment, under a header whose chevron folds it away.
 ///
-/// Sections start open. Collapsing every element but the one being tuned is
-/// what keeps a panel of forty-odd sliders on screen without scrolling.
+/// `open` is the state it spawns in, and must agree across the two entities
+/// [`fold_section`] keeps in step: `Checked` on the chevron, `display` on the
+/// body. Folding everything but the section being tuned is what keeps a panel
+/// of forty-odd sliders on screen without scrolling.
 ///
 /// The group's children are `[header, body]` in that order, and the toggle
 /// sits in the header — [`fold_section`] walks that shape.
-fn section(title: impl Into<String>, body: impl SceneList) -> impl Scene {
+fn section(title: impl Into<String>, open: bool, body: impl SceneList) -> impl Scene {
+    // An `Option<impl Scene>` resolving to `None` adds nothing, which is how a
+    // marker component is left off a template.
+    let checked = open.then_some(bsn! { Checked });
+    let display = if open { Display::Flex } else { Display::None };
     bsn! {
         group()
         Children [
@@ -444,12 +453,14 @@ fn section(title: impl Into<String>, body: impl SceneList) -> impl Scene {
                 (Text(title) ThemedText),
                 (
                     @FeathersDisclosureToggle
-                    Checked
                     on(checkbox_self_update)
                     on(fold_section)
+                    // Last: a brace straight after `@FeathersDisclosureToggle`
+                    // would be read as that scene component's props.
+                    {checked}
                 ),
             ],
-            group_body() Children [ {body} ],
+            group_body() Node { display: {display} } Children [ {body} ],
         ]
     }
 }
@@ -553,13 +564,17 @@ mod tests {
         assert_eq!(app.world().resource::<SceneParams>().seed, 20, "released");
     }
 
-    fn one_section() -> impl SceneList {
-        bsn_list![section("Test", bsn_list![Node])]
+    fn open_section() -> impl SceneList {
+        bsn_list![section("Test", true, bsn_list![Node])]
+    }
+
+    fn closed_section() -> impl SceneList {
+        bsn_list![section("Test", false, bsn_list![Node])]
     }
 
     /// Everything a section's scene touches while spawning, and nothing else:
     /// no window, no renderer, no theme.
-    fn panel_app() -> App {
+    fn panel_app<L: SceneList>(scene: fn() -> L) -> App {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
@@ -568,7 +583,7 @@ mod tests {
         ))
         .init_asset::<bevy::text::Font>()
         .init_asset::<Image>()
-        .add_systems(Startup, one_section.spawn());
+        .add_systems(Startup, scene.spawn());
         app.update();
         app
     }
@@ -587,7 +602,7 @@ mod tests {
     /// one thing here that can silently land on the wrong entity.
     #[test]
     fn a_chevron_folds_the_body_of_its_section() {
-        let mut app = panel_app();
+        let mut app = panel_app(open_section);
         let world = app.world_mut();
         let toggle = world
             .query_filtered::<Entity, With<bevy::ui_widgets::Checkbox>>()
@@ -604,6 +619,23 @@ mod tests {
             world.flush();
             assert_eq!(hidden(world), folded, "after toggling to {value}");
         }
+    }
+
+    /// A section spawned closed: body folded away, chevron agreeing. The two
+    /// live on different entities, so nothing but a spawn keeps them in step.
+    #[test]
+    fn a_closed_section_spawns_folded() {
+        let mut app = panel_app(closed_section);
+        let world = app.world_mut();
+        assert_eq!(hidden(world), 1, "the body");
+        assert_eq!(
+            world
+                .query_filtered::<Entity, With<Checked>>()
+                .iter(world)
+                .count(),
+            0,
+            "the chevron",
+        );
     }
 
     fn one_dropdown() -> impl SceneList {
