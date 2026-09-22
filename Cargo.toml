@@ -24,6 +24,10 @@ bevy = { version = "0.19.1", features = [
     "ghost_nodes",
     "bevy_ui_debug",
     "reflect_documentation",
+    # Without this, `Clipboard` on desktop writes to an in-process buffer no
+    # other application can see; the web build reaches `navigator.clipboard`
+    # either way.
+    "system_clipboard",
 ] }
 anyhow = "1"
 # The export document crosses into Python as JSON — see `src/scene/doc.rs`.
