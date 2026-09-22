@@ -11,7 +11,8 @@ Running the configured scene in Isaac Lab
 
 
 Parameter editor and visualizer app
-<img width="1850" height="974" alt="image" src="https://github.com/user-attachments/assets/24ea9490-20b5-49a5-a547-a2f96910a381" />
+<img width="2236" height="1039" alt="image" src="https://github.com/user-attachments/assets/37b38b86-edd5-49aa-8c8d-58143415bb86" />
+
 
 > Try the parameter editor in your browser: [azazdeaz.github.io/vinery-lab](https://azazdeaz.github.io/vinery-lab/) — bit slower, needs WebGPU, and no wireframe view.
 
