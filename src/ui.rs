@@ -711,10 +711,10 @@ fn copy_cfg_button() -> impl Scene {
             // the panel as it reads right now and not as it read before the
             // last edit settled.
             //
-            // Logged as well as copied. The clipboard is the point, but it is
-            // the part that can fail for reasons outside the app — no backend
-            // on a bare Wayland session, no X11 display — and the snippet is
-            // worth more than the error.
+            // Logged as well as copied. The clipboard is the part that can
+            // fail for reasons outside the app — no display server to talk to
+            // — and on X11 what is copied lives only as long as the viewer
+            // does, so the log keeps the snippet reachable either way.
             on(|_activate: On<Activate>,
                 staged: Res<Staged>,
                 mut clipboard: ResMut<Clipboard>| {
