@@ -15,6 +15,12 @@ path is derived from the USD. No sensor input is used in this demo.
 uv run main.py
 ```
 
+
+
+https://github.com/user-attachments/assets/abd423dc-af2f-488c-a451-a3e8a437b951
+
+
+
 The first run generates the vineyard and converts the robot, and caches both;
 later runs start straight up. `--help` lists the launcher's options —
 `--row` picks the row it starts on, `--physics` the backend and `--viz` the
