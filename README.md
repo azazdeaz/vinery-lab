@@ -1,4 +1,4 @@
-:construction: This project is still under development.
+:warning: Developer preview. Expect breaking changes.
 
 [![CI](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/azazdeaz/vinery-lab/actions/workflows/ci.yml)
 
@@ -38,14 +38,16 @@ Parameter editor and visualizer app
  - GeoJSON and TASKDATA.xml export
  - **Share what you need for your project :rocket:**
 
-## Quick commands to demo
+## Parameter editor app
 
 Run the parameter editor
 ```bash
 cargo run --release
 ```
 
-Generate and run in Isaac Lab
+## Examples
+
+Navigate the rows with a quadruped. See its [README](examples/isaaclab_demo/README.md) for more detail.
 ```bash
 cd examples/isaaclab_demo/
 uv run main.py
@@ -61,7 +63,7 @@ The same demo on MJWarp alone, the fastest of the backends (the stray shoots spa
 uv run main.py --physics newton_mjwarp
 ```
 
-Drive a straddling robot down every row
+Drive a straddling robot down every row. See its [README](examples/straddler_demo/README.md) for more detail.
 ```bash
 cd examples/straddler_demo/
 uv run main.py

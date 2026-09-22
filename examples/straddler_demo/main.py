@@ -49,6 +49,13 @@ VINEYARD_CFG = VineyardCfg(
     # under any other.
     shoot=ShootCfg(stray=0.05),
 )
+
+# # Long straight rows with a lot of stray shoots
+# VINEYARD_CFG = VineyardCfg(
+#     terrain=TerrainCfg(width=24.0),
+#     shoot=ShootCfg(stray=0.18),
+# )
+
 VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
 
@@ -137,6 +144,11 @@ def main():
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it
     # on exit. An explicit --physics replaces the config built above.
     with launch_simulation(sim_cfg, args_cli):
+        # Kit ships the movie capture window but does not load it, so turn it
+        # on to record the drive from Window > Movie Capture. Only Kit has a
+        # viewport to capture, and only a running Kit can be asked for it.
+        if "kit" in args_cli.visualizer:
+            sim_utils.enable_extension("omni.kit.window.movie_capture")
         sim = sim_utils.SimulationContext(sim_cfg)
         route, heading, ground = row_route(VINEYARD_CFG, args_cli.row)
         # The robot is sized to the field it works: a leg in each alley, and

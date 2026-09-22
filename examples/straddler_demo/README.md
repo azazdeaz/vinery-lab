@@ -1,7 +1,8 @@
 # Straddling robot demo
 
 A portal field robot driving every row of a generated vineyard: a leg in the
-alley either side of the row, the trellis passing under its frame.
+alley either side of the row, the trellis passing under its frame. The navigation 
+path is derived from the USD. No sensor input is used in this demo. 
 
 ## Requirements
  - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
