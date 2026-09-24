@@ -81,14 +81,6 @@ def test_only_the_named_robot_bodies_can_bend_a_shoot(cfg):
     assert proxy.bodies == [f"{ROBOT}/.*FOOT"]
 
 
-def test_the_shoots_step_finer_than_the_robot(cfg, entries):
-    """Rod joints lose a cane that is standing upright once their step grows
-    past about a millisecond. Taking the extra substeps on the entry keeps the
-    cost off the robot and off the coupling passes."""
-    assert cfg.num_substeps >= 4
-    assert entries["shoots"].substeps > entries["rigid"].substeps
-
-
 @pytest.mark.parametrize(
     "shoot", [ShootCfg(), ShootCfg(stray=0.05, flexible=False)], ids=["held", "static strays"]
 )
@@ -189,25 +181,23 @@ def builder(monkeypatch) -> object:
     return builder
 
 
-def test_only_a_rods_angular_slots_are_stiffened(builder):
-    """Stretch and shear already hold a cane together; raising them only
-    shortens the substep it survives. The two angular slots are what a cane
-    stands up with."""
-    physics.tune_shoots(stiffen=10.0, damping=0.0)
+def test_a_rods_linear_slots_are_softened_and_its_angular_ones_stiffened(builder):
+    """Two factors, one per pair: stretch and shear are what the solver
+    converges worst on, and bend and twist are what a cane stands up with."""
+    physics.tune_shoots(stiffen=10.0, damping=0.0, stretch=0.5)
     NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
 
-    assert builder.joint_target_ke == pytest.approx([1.0] * 6 + [200.0, 100.0, 40.0, 20.0] + [1.0])
+    assert builder.joint_target_ke == pytest.approx([1.0] * 6 + [100.0, 50.0, 40.0, 20.0] + [1.0])
 
 
-def test_every_rod_slot_takes_damping_from_its_own_stiffness(builder):
-    """The four slots differ by orders of magnitude, so one damping in absolute
-    units would be either nothing or a clamp. A fraction of each slot's own
-    stiffness is a time constant, and the same number then means the same
-    settling in all four."""
-    physics.tune_shoots(stiffen=1.0, damping=0.1)
+def test_only_a_rods_angular_slots_take_damping_from_their_own_stiffness(builder):
+    """A fraction of each slot's own stiffness is a time constant, so bend and
+    twist settle alike. Stretch and shear are left undamped: VBD adds damping
+    to a slot's stiffness every sweep, and there it keeps the canes swinging."""
+    physics.tune_shoots(stiffen=1.0, damping=0.1, stretch=1.0)
     NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
 
-    assert builder.joint_target_kd == pytest.approx([0.0] * 6 + [20.0, 10.0, 0.4, 0.2] + [0.0])
+    assert builder.joint_target_kd == pytest.approx([0.0] * 8 + [0.4, 0.2] + [0.0])
 
 
 def test_tune_shoots_registers_once_while_its_registration_stands(builder):

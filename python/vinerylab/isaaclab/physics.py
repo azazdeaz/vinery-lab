@@ -53,53 +53,66 @@ them."""
 SUBSTEPS = 4
 """Physics substeps per simulation step.
 
-Not a preference: a rod's joints are stiff enough that a shoot standing upright
-collapses instead of settling once the substep is longer than about a
-millisecond. At the 200 Hz a locomotion policy wants, four is the floor.
+Four inside the 200 Hz step a locomotion policy wants. The shoots do not need that many:
+tuned as below, they hold still at a 2.5 ms step as well, so the number is the
+robot's to lower.
 """
 
-SHOOT_SUBSTEPS = 2
+SHOOT_SUBSTEPS = 1
 """Substeps the shoots take inside each of those.
 
-They want a shorter step still: at one, a settled cane still drifts about a
-centimeter and keeps moving; at two it holds to a few millimeters. Four halves
-that again for twice the cost, which buys nothing anyone can see. Taking the
-extra steps here rather than by raising `SUBSTEPS` keeps them off the robot and
-off the coupling passes between the two.
+One. More settles a cane worse, not better: VBD adds a joint's damping to its
+stiffness as `kd / dt` every sweep, so the shorter the step the more that term
+swamps the rest and the less ten sweeps converge. At two, a cane shoved at the
+robot's cruising speed takes several times as long to come within a centimetre
+of rest, and some end centimetres off where they started.
 """
 
 
-SHOOT_STIFFEN = 100.0
+SHOOT_STIFFEN = 3.0
 """What a rod joint's bend and twist stiffness is multiplied by.
 
-Not a preference. VBD solves a rod chain with `VBDSolverCfg.iterations` (ten)
-Gauss-Seidel sweeps per substep, and ten sweeps leave a cane's joints holding
-about an eighth of the stiffness they were given; what a sweep does not
-converge becomes velocity. At the stiffness the cable material implies -- about
-3 N.m/rad for a 9 mm shoot -- that eighth is a hinge too soft to carry the
-cane. It swings from its first few joints as a pendulum, through a metre of
-height at the pendulum's own period, for as long as the run lasts. Multiplied
-by this it droops a few centimetres and stops. Forty sweeps at thirty times
-hold the same pose for about twice the cost; four hundred at the authored
-stiffness restore the droop but not the calm.
+A trade between the pose the generator drew and a believable swing. A
+cantilever's sag under its own weight and its first frequency are tied by
+gravity alone -- the tip sags about 1.5 g / omega^2, whatever the mass and
+stiffness -- so a cane swinging at the ~0.8 Hz its cable material implies sags
+a quarter metre out of the drawn pose. At this factor a 1.4 m cane sags about
+9 cm and swings at about 1.1 Hz.
 
-Bend and twist only. Stretch and shear already hold the chain together, and
-raising them shortens the substep a rod stays stable at -- see `SUBSTEPS`.
+Not lower. At two, `VBDSolverCfg.iterations` (ten) sweeps no longer hold a
+chain that soft: a cane creeps for seconds after a push, and some come to rest
+centimetres from where they started.
 """
 
-SHOOT_DAMPING = 0.01
-"""Damping a rod joint takes as a fraction of its own stiffness, in seconds.
+SHOOT_STRETCH = 0.01
+"""What a rod joint's stretch and shear stiffness is multiplied by.
+
+Not a preference. VBD solves a rod chain by Gauss-Seidel sweeps, one body at a
+time against its neighbours, and a joint far stiffer than a segment's inertia
+over one step (m / dt^2) is what those converge worst on. The cable material
+makes stretch and shear several hundred times that. The part a sweep leaves
+unconverged becomes velocity: at the authored values, a cane soft enough to
+swing like one never comes to rest, damped or not. A hundredth brings them
+to a few times the inertia, which still holds a 1.4 m cane to under a
+millimetre of stretch. A thousandth is too soft the other way, and the canes
+stop settling again.
+"""
+
+SHOOT_DAMPING = 0.1
+"""Damping a rod joint's bend and twist take as a fraction of their own
+stiffness, in seconds.
 
 Newton builds every rod joint undamped -- the cable importer never passes
 `add_rod` a damping, and the curve material schema has no attribute to carry
-one -- so a stiffened cane rings around its drooped pose instead of arriving at
-it. This much takes the ring out within a second or two.
+one -- so a cane rings around its rest pose instead of arriving at it. This
+much is a heavily damped swing, the way a leafy shoot moves in air: pushed
+aside and let go, a cane swings back past its rest pose once, by about a fifth
+of the push, and is within a centimetre of rest in one to three seconds.
 
-It cannot be more. VBD folds damping into every sweep's stiffness as `kd / dt`,
-and a chain that stiff converges worse in ten sweeps, not better: at a tenth
-the canes give way further under their own weight than undamped, at a fifth
-they swing harder than with no damping at all. Damping in this solver softens
-a rod before it slows one.
+Bend and twist only. VBD adds damping to a slot's stiffness as `kd / dt` every
+sweep, so on stretch and shear it would make the slots that already converge
+worst stiffer still; damped there, canes pump themselves into a swing that
+never stops.
 """
 
 SHOOT_GROUP = -2
@@ -137,8 +150,12 @@ _tuning: CallbackHandle | None = None
 """The registration `tune_shoots` made, while it stands."""
 
 
-def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) -> CallbackHandle:
-    """Stiffen every rod joint against gravity, damp it, and stop rods colliding.
+def tune_shoots(
+    stiffen: float = SHOOT_STIFFEN,
+    damping: float = SHOOT_DAMPING,
+    stretch: float = SHOOT_STRETCH,
+) -> CallbackHandle:
+    """Retune every rod joint's stiffness and damping, and stop rods colliding.
 
     `spawn_vineyard` calls this when it spawns rods under a solver that steps
     them, so a script calls it only to change the numbers: from inside the
@@ -153,10 +170,10 @@ def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) 
     the simulation stops -- a further call returns it unchanged, rather than
     multiplying the joints a second time.
 
-    Without the stiffening a cane swings from its base like a pendulum for as
-    long as the run lasts; see `SHOOT_STIFFEN`. Without the grouping the scene
-    pays N(N-1)/2 candidate pairs for collisions it never solves; see
-    `SHOOT_GROUP`.
+    Without the tuning a cane sags out of its drawn pose and swings for as long
+    as the run lasts; see `SHOOT_STIFFEN` and `SHOOT_STRETCH`. Without the
+    grouping the scene pays N(N-1)/2 candidate pairs for collisions it never
+    solves; see `SHOOT_GROUP`.
 
     `SHOOT_GROUP` is free under the coupled config `make_physics_cfg_newton`
     builds, where a rod-vs-static pair is solved by nobody anyway. Under VBD on
@@ -185,9 +202,10 @@ def tune_shoots(stiffen: float = SHOOT_STIFFEN, damping: float = SHOOT_DAMPING) 
             # A rod's four slots, in the builder's order: stretch, shear, bend,
             # twist.
             dof = builder.joint_qd_start[joint]
+            for slot in (dof, dof + 1):
+                builder.joint_target_ke[slot] *= stretch
             for slot in (dof + 2, dof + 3):
                 builder.joint_target_ke[slot] *= stiffen
-            for slot in range(dof, dof + 4):
                 builder.joint_target_kd[slot] = damping * builder.joint_target_ke[slot]
 
         # The static scene. `body_shapes` is keyed by body index and a static
