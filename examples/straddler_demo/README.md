@@ -17,7 +17,7 @@ uv run main.py
 
 
 
-https://github.com/user-attachments/assets/abd423dc-af2f-488c-a451-a3e8a437b951
+https://github.com/user-attachments/assets/fd3fa3ef-3130-49ce-b59d-d5a1189af516
 
 
 
