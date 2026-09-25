@@ -1,8 +1,8 @@
 """The route a robot drives through a generated vineyard.
 
-The waypoints come out of the generated scene itself -- the trellis posts --
-so the route re-solves whenever the vineyard parameters change, with nothing
-to keep in sync by hand.
+The waypoints come out of the generated scene itself -- the trellis posts for
+the lines, the terrain mesh for the heights -- so the route re-solves whenever
+the vineyard parameters change, with nothing to keep in sync by hand.
 """
 
 from __future__ import annotations
@@ -34,18 +34,18 @@ def alley_route(cfg: VineyardCfg) -> np.ndarray:
     Alleys are walked in alternating directions, so the result is one
     continuous path with no drive back to the start between them.
 
-    Waypoint heights come from the posts of the two rows the alley runs
-    between rather than the terrain under the alley itself. Only the spawn
-    height reads them, and the two are centimeters apart on any terrain this
-    generator produces.
+    Waypoint heights come from the terrain under each point, not from the
+    posts: the spawn height reads them, and out in a run-out the nearest post
+    is metres away -- far enough on a slope to put the feet 20 cm underground.
     """
     # Imported here, not at module level: both pull in `pxr`, and Kit's own
     # copy of `pxr` only wins the import if nothing loaded the pip one first.
     from pxr import Usd, UsdGeom
 
-    from vinerylab.usd import ROOT
+    from vinerylab.usd import ROOT, Ground
 
     stage = Usd.Stage.Open(resolve_usd_path(cfg))
+    ground = Ground(stage)
     rows = [
         np.array(
             [
@@ -70,11 +70,12 @@ def alley_route(cfg: VineyardCfg) -> np.ndarray:
     for index, (row, neighbour) in enumerate(zip(rows, rows[1:])):
         alley = _paved(row, neighbour, a, ab)
         route.append(alley if index % 2 == 0 else alley[::-1])
-    return np.concatenate(route)
+    route = np.concatenate(route)
+    return np.column_stack([route, [ground.height(x, y) for x, y in route]])
 
 
 def _paved(row: np.ndarray, neighbour: np.ndarray, a: np.ndarray, ab: np.ndarray) -> np.ndarray:
-    """The alley between `row` and `neighbour` as evenly spaced waypoints.
+    """The alley between `row` and `neighbour` as evenly spaced xy waypoints.
 
     Both rows are straight by construction, so sampling their midline loses
     nothing but the centimeter of wobble each post was driven with. Two things
@@ -100,7 +101,4 @@ def _paved(row: np.ndarray, neighbour: np.ndarray, a: np.ndarray, ab: np.ndarray
         max(u.max() for u in along) + RUNOUT + STRIDE,
         STRIDE,
     )
-    # The two rows' heights averaged. Past a row's own end its `interp` holds
-    # that row's outermost post, which is what a run-out wants.
-    height = np.mean([np.interp(span, u, r[:, 2]) for u, r in zip(along, rows)], axis=0)
-    return np.column_stack([a + offset * across + np.outer(span, ab), height])
+    return a + offset * across + np.outer(span, ab)
