@@ -43,18 +43,20 @@ VINEYARD_CFG = VineyardCfg(
     # A small field, so a wave to match: roughly 0.8 m of relief across it.
     terrain=TerrainCfg(length=22.0, width=22.0, max_inclination=10.0, feature_size=8.0),
     parcel=ParcelCfg(orientation=-14.0, row_spacing=1.7),
-    # A few stray shoots reaching into the alley for the robot to push
-    # through. They bend under the default backend, and are spawned static
-    # under any other.
+    # A few flexible stray shoots, leaning out over the alleys from the
+    # cordons. Out there they are no lower than about a metre, well above an
+    # ANYmal's legs, so the robot walks under them without touching one. They
+    # hang under their own weight on the default backend, and are spawned
+    # static under any other.
     shoot=ShootCfg(stray=0.05),
 )
 
 VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
 
-# The parts of the robot a shoot may bend. Legs only: nothing else on an ANYmal
-# reaches into the canopy, and every body named here costs a proxy in the
-# solver that bends them.
+# The parts of the robot a shoot may bend: the legs. In this scene none of them
+# reaches one -- see `VINEYARD_CFG` -- and every body named here still costs a
+# proxy in the solver that bends them.
 ROBOT_CONTACT = [rf"{ROBOT_PATH}/.*_(THIGH|SHANK|FOOT)"]
 
 

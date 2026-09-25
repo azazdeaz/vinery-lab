@@ -20,7 +20,9 @@ up. `--help` lists the launcher's options — `--physics` picks the backend and
 `--viz` the viewer.
 
 The default backend is Newton coupled with VBD, the one solver that bends the
-vineyard's flexible shoots as the robot walks through them. Any other —
+vineyard's flexible shoots. Here they lean out over the alleys a metre or so up,
+above the quadruped, which walks under them without touching one; the
+[straddler demo](../straddler_demo/) is the one that pushes through them. Any other —
 `--physics newton_mjwarp`, or a PhysX backend — spawns the stray shoots
 static, at the same lean.
 
