@@ -67,6 +67,8 @@ the canopy's sides back to a plane, sickle bars at 3–4 km/h and rotary knives
 at 5–6, about the pace this robot drives at. A real hedger cuts the whole
 canopy face. Here the shoots the trellis holds are static meshes, so the bars
 sit just outside them and cut only the flexible strays.
+[docs/pruning-research.md](../../docs/pruning-research.md) covers the
+machines and papers this draws on.
 
 `Trimmer` in `straddler.py` holds the bars' reach, bottom, width and
 thickness. The cut itself is

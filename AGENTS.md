@@ -79,6 +79,7 @@ without it.
 - [docs/architecture.md](docs/architecture.md) — how a scene is built and exported: the element pipeline, quantization, randomness, coordinates
 - [docs/editing-parameters.md](docs/editing-parameters.md) — how to add or change a parameter
 - [docs/parameters.md](docs/parameters.md) — every parameter, with its default and range (generated)
+- [docs/pruning-research.md](docs/pruning-research.md) — prior art for cutting shoots: pruning robots, hedgers, how simulators model a cut
 - [examples/isaaclab_demo/DEVELOPMENT.md](examples/isaaclab_demo/DEVELOPMENT.md) — the pinned Isaac Lab revision and how to bump it
 
 ## Rules that bite
