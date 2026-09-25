@@ -84,6 +84,11 @@ cd examples/straddler_demo/
 uv run main.py
 ```
 
+The same robot with a hedger hung under it, trimming the stray shoots back to the canopy
+```bash
+uv run main.py --trim
+```
+
 
 ## How it works (main points)
 

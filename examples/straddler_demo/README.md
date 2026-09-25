@@ -49,6 +49,44 @@ The route closes on itself — down every row, then back the way it came — so
 `--row` rotates where the drive begins rather than shortening it, and the
 whole block is covered whichever row it starts on.
 
+## Trimming
+
+```bash
+uv run main.py --trim
+```
+
+`--trim` hangs a hedger under the frame: an upright cutter bar either side of
+the row, 0.4 m out from it, reaching from 0.3 m above the ground to the frame.
+Every stray shoot that crosses a bar's plane is cut right where it crosses,
+and the piece past the cut falls and lies where it lands. The vineyard it
+drives has more strays than the plain demo, so there is something to trim on
+every row.
+
+That is how summer hedging is done: cutter bars on a frame over the row trim
+the canopy's sides back to a plane, sickle bars at 3–4 km/h and rotary knives
+at 5–6, about the pace this robot drives at. A real hedger cuts the whole
+canopy face. Here the shoots the trellis holds are static meshes, so the bars
+sit just outside them and cut only the flexible strays.
+
+`Trimmer` in `straddler.py` holds the bars' reach, bottom, width and
+thickness. The cut itself is
+[`vinerylab.isaaclab.cutting`](../../python/vinerylab/isaaclab/cutting.py),
+which any script can use on a running simulation:
+
+```python
+from vinerylab.isaaclab import Shears
+
+shears = Shears()                           # after sim.reset()
+shears.cut_through(corner, along, up)       # every rod crossing a rectangle
+shears.cut(body, 0.4)                       # one rod body, 40% along it
+shears.settle(ground.height)                # lay fallen pieces on the ground
+```
+
+A cut between two joints shortens the capsule it lands on and stretches the
+next one back to meet it, so a shoot comes apart exactly at the knife, not at
+the nearest joint. Only values in the model change, never its size, so the
+cut runs under the CUDA graph that steps the simulation.
+
 ## The robot
 
 `Straddler` is a dataclass of dimensions, and `straddler.py` generates a URDF
@@ -76,8 +114,8 @@ the wheels — so there is no manufacturer's description in here to be bound by.
 
 | file | what it owns |
 | —- | —- |
-| `main.py` | the vineyard, the sky, the robot, the simulation loop |
-| `straddler.py` | the robot: its dimensions, the URDF built from them, the actuators |
+| `main.py` | the vineyard, the sky, the robot, the simulation loop, the trimming |
+| `straddler.py` | the robot: its dimensions, the URDF built from them, the actuators, the trimmer |
 | `route.py` | waypoints down every row, read off the trellis posts |
 | `driver.py` | waypoint following and swerve kinematics |
 | `newton_patches.py` | workarounds for Newton backend bugs |

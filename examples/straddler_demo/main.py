@@ -11,9 +11,14 @@ command-line choices, e.g. `--row 3 --physics newton_mjwarp --viz newton`;
 The default backend is Newton coupled with VBD, which bends the vineyard's
 flexible shoots -- see `vinerylab.isaaclab.physics`. Under any other the stray
 shoots are spawned static.
+
+`--trim` hangs a hedger under the frame, which cuts every stray shoot reaching
+across it -- see `straddler.Trimmer` and `vinerylab.isaaclab.cutting`.
 """
 
 import argparse
+import dataclasses
+from collections.abc import Callable
 
 import numpy as np
 
@@ -29,11 +34,12 @@ from vinerylab.isaaclab import (
     VineyardCfg,
     make_physics_cfg_newton,
 )
+from vinerylab.isaaclab.physics import steps_rods
 
 from driver import DECIMATION, SIM_DT, Driver
 from newton_patches import fix_heightfield_offsets
 from route import row_route
-from straddler import Straddler, set_finish, straddler_cfg
+from straddler import Straddler, Trimmer, set_finish, straddler_cfg
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
@@ -49,6 +55,10 @@ VINEYARD_CFG = VineyardCfg(
     # under any other.
     shoot=ShootCfg(stray=0.05),
 )
+
+# With a trimmer aboard, a vineyard that needs one: a fifth of its shoots
+# strayed out of the canopy, where the bars reach them.
+TRIM_VINEYARD_CFG = dataclasses.replace(VINEYARD_CFG, shoot=ShootCfg(stray=0.2))
 
 # # Long straight rows with a lot of stray shoots
 # VINEYARD_CFG = VineyardCfg(
@@ -81,6 +91,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--trim",
+        action="store_true",
+        help=(
+            "Hang a hedger under the frame: a cutter bar either side of the row that "
+            "cuts every stray shoot reaching across it. Only the default backend bends, "
+            "and so cuts, a shoot."
+        ),
+    )
+    parser.add_argument(
         "--physics",
         help=(
             "An Isaac Lab backend in place of the default: physx, isaacsim_physx, "
@@ -100,7 +119,7 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def design_scene(machine: Straddler) -> Articulation:
+def design_scene(vineyard: VineyardCfg, machine: Straddler) -> Articulation:
     """The vineyard, a sky, and one straddler to drive it."""
     # HDR dome light (IBL + visible sky). Outdoor locomotion envs use this map.
     cfg = sim_utils.DomeLightCfg(
@@ -111,7 +130,7 @@ def design_scene(machine: Straddler) -> Articulation:
 
     # The generated scene brings its own colliders: the ground as its own mesh,
     # the posts and trunks as capsules.
-    VINEYARD_CFG.func(VINEYARD_PATH, VINEYARD_CFG)
+    vineyard.func(VINEYARD_PATH, vineyard)
 
     robot = Articulation(straddler_cfg(machine, ROBOT_PATH))
     # The URDF gave its materials their colours; the rest of the surface has
@@ -120,7 +139,44 @@ def design_scene(machine: Straddler) -> Articulation:
     return robot
 
 
-def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, driver: Driver):
+def trimming(
+    sim: sim_utils.SimulationContext, machine: Straddler, robot: Articulation, ground
+) -> Callable[[], None] | None:
+    """What the trimmer does at each control step: cut whatever crosses its
+    bars where they are now, and lay what it cut down where it lands.
+
+    None under a backend that bends no shoot, where there is nothing to cut.
+    Call once the simulation is reset, since that is what builds the rods.
+    """
+    if not steps_rods(sim.cfg.physics):
+        print("[WARN]: the backend bends no shoot, so the trimmer has nothing to cut")
+        return None
+    import torch
+    from isaaclab.utils.math import quat_apply
+
+    from vinerylab.isaaclab.cutting import Shears
+
+    shears = Shears()
+    # (bar, corner/along/up, xyz) in the base frame.
+    bars = torch.tensor(machine.bars, dtype=torch.float32, device=robot.device)
+
+    def trim():
+        pose = robot.data.root_quat_w.torch[0].expand(bars.numel() // 3, 4)
+        world = quat_apply(pose, bars.reshape(-1, 3)).reshape(bars.shape)
+        world[:, 0] += robot.data.root_pos_w.torch[0]
+        for corner, along, up in world.cpu().numpy():
+            shears.cut_through(corner, along, up)
+        shears.settle(ground.height)
+
+    return trim
+
+
+def run_simulator(
+    sim: sim_utils.SimulationContext,
+    robot: Articulation,
+    driver: Driver,
+    trim: Callable[[], None] | None = None,
+):
     """Runs the simulation loop."""
     driver.place()
 
@@ -128,6 +184,8 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, driver:
     while sim.is_headless_or_exist_active_visualizer():
         if step % DECIMATION == 0:
             driver.control()
+            if trim is not None:
+                trim()
         robot.write_data_to_sim()
         sim.step()
         robot.update(SIM_DT)
@@ -136,10 +194,11 @@ def run_simulator(sim: sim_utils.SimulationContext, robot: Articulation, driver:
 
 def main():
     args_cli = parse_args()
+    vineyard = TRIM_VINEYARD_CFG if args_cli.trim else VINEYARD_CFG
     sim_cfg = sim_utils.SimulationCfg(
         dt=SIM_DT,
         device=args_cli.device,
-        physics=make_physics_cfg_newton(VINEYARD_CFG, ROBOT_PATH, ROBOT_CONTACT),
+        physics=make_physics_cfg_newton(vineyard, ROBOT_PATH, ROBOT_CONTACT),
     )
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it
     # on exit. An explicit --physics replaces the config built above.
@@ -150,11 +209,13 @@ def main():
         if "kit" in args_cli.visualizer:
             sim_utils.enable_extension("omni.kit.window.movie_capture")
         sim = sim_utils.SimulationContext(sim_cfg)
-        route, heading, ground = row_route(VINEYARD_CFG, args_cli.row)
+        route, heading, ground = row_route(vineyard, args_cli.row)
         # The robot is sized to the field it works: a leg in each alley, and
         # the frame over the trellis wire.
-        machine = Straddler.for_vineyard(VINEYARD_CFG)
-        robot = design_scene(machine)
+        machine = Straddler.for_vineyard(vineyard)
+        if args_cli.trim:
+            machine = dataclasses.replace(machine, trimmer=Trimmer())
+        robot = design_scene(vineyard, machine)
         # Behind the robot at its start, looking the way it drives off. Taken
         # from the route rather than from `heading`, which is the row direction
         # only: alternate passes run down it backwards, and so does a start row
@@ -170,7 +231,8 @@ def main():
         # Now we are ready!
         print(f"[INFO]: Setup complete, {len(route)} waypoints to drive...")
         # Run the simulator
-        run_simulator(sim, robot, Driver(route, heading, machine, robot, ground))
+        trim = trimming(sim, machine, robot, ground) if machine.trimmer else None
+        run_simulator(sim, robot, Driver(route, heading, machine, robot, ground), trim)
 
 
 if __name__ == "__main__":

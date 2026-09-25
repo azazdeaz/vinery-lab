@@ -56,6 +56,7 @@ def test_a_preset_opens_as_wide_as_its_maker_publishes(name, opening):
     [
         {"clear_height": 0.2},  # a frame below the wheel centres
         {"leg_thickness": 1.2},  # legs that meet in the middle
+        {"trimmer": straddler.Trimmer(reach=0.5)},  # cutter bars in the legs
     ],
 )
 def test_a_machine_with_no_opening_is_refused(impossible):
@@ -121,6 +122,20 @@ def test_the_roof_is_one_slab_resting_on_the_legs(built):
     assert (length, width) == pytest.approx((MACHINE.wheelbase + leg, MACHINE.track + leg)), (
         "the roof's corners land on the legs'"
     )
+
+
+def test_a_trimmer_is_drawn_over_the_planes_it_cuts():
+    """Drawn only: a bar that collided would push the shoots it is there to cut
+    out of its way."""
+    machine = dataclasses.replace(MACHINE, trimmer=straddler.Trimmer())
+    frame = ElementTree.fromstring(straddler.urdf(machine)).find("./link[@name='base_link']")
+    bare = ElementTree.fromstring(straddler.urdf(MACHINE)).find("./link[@name='base_link']")
+    extra = list(frame.iter("visual"))[len(list(bare.iter("visual"))) :]
+
+    assert len(list(frame.iter("collision"))) == len(list(bare.iter("collision")))
+    for bar, ((x, y, z), along, up) in zip(extra, machine.bars, strict=True):
+        centre = [float(value) for value in bar.find("origin").get("xyz").split()]
+        assert centre == pytest.approx([x + along[0] / 2, y, z + up[2] / 2])
 
 
 def test_the_steering_axis_runs_through_the_wheel_centre(built):
