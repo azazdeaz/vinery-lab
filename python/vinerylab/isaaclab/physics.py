@@ -51,11 +51,20 @@ builds. Cable bodies have no prim of their own, so this is the only way to name
 them."""
 
 SUBSTEPS = 4
-"""Physics substeps per simulation step.
+"""Physics substeps per simulation step, with or without shoots.
 
-Four inside the 200 Hz step a locomotion policy wants. The shoots do not need that many:
-tuned as below, they hold still at a 2.5 ms step as well, so the number is the
-robot's to lower.
+The quadruped's number. ANYmal-C tips over on the demo's headland turns, where
+it pivots on the spot, once MJWarp steps it coarser: on two-minute walks of the
+route it fell on three of seven at two substeps, as many or more at one, and on
+none at four. Three did not fall, but leaned further on the same turns. Plain
+MJWarp fails the same way as the coupler, so the short step is the robot's, not
+the shoots'.
+
+The straddler drives its rows the same at two, about a fifth faster headless;
+a scene with no other robot can pass `substeps=2` to `make_physics_cfg_newton`.
+Its pushed canes then take about a tenth longer to settle. The shoot tuning
+assumes the 1.25 ms step four gives with `SHOOT_SUBSTEPS`: at one substep the
+shoots sag about twice as far.
 """
 
 SHOOT_SUBSTEPS = 1
@@ -257,12 +266,14 @@ def make_physics_cfg_newton(
             These are handed to the VBD half as proxies, and **nothing outside
             this list can bend a shoot** -- a leg that is not named passes
             straight through one.
+        substeps: Physics substeps per simulation step, under either
+            config; see `SUBSTEPS`.
 
     Returns:
         A physics config to hand to `SimulationCfg(physics=...)`.
     """
     if not has_flexible_shoots(vineyard):
-        return NewtonCfg()
+        return NewtonCfg(num_substeps=substeps)
     return NewtonCfg(
         solver_cfg=CouplerProxyCfg(
             entries=[

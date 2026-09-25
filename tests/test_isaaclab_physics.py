@@ -85,11 +85,12 @@ def test_only_the_named_robot_bodies_can_bend_a_shoot(cfg):
     "shoot", [ShootCfg(), ShootCfg(stray=0.05, flexible=False)], ids=["held", "static strays"]
 )
 def test_a_vineyard_without_flexible_shoots_runs_on_mjwarp_alone(shoot):
-    """Plain MJWarp is what escapes the rods' substep floor, and a scene with
-    no rod in it has nothing for a second entry to own -- the coupler refuses
-    an entry that matches no body."""
+    """A scene with no rod in it has nothing for a second entry to own -- the
+    coupler refuses an entry that matches no body. The robot still wants its
+    substeps: `NewtonCfg` defaults to one, where the quadruped falls over."""
     cfg = physics.make_physics_cfg_newton(VineyardCfg(shoot=shoot), ROBOT, [ROBOT])
     assert isinstance(cfg.solver_cfg, MJWarpSolverCfg)
+    assert cfg.num_substeps == physics.SUBSTEPS
 
 
 @pytest.mark.parametrize(
