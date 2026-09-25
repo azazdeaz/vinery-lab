@@ -57,6 +57,7 @@ that need it skip themselves; run those from a demo venv — see
 | [isaaclab/vineyard_cfg.py](python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
 | [isaaclab/vineyard.py](python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
 | [isaaclab/physics.py](python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
+| [isaaclab/cutting.py](python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
 | [_core.pyi](python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
 
 Only `vinerylab.isaaclab` imports Isaac Lab, so plain `import vinerylab` works
