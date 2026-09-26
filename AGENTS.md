@@ -57,6 +57,7 @@ that need it skip themselves; run those from a demo venv — see
 | [isaaclab/vineyard_cfg.py](python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
 | [isaaclab/vineyard.py](python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
 | [isaaclab/physics.py](python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
+| [isaaclab/cutting.py](python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
 | [_core.pyi](python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
 
 Only `vinerylab.isaaclab` imports Isaac Lab, so plain `import vinerylab` works
@@ -68,7 +69,7 @@ without it.
 | --- | --- |
 | [tests/](tests/) | Python tests: the params, the USD build, the Isaac Lab cfg and physics |
 | [examples/isaaclab_demo/](examples/isaaclab_demo/) | a quadruped walking the alleys; its own uv project |
-| [examples/straddler_demo/](examples/straddler_demo/) | a straddling robot driving every row; its own uv project |
+| [examples/straddler_demo/](examples/straddler_demo/) | a straddling robot driving every row, `--trim` to hedge it; its own uv project |
 | [assets/leaves/](assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
 
@@ -78,6 +79,7 @@ without it.
 - [docs/architecture.md](docs/architecture.md) — how a scene is built and exported: the element pipeline, quantization, randomness, coordinates
 - [docs/editing-parameters.md](docs/editing-parameters.md) — how to add or change a parameter
 - [docs/parameters.md](docs/parameters.md) — every parameter, with its default and range (generated)
+- [docs/pruning-research.md](docs/pruning-research.md) — prior art for cutting shoots: pruning robots, hedgers, how simulators model a cut
 - [examples/isaaclab_demo/DEVELOPMENT.md](examples/isaaclab_demo/DEVELOPMENT.md) — the pinned Isaac Lab revision and how to bump it
 
 ## Rules that bite
