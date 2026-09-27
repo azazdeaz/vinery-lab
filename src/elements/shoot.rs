@@ -68,6 +68,20 @@
 //! stray shoot is drawn the way a held one is — one stem, hung with its own
 //! leaves — leaning out of the canopy the same way, with nothing to bend it.
 //!
+//! A dormant vineyard — [`ShootParams::dormant`] — is last season's canes
+//! after leaf fall: lignified brown wood with a bud at every node in place of
+//! a leaf, and every one of them a rod, held or not, since a dormant cane is
+//! there to be pruned. A bud is a geometry prim of its own, hung where the
+//! leaf would be, so a consumer can read every bud's position off the stage:
+//!
+//! ```text
+//! Shoot_00_0
+//!   Cable
+//!   Cable_edge_body_1
+//!     Stem
+//!     Bud_00          -> parts/Bud_0, in the axil the leaf grew from
+//! ```
+//!
 //! Same split as one level up: where the nodes are comes from the
 //! **representative**, because a leaf has to sit on the stem that actually got
 //! built, while each leaf's bearing, droop, twist, size and blade are drawn per
@@ -101,6 +115,10 @@ pub const PART: &str = "Shoot";
 /// representative where there is one stem per representative, and
 /// [`Library::clear`] drops a whole prefix at a time.
 pub const CANE: &str = "Cane";
+
+/// The mesh-library prefix the bud mesh goes under. A bud is one fixed shape
+/// at one fixed size, so the layer registers a single one.
+pub const BUD: &str = "Bud";
 
 /// The prim a shoot's stem takes, below the shoot itself. A child rather than
 /// the shoot prim itself, because a shoot has leaves hanging off it and
@@ -246,6 +264,19 @@ const TIP_SCALE: f64 = 0.15;
 /// canopy's age gradient change every time its density did.
 const EXPANDING_REACH: f64 = 0.25;
 
+// ─── Bud constants ──────────────────────────────────────────────────
+
+/// A dormant bud: a short cone standing in the axil the leaf grew from. Base
+/// radius and length, in meters — a compound bud on a *vinifera* cane is a few
+/// millimeters across, and this one starts on the centerline, so the stem's
+/// own radius buries its base.
+const BUD_RADIUS: f32 = 0.0025;
+const BUD_LENGTH: f32 = 0.008;
+
+/// How far a bud is tipped off the stem it sits on, in radians: outward at
+/// the leaf's bearing and up the cane, the way a bud sits over its leaf scar.
+const BUD_TILT: f32 = 1.0;
+
 // ─── Config ─────────────────────────────────────────────────────────
 
 /// The shortest shoot we will build: below this the bend has nowhere to
@@ -271,6 +302,10 @@ pub struct ShootConfig {
     /// stands over the top wire with it; and since nothing holds it, it is
     /// what a solver bends — see [`is_stray`](Self::is_stray).
     pub pitch: f32,
+    /// Whether this is a dormant cane: leafless lignified wood with a bud at
+    /// every node, exported as a rod whether the trellis holds it or not. See
+    /// [`ShootParams::dormant`].
+    pub dormant: bool,
     pub sides: u32,
     pub detail: u32,
     /// Distance between leaf nodes up the shoot, in meters. Below
@@ -316,6 +351,7 @@ impl ShootConfig {
                 params.lean.max(0.0)
             },
             pitch,
+            dormant: params.dormant,
             sides: params.sides.max(3),
             detail: params.detail.max(1),
             internode: (params.internode * spacing).max(0.0),
@@ -327,11 +363,19 @@ impl ShootConfig {
 
     /// Whether this shoot escaped the trellis.
     ///
-    /// A stray shoot is the one kind exported as a cable rather than a mesh —
-    /// the trellis holds the others still, and nothing holds this one — unless
-    /// [`ShootParams::flexible`] is off, which draws it like the rest.
+    /// A stray shoot is exported as a cable rather than a mesh — the trellis
+    /// holds the others still, and nothing holds this one. So is every cane
+    /// of a dormant vineyard; see [`is_simulated`](Self::is_simulated).
     pub fn is_stray(&self) -> bool {
         self.pitch > 0.0
+    }
+
+    /// Whether this shoot is exported as a curve for a solver to bend and
+    /// cut, rather than as a mesh: a stray one, which nothing holds, or a
+    /// dormant cane, which is there to be pruned. [`ShootParams::flexible`]
+    /// off draws either as a mesh all the same.
+    pub fn is_simulated(&self) -> bool {
+        self.is_stray() || self.dormant
     }
 }
 
@@ -382,6 +426,10 @@ impl Metric<ShootConfig> for ShootMetric {
 /// leans out of the canopy, longer than the shoots beside it, and is exported
 /// as a deformable curve a physics engine bends; `flexible` off exports it as
 /// an ordinary static mesh at the same rest shape instead.
+///
+/// `dormant` turns the whole canopy into the winter's bare canes: brown,
+/// leafless, a bud at every node, and every one exported as a curve so a
+/// pruning robot can cut it.
 #[derive(Resource, Reflect, Clone, Debug, PartialEq)]
 #[cfg_attr(
     feature = "python",
@@ -417,6 +465,18 @@ pub struct ShootParams {
     /// from it.
     #[reflect(@Label("Bendable strays"))]
     pub flexible: bool,
+    /// Winter: every shoot is last season's cane after leaf fall — lignified
+    /// brown, leafless, with a bud at every node — and is exported as a
+    /// deformable curve a pruner can cut, whether the trellis holds it or not.
+    /// `internode` is then the bud spacing, 10–15 cm on a dormant cane, and
+    /// `flexible` off draws the canes as static meshes instead.
+    ///
+    /// A bud is hung where the leaf would be, as a geometry prim named
+    /// `Bud_NN` under the rod segment that carries it — see [`BUD`] — so a
+    /// consumer reads every bud's position off the stage, in the segment's
+    /// own frame.
+    #[reflect(@Label("Dormant canes"))]
+    pub dormant: bool,
     /// Distance between leaf nodes up the shoot, in meters — how many leaves
     /// it carries, said the way a viticulturist would. Zero leaves the shoot
     /// bare.
@@ -464,6 +524,7 @@ impl Default for ShootParams {
             lean: 0.06,
             stray: 0.0,
             flexible: true,
+            dormant: false,
             internode: 0.07,
             leaf_droop: 0.35,
             sides: 6,
@@ -715,7 +776,9 @@ fn leaf_scale(below_tip: f64) -> f64 {
 /// *shoot*, in [`build`].
 #[derive(Clone, Debug)]
 struct LeafNode {
-    name: String,
+    /// Counted up the shoot from its base, which is what names the organ
+    /// hung here: `Leaf_NN`, or `Bud_NN` on a dormant cane.
+    index: usize,
     position: Vec3,
     /// How far along the shoot it sits, in meters from the bud — what picks
     /// the rod segment it rides on a cane.
@@ -764,7 +827,7 @@ fn leaf_nodes(config: &ShootConfig, axis: &ShootAxis, seed: u64) -> Vec<LeafNode
         let position = axis.at(at);
 
         nodes.push(LeafNode {
-            name: format!("Leaf_{index:02}"),
+            index,
             position: Vec3::new(position.x as f32, position.y as f32, position.z as f32),
             station: at as f32,
             // Distichous: successive leaves sit half a turn apart, in two ranks
@@ -995,7 +1058,7 @@ struct ShootBuild {
 fn build_shoot(config: &ShootConfig, seed: u64, flexible: bool) -> anyhow::Result<ShootBuild> {
     let axis = ShootAxis::new(config, &mut Rng::new(seed));
     let centerline = Centerline::new(&axis);
-    let drawn = if config.is_stray() && flexible {
+    let drawn = if config.is_simulated() && flexible {
         Drawn::Tubes(
             segment_tubes(&centerline, config.sides as usize)
                 .iter()
@@ -1060,6 +1123,12 @@ pub(crate) fn build(
 ) -> Result<()> {
     library.clear(PART);
     library.clear(CANE);
+    library.clear(BUD);
+    // One bud for the whole layer, in the canes' own wood.
+    let bud = params.dormant.then(|| {
+        let wood = material::WOOD.surface(color::srgb(color::DORMANT_CANE));
+        library.part(BUD, 0, bud_mesh().to_mesh(), wood)
+    });
 
     let mut grown: Vec<(Order, Entity, ShootConfig)> = shoots
         .iter()
@@ -1089,7 +1158,7 @@ pub(crate) fn build(
         } = grown?;
         // The curve draws in the mesh's colour, so a cane and a rigid shoot of
         // the same representative look alike.
-        let skin = surface(stem_seed(index));
+        let skin = surface(stem_seed(index), params.dormant);
         let drawn = match drawn {
             Drawn::Stem(stem) => Drawn::Stem(library.part(PART, index, stem, skin)),
             Drawn::Tubes(tubes) => {
@@ -1172,30 +1241,34 @@ pub(crate) fn build(
             let outline = (rng.unit() * leaf::OUTLINES.len() as f64) as usize;
             let curl = rng.unit();
 
-            leaf_order += 1;
-            let mut placement = placed(
-                node.position,
-                // Wrapped, because the rank angle runs past a full turn by the
-                // fourth node.
-                (bearing + node.yaw as f64 + turn).rem_euclid(TAU) as f32,
-                // A leaf is drawn flat along +X with its face toward +Z, so the
-                // tilt is the whole of its posture: X twists the blade about
-                // its own long axis, Y pitches its tip down.
-                Vec2::new(
-                    roll as f32,
-                    (config.leaf_droop as f64 * node.maturity as f64 * sag) as f32,
+            // Wrapped, because the rank angle runs past a full turn by the
+            // fourth node.
+            let bearing = (bearing + node.yaw as f64 + turn).rem_euclid(TAU) as f32;
+            let mut placement = match &bud {
+                // A bud stands up +Z, tipped out over its leaf scar.
+                Some(_) => placed(node.position, bearing, Vec2::new(0.0, BUD_TILT), 1.0),
+                None => placed(
+                    node.position,
+                    bearing,
+                    // A leaf is drawn flat along +X with its face toward +Z,
+                    // so the tilt is the whole of its posture: X twists the
+                    // blade about its own long axis, Y pitches its tip down.
+                    Vec2::new(
+                        roll as f32,
+                        (config.leaf_droop as f64 * node.maturity as f64 * sag) as f32,
+                    ),
+                    // `leaf::AREA` is the same for every blade, so a scale is
+                    // a size in meters whichever one this node drew.
+                    node.maturity * vigour as f32,
                 ),
-                // `leaf::AREA` is the same for every blade, so a scale is a
-                // size in meters whichever one this node drew.
-                node.maturity * vigour as f32,
-            );
+            };
             // A bearing is a turn about the stem, which stands up +Z on a held
             // shoot and lies over with the rise on a stray one: the whole
             // posture is turned over with it, so the ranks stay around the
             // stem rather than around the vertical.
             placement.rotation = Quat::from_rotation_y(centerline.pitch) * placement.rotation;
 
-            // On a cane the leaf hangs off the segment that carries it, which
+            // On a cane the organ hangs off the segment that carries it, which
             // is a frame of its own; on a held shoot, off the shoot.
             let (host, placement) = match drawn {
                 Drawn::Tubes(_) => {
@@ -1205,24 +1278,48 @@ pub(crate) fn build(
                 Drawn::Stem(_) => (*entity, placement),
             };
 
-            commands.entity(host).with_child((
-                Name::new(node.name.clone()),
-                placement,
-                Visibility::default(),
-                leaf::LeafConfig::new(&leaf_params, outline, curl),
-                Order(leaf_order),
-            ));
+            let mut host = commands.entity(host);
+            match &bud {
+                Some(bud) => {
+                    host.with_child((
+                        Name::new(format!("{BUD}_{:02}", node.index)),
+                        placement,
+                        bud.clone(),
+                    ));
+                }
+                None => {
+                    leaf_order += 1;
+                    host.with_child((
+                        Name::new(format!("Leaf_{:02}", node.index)),
+                        placement,
+                        Visibility::default(),
+                        leaf::LeafConfig::new(&leaf_params, outline, curl),
+                        Order(leaf_order),
+                    ));
+                }
+            }
         }
     }
     Ok(())
 }
 
-/// A green stem, shaded off this representative's own seed.
-fn surface(seed: u64) -> Surface {
-    material::FOLIAGE.surface(color::shade(
-        color::srgb(color::CANE),
+/// A green stem — or, `dormant`, a lignified cane — shaded off this
+/// representative's own seed.
+fn surface(seed: u64, dormant: bool) -> Surface {
+    let (response, base) = if dormant {
+        (material::WOOD, color::DORMANT_CANE)
+    } else {
+        (material::FOLIAGE, color::CANE)
+    };
+    response.surface(color::shade(
+        color::srgb(base),
         &mut Rng::new(seed ^ color::COLOR_STREAM),
     ))
+}
+
+/// A dormant bud: one small cone standing up +Z from the node it sits on.
+fn bud_mesh() -> MeshData {
+    cylinder_mesh(BUD_RADIUS, BUD_RADIUS * 0.2, BUD_LENGTH, 6)
 }
 
 #[cfg(test)]
@@ -1454,8 +1551,8 @@ mod tests {
                 assert!(index > 0, "nothing hangs on the bolted first segment");
                 assert!(
                     (cable.stations[index]..=cable.stations[index + 1]).contains(&leaf.station),
-                    "{} sits outside segment {index}",
-                    leaf.name
+                    "leaf {} sits outside segment {index}",
+                    leaf.index
                 );
 
                 let placement = placed(leaf.position, leaf.yaw, Vec2::ZERO, 1.0);
@@ -1697,7 +1794,11 @@ mod tests {
                 let off = (node.position.x as f64 - on_axis.x)
                     .hypot(node.position.y as f64 - on_axis.y)
                     .hypot(node.position.z as f64 - on_axis.z);
-                assert!(off < 1e-6, "{} sits on the axis, off by {off}", node.name);
+                assert!(
+                    off < 1e-6,
+                    "leaf {} sits on the axis, off by {off}",
+                    node.index
+                );
             }
         }
     }
@@ -1717,9 +1818,9 @@ mod tests {
             // leafy shoot, where a single-precision step is a few 1e-6.
             assert!(
                 apart <= PHYLLOTAXY_DRIFT + 1e-4,
-                "{} follows {} half a turn round, off by {apart} rad",
-                pair[1].name,
-                pair[0].name
+                "leaf {} follows leaf {} half a turn round, off by {apart} rad",
+                pair[1].index,
+                pair[0].index
             );
         }
     }
@@ -2021,6 +2122,89 @@ mod tests {
                 .all(|(name, _)| !name.starts_with(&format!("{PART}_"))),
             "a stem was built for shoots that never draw one"
         );
+    }
+
+    /// A dormant cane is a rod whether or not the trellis holds it, is wood
+    /// rather than foliage, and carries a bud at every node in place of a
+    /// leaf — a geometry prim of its own, so a pruner can read the buds off
+    /// the stage. With `flexible` off it is the same bare cane as one mesh.
+    #[test]
+    fn a_dormant_cane_is_a_rod_with_a_bud_at_every_node() {
+        for flexible in [true, false] {
+            let mut app = testing::grown(VineyardParams {
+                shoot: ShootParams {
+                    dormant: true,
+                    flexible,
+                    ..default()
+                },
+                ..default()
+            });
+
+            let shoots = organs::<ShootConfig>(app.world_mut());
+            assert!(shoots.len() > 100, "the fixture grew shoots");
+            assert!(
+                shoots
+                    .iter()
+                    .all(|s| s.config.dormant && !s.config.is_stray())
+            );
+            assert!(
+                organs::<leaf::LeafConfig>(app.world_mut()).is_empty(),
+                "flexible {flexible}: a dormant cane carries no leaf"
+            );
+
+            let mut buds = 0;
+            for shoot in &shoots {
+                let entity =
+                    testing::prim(app.world_mut(), &shoot.path.split('/').collect::<Vec<_>>())
+                        .expect("the shoot is on the scene graph");
+                let children = named_children(app.world_mut(), entity);
+                assert_eq!(
+                    children.iter().any(|(name, _)| name == CABLE),
+                    flexible,
+                    "{}: a rod iff something bends it, got {children:?}",
+                    shoot.path
+                );
+                // On the shoot itself, or on the rod segments a cane hangs
+                // them from.
+                let hosts: Vec<Entity> = children
+                    .iter()
+                    .filter(|(name, _)| name.contains("_edge_body_"))
+                    .map(|(_, segment)| *segment)
+                    .chain([entity])
+                    .collect();
+                for host in hosts {
+                    for (name, organ) in named_children(app.world_mut(), host) {
+                        if let Some(index) = name.strip_prefix(&format!("{BUD}_")) {
+                            assert_eq!(index.len(), 2, "{}: {name} is numbered", shoot.path);
+                            buds += 1;
+                            let part = app.world().entity(organ).get::<UsdReference>();
+                            assert_eq!(
+                                part.map(|p| p.0.as_str()),
+                                Some("Bud_0"),
+                                "{}/{name} draws the one bud mesh",
+                                shoot.path
+                            );
+                        }
+                    }
+                }
+            }
+            assert!(buds > 4 * shoots.len(), "buds up every cane, got {buds}");
+
+            let library = app.world().resource::<Prototypes>();
+            assert!(
+                library.get("Bud_0").is_some(),
+                "the bud mesh is in the library"
+            );
+            let (name, cane) = library
+                .iter()
+                .find(|(name, _)| name.starts_with(if flexible { CANE } else { PART }))
+                .expect("the canes are drawn");
+            assert_eq!(
+                cane.roughness,
+                material::WOOD.roughness,
+                "{name}: a dormant cane is wood, not foliage"
+            );
+        }
     }
 
     /// With `flexible` off the same shoots still stray — same pitch, same

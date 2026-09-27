@@ -1,4 +1,8 @@
-"""Workarounds for Newton backend bugs. Each should go when upstream fixes it."""
+"""Workarounds for Newton backend bugs. Each should go when upstream fixes it.
+
+Not imported by the package's `__init__`: a workaround is applied by the script
+that runs the simulation, at the point in its setup the workaround names.
+"""
 
 import sys
 

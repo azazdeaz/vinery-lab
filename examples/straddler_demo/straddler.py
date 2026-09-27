@@ -11,7 +11,7 @@ The proportions are the commercial portals': 0.10-0.25 m of structure between
 a wheel centre and the opening, tracks of 1.1-2.0 m, and openings 1.4-2.35 m
 high. `PRESETS` holds four of those machines at their published figures. The
 defaults are lighter and smaller-wheeled than any of them, because this robot
-is only the frame: nothing is hung under it yet.
+is only the frame. The one tool it can carry is a `Trimmer`.
 
 Mass sits low on purpose: the drive modules carry most of it and the top frame
 is light, which is both how these machines are built and the only way
@@ -84,6 +84,34 @@ else on a vehicle.
 
 
 @dataclasses.dataclass(frozen=True)
+class Trimmer:
+    """A hedger: two upright cutter bars hung from the frame, one either side of
+    the row, trimming the canopy's sides to a plane as the machine drives.
+
+    Summer hedging is done this way, with sickle bars at 3-4 km/h or rotary
+    knives at 5-6, which is the pace this robot cruises at. The bars are
+    visuals only; what they cut is decided by `Straddler.bars` and
+    `vinerylab.isaaclab.cutting.Shears`.
+    """
+
+    reach: float = 0.4
+    """Row line to each bar: the half width the canopy is trimmed to.
+
+    Clear of the shoots the trellis holds, which reach about 0.3 m out either
+    side and are static, so only the strays -- the flexible ones -- cross it.
+    """
+
+    bottom: float = 0.3
+    """The bars' lower ends, above the ground. Their tops are at the frame."""
+
+    width: float = 0.08
+    """Along the row. The knife sweeps this much of its plane at each check,
+    so it has to be wider than the machine drives in a control step."""
+
+    thickness: float = 0.03
+
+
+@dataclasses.dataclass(frozen=True)
 class Straddler:
     """One machine, in metres and kilograms.
 
@@ -124,9 +152,14 @@ class Straddler:
     max_speed: float = 2.4
     """m/s on the ground, flat out."""
 
+    trimmer: Trimmer | None = None
+    """What hangs under the frame, if anything."""
+
     def __post_init__(self):
         if self.clear_width <= 0 or self.clear_height <= self.wheel_radius:
             raise ValueError(f"{self} leaves no opening over the row")
+        if self.trimmer and self.trimmer.reach + self.trimmer.thickness / 2 >= self.clear_width / 2:
+            raise ValueError(f"{self.trimmer} does not fit between the legs")
 
     @classmethod
     def for_vineyard(cls, vineyard: VineyardCfg, clearance: float = 0.2) -> Straddler:
@@ -181,6 +214,27 @@ class Straddler:
     def module_mass(self) -> float:
         """One drive module: the motor, its gearbox and its share of the batteries."""
         return (1 - FRAME_SHARE - WHEEL_SHARE) * self.mass / 4
+
+    @property
+    def bars(self) -> list[tuple[tuple[float, ...], ...]]:
+        """The trimmer's cutter bars, in the base frame, as the plane each
+        knife sweeps: a corner and the two edges from it, along the row and up.
+        Empty without a trimmer.
+
+        Midway along the wheelbase, so the bars lead neither way: the machine
+        drives alternate rows in reverse.
+        """
+        if self.trimmer is None:
+            return []
+        t = self.trimmer
+        return [
+            (
+                (-t.width / 2, side * t.reach, t.bottom),
+                (t.width, 0.0, 0.0),
+                (0.0, 0.0, self.clear_height - t.bottom),
+            )
+            for side in (1, -1)
+        ]
 
 
 def _commercial(**published) -> Straddler:
@@ -308,6 +362,16 @@ def urdf(machine: Straddler) -> str:
                     f"{leg} {leg} {leg_height}",
                 )
                 for x, y in machine.corners
+            ),
+            # A cutter bar over the plane its knife sweeps. Drawn only: a
+            # collider would push the shoots aside before they could be cut.
+            *(
+                _box(
+                    f"{x + along[0] / 2} {y} {z + up[2] / 2}",
+                    f"{along[0]} {machine.trimmer.thickness} {up[2]}",
+                    collide=False,
+                )
+                for (x, y, z), along, up in machine.bars
             ),
         ]
     )

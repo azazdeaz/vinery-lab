@@ -136,6 +136,7 @@ meshes.
 /Vineyard/Planting/Row_00/Vine_047     Xform, unique
   /Wood                                 -> parts/Vine_3, instanceable
   /Collision                            Capsule, the trunk's physics proxy
+  /Cordon_0                             Capsule, one cordon's physics proxy
   /Shoot_00_0                           Xform, unique
     /Stem                               -> parts/Shoot_1, instanceable
     /Leaf_00                            -> parts/Leaf_2, instanceable
@@ -145,6 +146,10 @@ An instanceable prim's descendants are not addressable, and a geometry prim has
 none — so the rule is safe and mechanical. An organ with nothing hanging off it
 (a leaf) *is* the geometry prim rather than an `Xform` over one, which at six
 figures of leaves is half the prims in the scene.
+
+A dormant scene (`ShootParams::dormant`) swaps the canopy for the winter's
+bare canes: every shoot is a cable, and a `Bud_NN` geometry prim hangs at each
+node in place of the leaf, under the rod segment that carries it.
 
 ### Quantization
 

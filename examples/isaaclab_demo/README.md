@@ -33,6 +33,5 @@ static, at the same lean.
 | `main.py` | the vineyard, the sky, the robot, the simulation loop |
 | `route.py` | waypoints down every alley, read off the trellis posts |
 | `driver.py` | waypoint following, the locomotion policy, getting back up |
-| `newton_patches.py` | workarounds for Newton backend bugs |
 
 `DEVELOPMENT.md` covers the pinned Isaac Lab revision.

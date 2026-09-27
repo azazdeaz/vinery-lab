@@ -26,7 +26,8 @@ Open-source parametric vineyard generator for developing and testing vineyard ro
  - Leaves are modelled as detailed meshes to enable depth perception based workflows
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim
- - Flexible stray shoots that the robot can push aside
+ - Flexible stray shoots that the robot can push aside, and cut anywhere along their length
+ - A dormant mode: bare brown canes with a bud at every node, every one of them cuttable
  - Cover crops and weeds
 
 ## Upcoming features
@@ -81,6 +82,19 @@ uv run main.py --physics newton_mjwarp
 Drive a straddling robot down every row. See its [README](examples/straddler_demo/README.md) for more detail.
 ```bash
 cd examples/straddler_demo/
+uv run main.py
+```
+
+The same robot with a hedger hung under it, trimming the stray shoots back to the canopy
+```bash
+uv run main.py --trim
+```
+
+Prune a dormant vineyard with a UGV-mounted arm, Bumblebee style: every cane
+cut back to two buds, planned from the scene's own bud positions. See its
+[README](examples/pruning_demo/README.md) for more detail.
+```bash
+cd examples/pruning_demo/
 uv run main.py
 ```
 

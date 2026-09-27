@@ -23,6 +23,7 @@ touch, are the arguments.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,16 @@ CABLE = "Cable"
 
 The generator picks it -- `CABLE` in `src/scene/mod.rs` -- and it survives into
 the body labels below, so the two have to be changed together."""
+
+VINE = "Vine"
+"""The prim name every vine takes, its index appended.
+
+The generator picks it -- `PART` in `src/elements/vine.rs`. A rod's body label
+and a wood collider's shape label both pass through the vine's prim, which is
+what puts a vine's canes and its wood in one collision group below."""
+
+_VINE_PATH = re.compile(rf"(.*/{VINE}_[^/]*)/")
+"""Matches a label up to and including its vine prim."""
 
 _ROD_BODY_SUFFIX = r"_edge_body_\d+"
 """What Newton's rod importer appends to the curve's path for each capsule it
@@ -124,35 +135,37 @@ worst stiffer still; damped there, canes pump themselves into a swing that
 never stops.
 """
 
-SHOOT_GROUP = -2
-"""Collision group the rod capsules and the static scene are moved into.
+VINE_GROUPS = 2
+"""The first collision group a vine takes; each vine gets the next one up.
 
 Not a preference. Newton appends one candidate pair per colliding shape pair
 while `Model.finalize` builds `shape_contact_pairs`, and sizes every broad- and
-narrow-phase buffer from that list, so N rod segments cost N(N-1)/2 pairs
-before a step is taken: ten thousand segments is 55 million pairs and 4 GiB.
-Filtering happens as the list is built, not inside a kernel, so a group that
-declines a pair never allocates it.
+narrow-phase buffer from that list, so N rod segments that may all meet cost
+N(N-1)/2 pairs before a step is taken: ten thousand segments is 55 million
+pairs and 4 GiB. Filtering happens as the list is built, not inside a kernel,
+so a group that declines a pair never allocates it.
 
-A *negative* group collides with every group but its own, which is the one
-thing the group algebra can express in O(1) per shape -- an explicit filter
-pair per rod pair is the same quadratic moved onto the host. So this drops
-rod-vs-rod, and keeps rod-vs-robot, since the robot keeps the default group 1
-and positive meets negative.
+A group is one signed integer per shape. A positive group meets itself and
+every negative one; a negative group meets everything but its own; zero meets
+nothing. That is the whole algebra, and it is enough: a vine's rods and its
+wood share a positive group, so a cut piece catches on its own vine's stub,
+canes and cordon, and segments of different vines never pair. The ground, the
+trellis and the robot's bodies are negative, so every rod meets them. The
+robot takes a group per body, which pairs its parts exactly as the default
+group did.
 
-The static scene joins the same group rather than getting one of its own,
-because two *positive* groups do not collide either: a group that excluded the
-rods would also stop the terrain from carrying the robot. Nothing is lost by
-it. Under the coupled config `make_physics_cfg_newton` builds a static shape
-belongs to the "rigid" entry, so a rod-vs-static pair is counted here and
-solved by nobody -- the shoots already fall through the ground, the posts and
-the wire.
-
-Measured on a vineyard-shaped rig -- a mesh terrain, 500 static capsules and
-2,002 rod segments -- stepped through the coupled solver: 407 MiB with
-everything colliding, 213 MiB with the rods alone in this group, 125 MiB with
-the static scene in it too.
+Measured on the pruning demo's row, 953 segments over twelve vines with a
+trunk and two cordons each: 62,058 contact pairs against 19,364 with no rod
+meeting a rod, at the same step time. Every rod meeting every other would be
+454,000.
 """
+
+SCENE_GROUP = -1
+"""Collision group of the ground and of every static shape that is not a
+vine's wood: negative, so every rod and the robot meet it, at one pair per rod
+segment each. A post costs that much, a wire would too. The straddler demo's
+widest scene, 9,800 segments among some eighty posts, pays 900,000 pairs and
+8% of its step time for them."""
 
 
 _tuning: CallbackHandle | None = None
@@ -164,7 +177,7 @@ def tune_shoots(
     damping: float = SHOOT_DAMPING,
     stretch: float = SHOOT_STRETCH,
 ) -> CallbackHandle:
-    """Retune every rod joint's stiffness and damping, and stop rods colliding.
+    """Retune every rod joint's stiffness and damping, and group what collides.
 
     `spawn_vineyard` calls this when it spawns rods under a solver that steps
     them, so a script calls it only to change the numbers: from inside the
@@ -182,12 +195,10 @@ def tune_shoots(
     Without the tuning a cane sags out of its drawn pose and swings for as long
     as the run lasts; see `SHOOT_STIFFEN` and `SHOOT_STRETCH`. Without the
     grouping the scene pays N(N-1)/2 candidate pairs for collisions it never
-    solves; see `SHOOT_GROUP`.
+    solves; see `VINE_GROUPS`.
 
-    `SHOOT_GROUP` is free under the coupled config `make_physics_cfg_newton`
-    builds, where a rod-vs-static pair is solved by nobody anyway. Under VBD on
-    its own it costs the rods their contact with the ground, the posts and the
-    wire -- which they hang clear of.
+    A rod meets its own vine's canes and wood, the ground, the posts and the
+    robot, and passes through every other vine.
     """
     global _tuning
     # Imported here and not at module scope: `newton` brings `pxr` with it, and
@@ -200,14 +211,13 @@ def tune_shoots(
 
     def tune(_payload) -> None:
         builder = NewtonManager._builder
+        rods: set[int] = set()
         for joint, kind in enumerate(builder.joint_type):
             if kind != JointType.ROD:
                 continue
-            # Both ends, so a chain's first body is reached too: it is the
+            # Both ends, so a chain's first body is counted too: it is the
             # first rod joint's parent and no rod joint's child.
-            for body in (builder.joint_parent[joint], builder.joint_child[joint]):
-                for shape in builder.body_shapes[body]:
-                    builder.shape_collision_group[shape] = SHOOT_GROUP
+            rods.update((builder.joint_parent[joint], builder.joint_child[joint]))
             # A rod's four slots, in the builder's order: stretch, shear, bend,
             # twist.
             dof = builder.joint_qd_start[joint]
@@ -217,18 +227,39 @@ def tune_shoots(
                 builder.joint_target_ke[slot] *= stiffen
                 builder.joint_target_kd[slot] = damping * builder.joint_target_ke[slot]
 
-        # The static scene. `body_shapes` is keyed by body index and a static
-        # shape has none, so -1 is the whole of it.
+        # Groups: a vine's for its canes and wood, allotted as they turn up;
+        # `SCENE_GROUP` for what stands under no vine; one of its own for
+        # every other body. Group 0 is a site, which collides with nothing,
+        # and stays.
+        vines: dict[str, int] = {}
+
+        def vine_group(label: str) -> int:
+            vine = _VINE_PATH.match(label)
+            if vine is None:
+                return SCENE_GROUP
+            return vines.setdefault(vine.group(1), VINE_GROUPS + len(vines))
+
+        def regroup(shapes: Sequence[int], group: int) -> None:
+            for shape in shapes:
+                if builder.shape_collision_group[shape] != 0:
+                    builder.shape_collision_group[shape] = group
+
+        # `body_shapes` is keyed by body index, and a static shape has none,
+        # so -1 is the whole of the static scene.
+        for body in range(builder.body_count):
+            label = builder.body_label[body]
+            group = vine_group(label) if body in rods else -(2 + body)
+            regroup(builder.body_shapes.get(body, ()), group)
         for shape in builder.body_shapes[-1]:
-            builder.shape_collision_group[shape] = SHOOT_GROUP
+            regroup((shape,), vine_group(builder.shape_label[shape]))
 
     _tuning = NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
     return _tuning
 
 
 def has_flexible_shoots(vineyard: VineyardCfg) -> bool:
-    """Whether the vineyard authors a flexible shoot: a stray one, with
-    `ShootCfg.flexible` on.
+    """Whether the vineyard authors a flexible shoot: a stray one, or every
+    cane of a dormant vineyard, with `ShootCfg.flexible` on.
 
     `stray` is a share drawn shoot by shoot, so a parcel small enough can draw
     none; the coupled solver then refuses an entry that owns no body, at
@@ -236,7 +267,8 @@ def has_flexible_shoots(vineyard: VineyardCfg) -> bool:
     """
     # ponytail: read off the cfg, as the scene itself is only generated inside
     # the app, after the physics config was built.
-    return vineyard.shoot.flexible and vineyard.shoot.stray > 0.0
+    shoot = vineyard.shoot
+    return shoot.flexible and (shoot.stray > 0.0 or shoot.dormant)
 
 
 def steps_rods(physics: PhysicsCfg | None) -> bool:
@@ -282,11 +314,8 @@ def make_physics_cfg_newton(
                     solver_cfg=MJWarpSolverCfg(),
                     bodies=[robot],
                     # The ground and the trellis. A static shape belongs to
-                    # exactly one entry -- an entry that lists any shape stops
-                    # seeing the rest -- and the robot walking on the terrain
-                    # is the one that cannot do without it. The shoots then
-                    # pass through the ground, which is free: they hang off the
-                    # wood and never reach it.
+                    # one entry at most, and the robot walking on the terrain
+                    # is the one that cannot do without it.
                     include_static_shapes=True,
                 ),
                 CouplerEntryCfg(
@@ -294,6 +323,10 @@ def make_physics_cfg_newton(
                     solver_cfg=VBDSolverCfg(),
                     # Under any path: only the rod importer labels a body so.
                     bodies=[rf".*/{CABLE}{_ROD_BODY_SUFFIX}"],
+                    # An entry that lists no shape still sees its own bodies'
+                    # capsules, and the static shapes another entry owns: the
+                    # ground, for a cut piece to land on.
+                    include_body_shapes=False,
                     substeps=SHOOT_SUBSTEPS,
                 ),
             ],

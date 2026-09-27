@@ -332,6 +332,10 @@ class ShootParams:
     out of the canopy, longer than the shoots beside it, and is exported as a
     deformable curve a physics engine bends; `flexible` off exports it as an ordinary
     static mesh at the same rest shape instead.
+
+    `dormant` turns the whole canopy into the winter's bare canes: brown, leafless, a
+    bud at every node, and every one exported as a curve so a pruning robot can cut
+    it.
     """
 
     length: float
@@ -353,6 +357,13 @@ class ShootParams:
     is a single static mesh at the same rest shape: the same lean out of the canopy,
     nothing for a solver to pick up. For a backend with no rods, or to keep a
     canopy's look without paying for the bodies.
+    """
+    dormant: bool
+    """Winter: every shoot is last season's cane after leaf fall — lignified brown,
+    leafless, with a bud at every node — and is exported as a deformable curve a
+    pruner can cut, whether the trellis holds it or not. `internode` is then the bud
+    spacing, 10–15 cm on a dormant cane, and `flexible` off draws the canes as
+    static meshes instead.
     """
     internode: float
     """Distance between leaf nodes up the shoot, in meters — how many leaves it
@@ -384,6 +395,7 @@ class ShootParams:
         lean: float = 0.06,
         stray: float = 0.0,
         flexible: bool = True,
+        dormant: bool = False,
         internode: float = 0.07,
         leaf_droop: float = 0.35,
         sides: int = 6,

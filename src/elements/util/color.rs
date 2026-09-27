@@ -41,6 +41,11 @@ pub const CANE: u32 = 0x6E8B3D;
 /// Permanent wood: trunk, cordons, spurs. Grey-brown shaggy bark.
 pub const WOOD: u32 = 0x5A4A38;
 
+/// A dormant cane: last season's shoot after it lignified and dropped its
+/// leaves. Tan rather than the grey-brown of old wood, since one-year bark is
+/// smooth and has not weathered yet.
+pub const DORMANT_CANE: u32 = 0x8B6A45;
+
 /// A trellis post. Grey with the faintest warm cast — weathered softwood and
 /// galvanized steel both land here, and at row distance nothing separates
 /// them but their silhouette.

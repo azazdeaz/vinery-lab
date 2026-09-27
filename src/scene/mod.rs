@@ -137,19 +137,31 @@ pub const COLLISION: &str = "Collision";
 pub struct Collider(pub doc::Capsule);
 
 /// The prim a capsule collider spanning `z0..z1` up the organ's own `+Z`
-/// becomes: its type, its shape, and the transform centering it on that span.
+/// becomes. See [`capsule_between`].
+pub fn capsule(radius: f32, z0: f32, z1: f32) -> impl Bundle + Copy {
+    capsule_between(radius, Vec3::Z * z0, Vec3::Z * z1)
+}
+
+/// The prim a capsule collider from `from` to `to`, in the organ's own frame,
+/// becomes: its type, its shape, and the transform laying it along that line,
+/// centered on it.
 ///
 /// USD measures a capsule's `height` across its cylindrical section alone, so
 /// a span shorter than its own two caps degenerates into a sphere reaching
 /// past both ends of it.
-pub fn capsule(radius: f32, z0: f32, z1: f32) -> impl Bundle + Copy {
+pub fn capsule_between(radius: f32, from: Vec3, to: Vec3) -> impl Bundle + Copy {
+    let span = to - from;
     (
         UsdType("Capsule"),
         Collider(doc::Capsule {
             radius,
-            height: (z1 - z0 - 2.0 * radius).max(0.0),
+            height: (span.length() - 2.0 * radius).max(0.0),
         }),
-        Transform::from_translation(Vec3::Z * (z0 + z1) / 2.0),
+        Transform {
+            translation: (from + to) / 2.0,
+            rotation: Quat::from_rotation_arc(Vec3::Z, span.try_normalize().unwrap_or(Vec3::Z)),
+            scale: Vec3::ONE,
+        },
     )
 }
 
