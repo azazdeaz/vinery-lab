@@ -140,10 +140,10 @@ def design_scene(vineyard: VineyardCfg, machine: Straddler) -> Articulation:
 
 
 def trimming(
-    sim: sim_utils.SimulationContext, machine: Straddler, robot: Articulation, ground
+    sim: sim_utils.SimulationContext, machine: Straddler, robot: Articulation
 ) -> Callable[[], None] | None:
     """What the trimmer does at each control step: cut whatever crosses its
-    bars where they are now, and lay what it cut down where it lands.
+    bars where they are now.
 
     None under a backend that bends no shoot, where there is nothing to cut.
     Call once the simulation is reset, since that is what builds the rods.
@@ -166,7 +166,6 @@ def trimming(
         world[:, 0] += robot.data.root_pos_w.torch[0]
         for corner, along, up in world.cpu().numpy():
             shears.cut_through(corner, along, up)
-        shears.settle(ground.height)
 
     return trim
 
@@ -231,7 +230,7 @@ def main():
         # Now we are ready!
         print(f"[INFO]: Setup complete, {len(route)} waypoints to drive...")
         # Run the simulator
-        trim = trimming(sim, machine, robot, ground) if machine.trimmer else None
+        trim = trimming(sim, machine, robot) if machine.trimmer else None
         run_simulator(sim, robot, Driver(route, heading, machine, robot, ground), trim)
 
 

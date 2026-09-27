@@ -31,7 +31,7 @@ from isaaclab_newton.physics import (  # noqa: E402
     VBDSolverCfg,
 )
 from isaaclab_physx.physics import PhysxCfg  # noqa: E402
-from newton import JointType  # noqa: E402
+from newton import GeoType, JointType  # noqa: E402
 
 VINEYARD = "/World/Vineyard"
 ROBOT = "/World/envs/env_0/Robot"
@@ -65,12 +65,15 @@ def test_the_cable_selector_matches_the_bodies_newton_builds(entries):
     assert not re.fullmatch(f"(?:{selector})(?:/.*)?", f"{ROBOT}/LF_FOOT")
 
 
-def test_the_robot_owns_the_static_scene(entries):
-    """A static shape belongs to exactly one entry, and an entry that lists any
-    shape stops seeing the rest. On the wrong entry the robot walks through the
-    terrain."""
+def test_the_robot_owns_the_static_scene_and_the_shoots_see_it(entries):
+    """A static shape belongs to one entry at most: on the wrong one the robot
+    walks through the terrain. An entry that lists any shape stops seeing the
+    static ones it does not own, so the shoots list none, not even their own
+    -- or a cut piece falls through the ground."""
     assert entries["rigid"].include_static_shapes
     assert not entries["shoots"].include_static_shapes
+    assert not entries["shoots"].include_body_shapes
+    assert not entries["shoots"].shape_label_patterns
 
 
 def test_only_the_named_robot_bodies_can_bend_a_shoot(cfg):
@@ -163,8 +166,8 @@ def builder(monkeypatch) -> object:
 
     Bodies 0 and 1 are the rod's, carrying shapes 0 and 1; bodies 2 and 3 stand
     for the robot, carrying shapes 2 and 3; shapes 4 and 5 are the static scene,
-    which is body -1 because a static shape has no body. The other two joints
-    are there to be walked past.
+    which is body -1 because a static shape has no body: the ground and a post.
+    The other two joints are there to be walked past.
     """
     builder = types.SimpleNamespace(
         joint_type=[JointType.D6, JointType.ROD, JointType.REVOLUTE],
@@ -175,6 +178,7 @@ def builder(monkeypatch) -> object:
         joint_child=[2, 1, 3],
         body_shapes={-1: [4, 5], 0: [0], 1: [1], 2: [2], 3: [3]},
         shape_collision_group=[1] * 6,
+        shape_type=[GeoType.CAPSULE] * 4 + [GeoType.HFIELD, GeoType.CAPSULE],
     )
     monkeypatch.setattr(NewtonManager, "_builder", builder, raising=False)
     # `tune_shoots` registers a callback per call, and nothing here deregisters.
@@ -214,16 +218,17 @@ def test_tune_shoots_registers_once_while_its_registration_stands(builder):
     assert physics.tune_shoots() is not first
 
 
-def test_the_rod_capsules_and_the_static_scene_share_a_group(builder):
-    """The robot has to keep the default group: it is what the rods are left
-    colliding with. A walk that reached its bodies -- following the wrong
-    joints, or a rod joint's own DoF index instead of its bodies -- would take
-    the robot out of the rods' reach and nothing would report it."""
+def test_the_rod_capsules_and_the_static_scene_but_the_ground_share_a_group(builder):
+    """The robot and the ground have to keep the default group: they are what
+    the rods are left colliding with. A walk that reached the robot's bodies --
+    following the wrong joints, or a rod joint's own DoF index instead of its
+    bodies -- would take it out of the rods' reach and nothing would report
+    it."""
     physics.tune_shoots()
     NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
 
     group = physics.SHOOT_GROUP
-    assert builder.shape_collision_group == [group, group, 1, 1, group, group]
+    assert builder.shape_collision_group == [group, group, 1, 1, 1, group]
 
 
 def test_the_shoot_group_drops_rod_pairs_and_keeps_the_robot(builder):

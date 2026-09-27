@@ -142,11 +142,10 @@ and positive meets negative.
 
 The static scene joins the same group rather than getting one of its own,
 because two *positive* groups do not collide either: a group that excluded the
-rods would also stop the terrain from carrying the robot. Nothing is lost by
-it. Under the coupled config `make_physics_cfg_newton` builds a static shape
-belongs to the "rigid" entry, so a rod-vs-static pair is counted here and
-solved by nobody -- the shoots already fall through the ground, the posts and
-the wire.
+rods would also stop the terrain from carrying the robot. All of it but the
+ground, which keeps the default group and so meets both: the rods land on it,
+at one pair per segment. The posts and the wire would cost a pair per segment
+each, hundreds, for canes that hang clear of them.
 
 Measured on a vineyard-shaped rig -- a mesh terrain, 500 static capsules and
 2,002 rod segments -- stepped through the coupled solver: 407 MiB with
@@ -184,16 +183,14 @@ def tune_shoots(
     grouping the scene pays N(N-1)/2 candidate pairs for collisions it never
     solves; see `SHOOT_GROUP`.
 
-    `SHOOT_GROUP` is free under the coupled config `make_physics_cfg_newton`
-    builds, where a rod-vs-static pair is solved by nobody anyway. Under VBD on
-    its own it costs the rods their contact with the ground, the posts and the
-    wire -- which they hang clear of.
+    The ground stays out of `SHOOT_GROUP`, so a rod lands on it; the posts
+    and the wire go in, and a rod passes through them.
     """
     global _tuning
     # Imported here and not at module scope: `newton` brings `pxr` with it, and
     # Kit's own `pxr` wins the import only if nothing loaded the pip one first.
     from isaaclab_newton.physics import NewtonManager
-    from newton import JointType
+    from newton import GeoType, JointType
 
     if _tuning is not None and _tuning.id in NewtonManager._callbacks:
         return _tuning
@@ -217,10 +214,12 @@ def tune_shoots(
                 builder.joint_target_ke[slot] *= stiffen
                 builder.joint_target_kd[slot] = damping * builder.joint_target_ke[slot]
 
-        # The static scene. `body_shapes` is keyed by body index and a static
-        # shape has none, so -1 is the whole of it.
+        # The static scene but the ground, which Newton builds as its one
+        # height field. `body_shapes` is keyed by body index and a static shape
+        # has none, so -1 is the whole of it.
         for shape in builder.body_shapes[-1]:
-            builder.shape_collision_group[shape] = SHOOT_GROUP
+            if builder.shape_type[shape] != GeoType.HFIELD:
+                builder.shape_collision_group[shape] = SHOOT_GROUP
 
     _tuning = NewtonManager.register_callback(tune, PhysicsEvent.MODEL_INIT)
     return _tuning
@@ -282,11 +281,8 @@ def make_physics_cfg_newton(
                     solver_cfg=MJWarpSolverCfg(),
                     bodies=[robot],
                     # The ground and the trellis. A static shape belongs to
-                    # exactly one entry -- an entry that lists any shape stops
-                    # seeing the rest -- and the robot walking on the terrain
-                    # is the one that cannot do without it. The shoots then
-                    # pass through the ground, which is free: they hang off the
-                    # wood and never reach it.
+                    # one entry at most, and the robot walking on the terrain
+                    # is the one that cannot do without it.
                     include_static_shapes=True,
                 ),
                 CouplerEntryCfg(
@@ -294,6 +290,10 @@ def make_physics_cfg_newton(
                     solver_cfg=VBDSolverCfg(),
                     # Under any path: only the rod importer labels a body so.
                     bodies=[rf".*/{CABLE}{_ROD_BODY_SUFFIX}"],
+                    # An entry that lists no shape still sees its own bodies'
+                    # capsules, and the static shapes another entry owns: the
+                    # ground, for a cut piece to land on.
+                    include_body_shapes=False,
                     substeps=SHOOT_SUBSTEPS,
                 ),
             ],

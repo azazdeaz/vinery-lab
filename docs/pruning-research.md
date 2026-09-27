@@ -12,7 +12,7 @@ straddler demo's `--trim` hedger, and a list of what could be built on them.
 | Where to cut | Picked from the plant's structure: "between the Nth and N+1th bud", "above the second node", a node graph plus an offset | `Shears.cut(body, at)`: a rod segment and a fraction along it |
 | Cutting a flexible stem | Not simulated. A cut is a pose check, or breaks a joint placed in advance | Any point on a rod, while the simulation runs |
 | Non-selective trimming | Hedgers cut the canopy's sides to a plane at 3–6 km/h | `Shears.cut_through`, driven by the straddler's bars at about 4 km/h |
-| What falls | Collected or left on the ground | Laid on the ground one segment at a time (`Shears.settle`) |
+| What falls | Collected or left on the ground | Falls onto the terrain and lies there, a rod of its own |
 
 ## Green canopy: hedgers and trimmers
 

@@ -2,7 +2,7 @@
 
 Requires Isaac Lab; skipped entirely where it isn't installed. Runs a bare
 Newton rod -- no Kit, no coupler -- stepped the way Isaac Lab steps it: the
-queued model changes first, then the solver.
+queued model changes first, then the contacts, then the solver.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ except ImportError:
 import numpy as np  # noqa: E402
 import warp as wp  # noqa: E402
 from isaaclab_newton.physics import NewtonManager  # noqa: E402
-from newton import BodyFlags, ModelBuilder  # noqa: E402
+from newton import BodyFlags, CollisionPipeline, ModelBuilder  # noqa: E402
 from newton.solvers import SolverVBD  # noqa: E402
 from pxr import Usd  # noqa: E402
 
@@ -30,10 +30,13 @@ GRAVITY = 9.81
 
 class Rig:
     """A straight rod of four 10 cm segments along x, a meter up, its first
-    body held still the way the importer bolts a shoot to the wood."""
+    body held still the way the importer bolts a shoot to the wood. A ground,
+    if `ground` is given, that many meters up."""
 
-    def __init__(self, monkeypatch):
+    def __init__(self, monkeypatch, ground: float | None = None):
         builder = ModelBuilder(gravity=(0.0, 0.0, -GRAVITY))
+        if ground is not None:
+            builder.add_ground_plane(height=ground)
         positions = [wp.vec3(SEGMENT * i, 0.0, 1.0) for i in range(5)]
         self.bodies, self.joints = builder.add_rod(
             positions,
@@ -50,6 +53,8 @@ class Rig:
         self.solver = SolverVBD(self.model, iterations=10)
         self.state, self.next = self.model.state(), self.model.state()
         self.control = self.model.control()
+        self.collision = CollisionPipeline(self.model)
+        self.contacts = self.collision.contacts()
         monkeypatch.setattr(NewtonManager, "_model", self.model)
         monkeypatch.setattr(NewtonManager, "_solver", self.solver)
         monkeypatch.setattr(NewtonManager, "_state_0", self.state)
@@ -61,7 +66,8 @@ class Rig:
             for change in NewtonManager._model_changes:
                 self.solver.notify_model_changed(change)
             NewtonManager._model_changes = set()
-            self.solver.step(self.state, self.next, self.control, None, DT)
+            self.collision.collide(self.state, self.contacts)
+            self.solver.step(self.state, self.next, self.control, self.contacts, DT)
             self.state, self.next = self.next, self.state
             NewtonManager._state_0 = self.state
 
@@ -131,22 +137,12 @@ def test_a_cut_next_to_a_joint_is_made_at_it(rig, body, at, loose):
     assert (rig.model.shape_scale.numpy() == scale).all()
 
 
-def test_a_landed_piece_lies_on_the_ground(rig):
-    """The rods do not collide with the ground, so each body is laid on it once
-    it is found below it -- level, whichever way it came down -- and stays."""
-    ground = 0.8
+def test_a_cut_piece_lands_on_the_ground_and_lies_there(monkeypatch):
+    """Nothing lays it down: it collides with the ground like any body."""
+    rig = Rig(monkeypatch, ground=0.8)
     rig.shears.cut(rig.bodies[1], 0.5)
-    # Tipped up at its free end, the way a piece of a leaning shoot falls.
-    spin = np.zeros((4, 6), dtype=np.float32)
-    spin[2:, 4] = 2.0
-    rig.state.body_qd.assign(spin)
-    for _ in range(40):
-        rig.step(0.02)
-        rig.shears.settle(lambda x, y: ground)
+    rig.step(1.0)
 
-    assert (rig.model.body_flags.numpy()[rig.bodies[2:]] == int(BodyFlags.KINEMATIC)).all()
     start, end = rig.shears._capsules()
-    assert start[2:, 2] == pytest.approx(ground + 0.01)
-    assert end[2:, 2] == pytest.approx(ground + 0.01)
-    rig.step(0.2)
-    assert np.stack(rig.shears._capsules())[:, 2:] == pytest.approx(np.stack([start, end])[:, 2:])
+    assert np.concatenate([start[2:, 2], end[2:, 2]]) == pytest.approx(0.8 + 0.01, abs=2e-3)
+    assert np.abs(rig.state.body_qd.numpy()[rig.bodies[2:]]).max() < 0.01

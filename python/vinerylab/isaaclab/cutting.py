@@ -24,9 +24,9 @@ capsule's new length, and whatever hangs off the shortened segment past the
 cut -- a leaf -- is hidden, since a prim cannot move to the piece that carries
 on without it.
 
-A piece that falls has nothing to land on, because the rods do not collide with
-the static scene (see `physics.SHOOT_GROUP`). `settle` stops each of its bodies
-where it reaches the ground.
+A piece that falls lands on the ground like any body (see
+`physics.SHOOT_GROUP`). VBD has no rolling friction, so a straight one on a
+slope can roll on downhill, off the edge of the terrain if nothing stops it.
 """
 
 from __future__ import annotations
@@ -52,9 +52,8 @@ class Shears:
     """Cuts the rods of the running simulation.
 
     Build one once the model exists -- after the first
-    `SimulationContext.reset()` -- and keep it: it tracks which rods are cut
-    and which pieces are still falling. `stage` is where the rods are drawn,
-    the running one by default.
+    `SimulationContext.reset()` -- and keep it: it tracks which rods are cut.
+    `stage` is where the rods are drawn, the running one by default.
 
     A rod's bodies are numbered from the wood out, and every position along
     one here is measured the same way: 0 at the end nearer the wood.
@@ -118,7 +117,6 @@ class Shears:
 
         self.loose = np.zeros(len(self.bodies), dtype=bool)
         """Which bodies are cut free of their rod, in `bodies` order."""
-        self._falling: set[int] = set()
 
     def cut(self, body: int, at: float) -> bool:
         """Cut rod body `body` at `at`, a fraction of its capsule's length, and
@@ -170,48 +168,6 @@ class Shears:
             if not self.loose[i]:
                 cuts += self.cut(int(self.bodies[i]), float(at[i]))
         return cuts
-
-    def settle(self, height: Callable[[float, float], float]) -> None:
-        """Lay every falling body that has reached the ground down on it.
-
-        `height(x, y)` is the ground under a point, e.g.
-        `vinerylab.usd.Ground.height`. A landed body is cut from the rest of
-        its piece, tipped level about the horizontal axis across it, so its
-        leaves keep their places along it, and made kinematic with no velocity,
-        which Newton holds still whatever pushes on it.
-
-        One body at a time, because a piece keeps the stiffness of the rod it
-        was cut from: held by its first landed body, the rest of it would stand
-        up off the ground for good. Cut loose, the rest falls on and lands a
-        body at a time, along the line the piece fell on.
-        """
-        if not self._falling:
-            return
-        from newton import BodyFlags, ModelFlags
-
-        start, end = self._capsules()
-        landed = {
-            i
-            for i in self._falling
-            if min(start[i, 2], end[i, 2]) - self._radius[i]
-            <= height(*(start[i, :2] + end[i, :2]) / 2)
-        }
-        if not landed:
-            return
-        self._falling -= landed
-        state = self._manager._state_0
-        for i in landed:
-            body = int(self.bodies[i])
-            for joint in (self._tip_joint.get(body), self._root_joint.get(body)):
-                if joint is not None:
-                    self._disable(joint)
-            middle = (start[i] + end[i]) / 2
-            middle[2] = height(*middle[:2]) + self._radius[i]
-            pose = _lying(state.body_q.numpy()[body], end[i] - start[i], middle, self._center[i])
-            _write([state.body_q], body, lambda _: pose)
-            _write([state.body_qd], body, np.zeros_like)
-            _write([self._model.body_flags], body, lambda _: int(BodyFlags.KINEMATIC))
-        self._manager.add_model_change(ModelFlags.BODY_PROPERTIES)
 
     def _capsules(self) -> tuple[np.ndarray, np.ndarray]:
         """Each rod body's capsule axis in world coordinates, as its end nearer
@@ -294,13 +250,12 @@ class Shears:
             xform.SetScale(Gf.Vec3f(1.0, 1.0, float(half / self._drawn[i])))
 
     def _release(self, joint: int) -> None:
-        """Turn `joint` off, and mark everything past it as falling."""
+        """Turn `joint` off, and mark everything past it as loose."""
         body = int(self._child[joint])
         self._disable(joint)
         while True:
             i = self._index[body]
             self.loose[i] = True
-            self._falling.add(i)
             if (joint := self._tip_joint.get(body)) is None:
                 return
             body = int(self._child[joint])
@@ -322,27 +277,6 @@ def _write(arrays, index: int, change: Callable) -> None:
         value = element.numpy()
         value[0] = change(value[0])
         element.assign(value)
-
-
-def _lying(pose: np.ndarray, axis: np.ndarray, middle: np.ndarray, offset: float) -> np.ndarray:
-    """A body `pose` (position, then an (x, y, z, w) rotation) tipped level
-    about the horizontal axis across its capsule `axis`, and moved so the
-    capsule's middle -- `offset` up the body's z axis -- is at `middle`."""
-    axis = axis / np.linalg.norm(axis)
-    level = np.array([axis[0], axis[1], 0.0])
-    # One standing on end has no way it leans; lay it along x.
-    level = level / np.linalg.norm(level) if np.linalg.norm(level) > 1e-6 else np.array([1.0, 0, 0])
-    # The shortest rotation from `axis` to `level`, then the pose's own.
-    turn = np.append(np.cross(axis, level), 1 + axis @ level)
-    turn /= np.linalg.norm(turn)
-    (x1, y1, z1, w1), (x2, y2, z2, w2) = turn, pose[3:]
-    rotation = [
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-    ]
-    return np.concatenate([middle - level * offset, rotation])
 
 
 def _rotate_z(quat: np.ndarray) -> np.ndarray:

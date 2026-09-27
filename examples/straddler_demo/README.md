@@ -81,7 +81,6 @@ from vinerylab.isaaclab import Shears
 shears = Shears()                           # after sim.reset()
 shears.cut_through(corner, along, up)       # every rod crossing a rectangle
 shears.cut(body, 0.4)                       # one rod body, 40% along it
-shears.settle(ground.height)                # lay fallen pieces on the ground
 ```
 
 A cut between two joints shortens the capsule it lands on and stretches the
