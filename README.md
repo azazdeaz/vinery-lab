@@ -27,6 +27,7 @@ Open-source parametric vineyard generator for developing and testing vineyard ro
  - Performance tuning. LoD and mesh variance are configurable to support low-end hardware and large vineyards
  - Every plant, shoot and leaf is an addressable prim
  - Flexible stray shoots that the robot can push aside, and cut anywhere along their length
+ - A dormant mode: bare brown canes with a bud at every node, every one of them cuttable
  - Cover crops and weeds
 
 ## Upcoming features

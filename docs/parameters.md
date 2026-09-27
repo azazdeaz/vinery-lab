@@ -141,6 +141,8 @@ A shoot also carries the canopy, so the two leaf knobs live here rather than on 
 
 `stray` is the share of shoots the trellis failed to hold. A stray shoot leans out of the canopy, longer than the shoots beside it, and is exported as a deformable curve a physics engine bends; `flexible` off exports it as an ordinary static mesh at the same rest shape instead.
 
+`dormant` turns the whole canopy into the winter's bare canes: brown, leafless, a bud at every node, and every one exported as a curve so a pruning robot can cut it.
+
 | Parameter | Type | Default | Slider range | Description |
 |---|---|---|---|---|
 | `length` | float | `0.75` | 0.1 to 1.6 | Bud to tip, in meters — how tall a shoot stands above the spur it grew from. Whoever places one varies this a little per shoot. |
@@ -148,6 +150,7 @@ A shoot also carries the canopy, so the two leaf knobs live here rather than on 
 | `lean` | float | `0.06` | 0 to 0.25 | How far the tip wanders off vertical, in meters. |
 | `stray` | float | `0.0` | 0 to 0.2 | The fraction of shoots the trellis failed to hold: missed by shoot positioning, so grown out into the alley, or by hedging, so grown on past the top wire. A stray shoot leans out of the canopy and is exported as a deformable curve rather than a mesh, which makes this the most expensive knob in the scene. |
 | `flexible` | bool | `True` |  | Whether a stray shoot is exported as a deformable curve a solver bends. Off, it is a single static mesh at the same rest shape: the same lean out of the canopy, nothing for a solver to pick up. For a backend with no rods, or to keep a canopy's look without paying for the bodies. |
+| `dormant` | bool | `False` |  | Winter: every shoot is last season's cane after leaf fall — lignified brown, leafless, with a bud at every node — and is exported as a deformable curve a pruner can cut, whether the trellis holds it or not. `internode` is then the bud spacing, 10–15 cm on a dormant cane, and `flexible` off draws the canes as static meshes instead. |
 | `internode` | float | `0.07` | 0 to 0.25 | Distance between leaf nodes up the shoot, in meters — how many leaves it carries, said the way a viticulturist would. Zero leaves the shoot bare. |
 | `leaf_droop` | float | `0.35` | 0 to 1.2 | How far a full-grown blade pitches below horizontal, in radians. The small blades at the tip stand nearly straight out. |
 | `sides` | int | `6` | 3 to 12 | Vertices around the tube. |

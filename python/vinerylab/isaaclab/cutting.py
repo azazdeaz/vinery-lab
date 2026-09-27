@@ -99,7 +99,11 @@ class Shears:
         self._center = placed[:, 2].copy()
         # The tube each body is drawn with was built at this length.
         self._drawn = self._half.copy()
-        self._labels = list(model.body_label)
+
+        self.labels = list(model.body_label)
+        """Every body's label, by model index. A rod body's is the prim path
+        of its segment -- see `physics` -- which is how a prim under one is
+        traced back to the body that carries it."""
 
         # Every copy of the shape arrays a solver steps from: the model's, and
         # the coupled solver's entries' own. See the module docstring.
@@ -169,6 +173,12 @@ class Shears:
                 cuts += self.cut(int(self.bodies[i]), float(at[i]))
         return cuts
 
+    def pose(self, body: int) -> np.ndarray:
+        """Where body `body` is now, as its world position and (x, y, z, w)
+        rotation in one array of 7. A prim authored under the body's segment
+        follows it: its world placement is this pose applied to its own."""
+        return self._manager._state_0.body_q.numpy()[body]
+
     def _capsules(self) -> tuple[np.ndarray, np.ndarray]:
         """Each rod body's capsule axis in world coordinates, as its end nearer
         the wood and its far end. Shape is (N, 3) each."""
@@ -199,7 +209,7 @@ class Shears:
         end = self._center[i] + self._half[i]
         from pxr import UsdGeom
 
-        body = self._stage.GetPrimAtPath(self._labels[self.bodies[i]])
+        body = self._stage.GetPrimAtPath(self.labels[self.bodies[i]])
         for child in body.GetChildren() if body.IsValid() else ():
             if child.GetName() != STEM:
                 origin = UsdGeom.Xformable(child).GetLocalTransformation().ExtractTranslation()
@@ -241,7 +251,7 @@ class Shears:
 
         from pxr import Gf, UsdGeom
 
-        stem = self._stage.GetPrimAtPath(f"{self._labels[body]}/{STEM}")
+        stem = self._stage.GetPrimAtPath(f"{self.labels[body]}/{STEM}")
         if stem.IsValid():
             # The tube was built centered on the body at the capsule's first
             # length, so a scale along z and a shift redraws it at any span.

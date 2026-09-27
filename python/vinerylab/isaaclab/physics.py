@@ -226,8 +226,8 @@ def tune_shoots(
 
 
 def has_flexible_shoots(vineyard: VineyardCfg) -> bool:
-    """Whether the vineyard authors a flexible shoot: a stray one, with
-    `ShootCfg.flexible` on.
+    """Whether the vineyard authors a flexible shoot: a stray one, or every
+    cane of a dormant vineyard, with `ShootCfg.flexible` on.
 
     `stray` is a share drawn shoot by shoot, so a parcel small enough can draw
     none; the coupled solver then refuses an entry that owns no body, at
@@ -235,7 +235,8 @@ def has_flexible_shoots(vineyard: VineyardCfg) -> bool:
     """
     # ponytail: read off the cfg, as the scene itself is only generated inside
     # the app, after the physics config was built.
-    return vineyard.shoot.flexible and vineyard.shoot.stray > 0.0
+    shoot = vineyard.shoot
+    return shoot.flexible and (shoot.stray > 0.0 or shoot.dormant)
 
 
 def steps_rods(physics: PhysicsCfg | None) -> bool:

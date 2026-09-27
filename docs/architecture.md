@@ -146,6 +146,10 @@ none — so the rule is safe and mechanical. An organ with nothing hanging off i
 (a leaf) *is* the geometry prim rather than an `Xform` over one, which at six
 figures of leaves is half the prims in the scene.
 
+A dormant scene (`ShootParams::dormant`) swaps the canopy for the winter's
+bare canes: every shoot is a cable, and a `Bud_NN` geometry prim hangs at each
+node in place of the leaf, under the rod segment that carries it.
+
 ### Quantization
 
 `src/quantize.rs` is the whole of it, and knows nothing about Bevy or botany:
