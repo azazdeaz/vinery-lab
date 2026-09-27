@@ -66,9 +66,10 @@ VINEYARD_PATH = "/World/Vineyard"
 ROBOT_PATH = "/World/Robot"
 
 # The parts of the robot a cane may bend: the arm, which pushes through the
-# canes around the one it is cutting. Each costs a proxy in the solver that
-# bends them, so the chassis stays out.
-ROBOT_CONTACT = [rf"{ROBOT_PATH}/.*(shoulder_lift|elbow|wrist_[123])_link"]
+# canes around the one it is cutting, and the shear -- its head and fixed
+# blade ride on the last wrist, its moving blade on a link of its own. Each
+# costs a proxy in the solver that bends them, so the chassis stays out.
+ROBOT_CONTACT = [rf"{ROBOT_PATH}/.*(shoulder_lift|elbow|wrist_[123]|blade)_link"]
 
 # Bumblebee's own figures, to read the tally against.
 PAPER = "Bumblebee: 87% of cuts made at the right place, 213 s per vine, 68% reachable"
@@ -219,28 +220,15 @@ def run_simulator(
                     mouth = hand_pose(robot, hand[0])[:3, 3]
                     cuts = nearest_first(plan(vine, shears, np.array([*to_row, 0.0])), mouth)
                     reachable = tally.reachable
-                    pruning = Pruning(
-                        machine.chain,
-                        machine.tool,
-                        machine.mouth,
-                        cuts,
-                        base,
-                        q,
-                        shears,
-                        stage,
-                        tally,
-                    )
+                    pruning = Pruning(machine, cuts, base, q, shears, stage, tally)
                     started = step * SIM_DT
                     print(
                         f"[INFO]: {vine.prim}: {len(cuts)} cuts planned,"
                         f" {tally.reachable - reachable} reachable"
                     )
             else:
-                targets, close = pruning.control(
-                    q,
-                    hand_pose(robot, hand[0]),
-                    float(robot.data.joint_pos.torch[0, shear[0]]),
-                    machine.shear.opening,
+                targets, jaw = pruning.control(
+                    q, hand_pose(robot, hand[0]), float(robot.data.joint_pos.torch[0, shear[0]])
                 )
                 robot.set_joint_position_target_index(
                     target=torch.tensor(
@@ -249,10 +237,7 @@ def run_simulator(
                     joint_ids=arm,
                 )
                 robot.set_joint_position_target_index(
-                    target=torch.full(
-                        (1, 1), 0.0 if close else machine.shear.opening, device=robot.device
-                    ),
-                    joint_ids=shear,
+                    target=torch.full((1, 1), jaw, device=robot.device), joint_ids=shear
                 )
                 if pruning.done:
                     tally.vines += 1

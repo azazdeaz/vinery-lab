@@ -8,6 +8,7 @@ most of them: it is where the dimensions above end up.
 from __future__ import annotations
 
 import dataclasses
+import math
 import xml.etree.ElementTree as ElementTree
 
 import numpy as np
@@ -63,28 +64,65 @@ def test_the_arm_stands_on_the_rail_and_folds_over_the_deck():
     assert MACHINE.chain[0].xyz == pytest.approx(MACHINE.rail)
 
 
-def test_the_mouth_lies_between_the_blades():
-    """What `Shears.cut_through` is given: a rectangle in the hand's frame
-    spanning the mouth across and the blades along, whose centre is the
-    tool frame's origin."""
-    corner, across, up = MACHINE.mouth
-    centre = MACHINE.tool[:3, 3]
+def test_the_mouth_is_what_the_closing_blade_sweeps():
+    """The tool frame's origin, where a cane is brought to, lies in the wedge
+    between the edges: clear of the open blade's plate, and crossed by the
+    plate on its way shut. The frame's +X is the pivot, which a cane lies
+    along, and the plate's rectangle faces it."""
     shear = MACHINE.shear
+    centre = MACHINE.tool[:3, 3]
 
-    assert np.linalg.norm(across) == pytest.approx(shear.jaw)
-    assert np.linalg.norm(up) == pytest.approx(shear.blade - 0.02)
-    assert across @ up == pytest.approx(0.0)
-    assert corner + across / 2 + up / 2 == pytest.approx(centre + (0.01 - 0.01) * up, abs=0.011)
-    # And the tool frame's +X is the pivot, which a cane lies along.
+    def reached(angle: float) -> bool:
+        corner, across, up = MACHINE.blade(angle)
+        offset = centre - corner
+        a, b = offset @ across / (across @ across), offset @ up / (up @ up)
+        return 0 <= a <= 1 and 0 <= b <= 1
+
+    assert not reached(shear.opening)
+    assert any(reached(angle) for angle in np.linspace(0.0, shear.opening, 100))
+    y, z = shear.mouth
+    assert -shear.blade * math.tan(shear.opening) < y < 0 and 0 < z < shear.blade
     assert MACHINE.tool[:3, 0] == pytest.approx([1.0, 0.0, 0.0])
+    corner, across, up = MACHINE.blade(0.0)
+    normal = np.cross(across, up)
+    assert abs(normal @ MACHINE.tool[:3, 0]) == pytest.approx(np.linalg.norm(normal))
 
 
-def test_the_blades_collide_with_nothing(built):
-    """A blade that collided would push the cane it is there to cut aside."""
-    for name in ("shear_link", "blade_link"):
+def test_the_blades_collide_but_for_their_edges(built):
+    """Each plate is drawn whole, with its edge on the link's XZ plane, and
+    collides only from a bite back of it: the closing blades push a cane
+    about, and never squeeze one between them."""
+    shear = MACHINE.shear
+    assert any(
+        width == pytest.approx(shear.head)
+        for _, width in _boxes(built.find("./link[@name='shear_link']"), "collision")
+    ), "the head collides"
+    for name, side in (("shear_link", 1), ("blade_link", -1)):
         link = built.find(f"./link[@name='{name}']")
-        assert link.find("collision") is None, name
-        assert link.find("visual") is not None, name
+        plates = [box for box in _boxes(link, "visual") if box[1] == pytest.approx(shear.width)]
+        colliders = [
+            box
+            for box in _boxes(link, "collision")
+            if box[1] == pytest.approx(shear.width - shear.bite)
+        ]
+        assert len(plates) == 1 and len(colliders) == 1, name
+        (y, width), (cy, cwidth) = plates[0], colliders[0]
+        assert side * y - width / 2 == pytest.approx(0.0), "the edge is on the XZ plane"
+        assert side * cy - cwidth / 2 == pytest.approx(shear.bite), (
+            "the collider starts a bite back"
+        )
+        assert side * cy + cwidth / 2 == pytest.approx(shear.width), "and reaches the plate's back"
+
+
+def _boxes(link: ElementTree.Element, tag: str) -> list[tuple[float, float]]:
+    """Each box under `link`'s `tag` elements, as its Y centre and Y size."""
+    boxes = []
+    for element in link.findall(tag):
+        box = element.find("geometry/box")
+        if box is not None:
+            y = float(element.find("origin").get("xyz").split()[1])
+            boxes.append((y, float(box.get("size").split()[1])))
+    return boxes
 
 
 def test_every_part_has_a_positive_size(built):

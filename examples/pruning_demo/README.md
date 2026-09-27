@@ -37,22 +37,28 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
    off the stage and their live positions off the rod bodies carrying them.
 2. **The approach.** Each cut is a pose for the shear's mouth, squared up to
    the cane: the pivot along it, the blades along the approach. The arm plans
-   to a point 15 cm out, then closes in on a straight line.
+   to a point 15 cm out, then closes in on a straight line. The shear's head
+   and blades collide with the canes, so a cane the mouth comes in on is
+   funnelled between the edges or pushed aside, bending as it goes.
 3. **The order.** The cuts on a vine are taken nearest neighbour first.
-4. **The cut.** The blades collide with nothing; the shear closing is what
-   cuts, through `Shears.cut_through` over the mouth between them. A cane that
-   is not in the mouth when the blades meet is not cut, which is how a cut can
-   be missed.
+4. **The cut.** The shear closes over half a second, and the moving blade
+   cuts what it sweeps through: every control tick its plate, at the angle the
+   blade has reached, goes to `Shears.cut_through`, and a cane is cut where the
+   edge reaches it. Each plate's last centimetre before the edge -- the part
+   that is in the wood -- collides with nothing, so the closing blades push the
+   two pieces apart like a wedge rather than crushing them. A cane the blade
+   never reaches, pushed out of the mouth on the way in or never in it, is a
+   miss.
 
 The score is printed after every vine, and against the paper's at the end:
 cuts reachable, cuts made, cuts made at the right place -- the kept bud still
 on the vine and the next one gone -- and seconds per vine. Bumblebee reports
 87% of cuts made at the right place, 213 s per vine and 68% of canes reachable
 from one side. On the default scene the demo reaches all 72 cuts of its row
-and makes 92% of them at the right place, at 8 s of simulated time per vine;
-a miss is a cane the approach pushed out of the mouth. Because the simulation
-knows the true plant, the score keeps "chose the right cut" apart from "made
-the cut", which a field trial cannot.
+and makes 94% of them at the right place, at 12 s of simulated time per vine;
+a miss is a cane the shear pushed out of the mouth on the way in. Because the
+simulation knows the true plant, the score keeps "chose the right cut" apart
+from "made the cut", which a field trial cannot.
 
 ## The robot
 

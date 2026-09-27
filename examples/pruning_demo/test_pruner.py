@@ -140,8 +140,9 @@ def test_the_ground_truth_is_read_off_the_stage():
 
 
 def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch):
-    """With an arm that goes where it is told, every reachable cane is cut
-    at its planned point, and the tally says so."""
+    """With an arm that goes where it is told and a blade that turns as told,
+    every reachable cane is cut at its planned point, and the tally says
+    so."""
     bumblebee = pytest.importorskip("bumblebee", reason="Isaac Lab is not installed")
     machine = bumblebee.Bumblebee()
     # Two canes standing beside the robot, out over its rail side.
@@ -159,16 +160,13 @@ def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch):
     cuts = pruner.plan(Vine("/vine", np.zeros(3), canes), shears, np.array([0.0, 1.0, 0.0]))
     tally = Tally()
     q = np.array([0.0, *bumblebee.ARM_HOME])
-    pruning = pruner.Pruning(
-        machine.chain, machine.tool, machine.mouth, cuts, np.eye(4), q, shears, None, tally
-    )
+    pruning = pruner.Pruning(machine, cuts, np.eye(4), q, shears, None, tally)
     assert tally.reachable == 2, "both are within reach"
 
     angle, ticks = machine.shear.opening, 0
     while not pruning.done and ticks < 3000:
         hand = kinematics.frames(machine.chain, q)[-1]
-        q, close = pruning.control(q, hand, angle, machine.shear.opening)
-        angle = 0.0 if close else machine.shear.opening
+        q, angle = pruning.control(q, hand, angle)
         ticks += 1
 
     assert pruning.done and ticks < 3000
