@@ -136,6 +136,7 @@ meshes.
 /Vineyard/Planting/Row_00/Vine_047     Xform, unique
   /Wood                                 -> parts/Vine_3, instanceable
   /Collision                            Capsule, the trunk's physics proxy
+  /Cordon_0                             Capsule, one cordon's physics proxy
   /Shoot_00_0                           Xform, unique
     /Stem                               -> parts/Shoot_1, instanceable
     /Leaf_00                            -> parts/Leaf_2, instanceable

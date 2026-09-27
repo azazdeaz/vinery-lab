@@ -39,6 +39,8 @@
 //! ```text
 //! Vine_007            the planted entity, carrying its VineConfig
 //!   Wood              -> parts/Vine_<rep>, shared with every vine that drew it
+//!   Collision         a capsule standing in for the trunk
+//!   Cordon_0          a capsule standing in for each cordon
 //!   Shoot_00_0        a ShootConfig of its own, placed on a bud
 //!   Shoot_00_1        ...
 //! ```
@@ -65,7 +67,7 @@ use super::shoot;
 use crate::params::{Label, Slider};
 use crate::quantize::{Metric, farthest_first};
 use crate::scene::{
-    COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed, placed,
+    COLLISION, Geometry, Library, Order, Surface, capsule, capsule_between, configs_changed, placed,
 };
 
 use super::util::mesh::merge_meshes;
@@ -83,6 +85,10 @@ pub const PART: &str = "Vine";
 /// hanging off it and geometry prims carry no children — see
 /// [`scene`](crate::scene).
 pub const WOOD: &str = "Wood";
+
+/// The prim a cordon's collision proxy takes, one per arm: `Cordon_0` and, on
+/// a bilateral vine, `Cordon_1`. The trunk's is [`COLLISION`].
+pub const CORDON: &str = "Cordon";
 
 /// The prim a replant's single shoot takes. Not `Shoot_00_0`: there is no spur
 /// and no bud, so a name naming either would be a lie.
@@ -586,7 +592,7 @@ fn vine_shape(config: &VineConfig, seed: u64) -> VineShape {
         spurs: Vec::new(),
     };
     for arm in 0..config.arms {
-        let sign = if arm == 0 { 1.0 } else { -1.0 };
+        let sign = arm_sign(arm);
         let (strands, spurs) = cordon_shape(config, sign, &mut rng);
         shape.strands.extend(strands);
         shape.spurs.extend(spurs);
@@ -880,6 +886,31 @@ fn build_vine(config: &VineConfig, seed: u64) -> anyhow::Result<VineBuild> {
 /// straight capsule cannot follow [`VineConfig::trunk_wobble`], so proxy and
 /// wood part company by up to that much around mid-height — which is what a
 /// proxy is for.
+/// Which way along the row arm `arm` runs: the first out along `+X`, the
+/// second back along `-X`.
+fn arm_sign(arm: u32) -> f64 {
+    if arm == 0 { 1.0 } else { -1.0 }
+}
+
+/// A capsule standing in for one cordon: straight from the top of the head to
+/// the arm's tip, at the cordon's radius at the head. The arm's sway and taper
+/// and the spur knuckles all lie within that radius of the line. A replant has
+/// none.
+fn cordon_collider(config: &VineConfig, sign: f64) -> Option<impl Bundle + Copy> {
+    config.is_mature().then(|| {
+        let head = config.trunk_height;
+        capsule_between(
+            config.cordon_radius,
+            Vec3::new(0.0, 0.0, head),
+            Vec3::new(
+                sign as f32 * config.cordon_reach,
+                0.0,
+                head - (HEAD_DROP + CORDON_DROOP) as f32,
+            ),
+        )
+    })
+}
+
 fn trunk_collider(config: &VineConfig) -> Option<impl Bundle + Copy> {
     config.is_mature().then(|| {
         capsule(
@@ -954,9 +985,15 @@ pub(crate) fn build(
             plant.with_child((Name::new(WOOD), geometry.clone()));
         }
         // From the representative, like the wood beside it: a proxy built from
-        // this plant's own config would describe a trunk it did not get.
-        if let Some(collider) = trunk_collider(&book.representatives[*drew as usize]) {
+        // this plant's own config would describe wood it did not get.
+        let representative = &book.representatives[*drew as usize];
+        if let Some(collider) = trunk_collider(representative) {
             plant.with_child((Name::new(COLLISION), collider));
+        }
+        for arm in 0..representative.arms {
+            if let Some(collider) = cordon_collider(representative, arm_sign(arm)) {
+                plant.with_child((Name::new(format!("{CORDON}_{arm}")), collider));
+            }
         }
 
         let mut rng = Rng::new(scene.seed ^ SHOOT_STREAM ^ salt(order.0));
@@ -1394,6 +1431,48 @@ mod tests {
             ..config()
         };
         assert!(trunk_collider(&replant).is_none());
+    }
+
+    /// A cordon's proxy runs the arm's whole length: short of the tip and a
+    /// cut cane drops through the end of the wood, thinner than the cordon
+    /// and it floats inside it.
+    #[test]
+    fn a_cordon_collider_runs_from_the_head_to_the_tip() {
+        let mut world = World::new();
+        for config in [
+            config(),
+            config_with(|p| p.arms = 1),
+            config_with(|p| p.cordon_gap = 0.5),
+        ] {
+            for arm in 0..config.arms {
+                let sign = arm_sign(arm);
+                let proxy = cordon_collider(&config, sign).expect("a mature vine has cordons");
+                let at = world.spawn(proxy).id();
+                let at = world.entity(at);
+                let shape = at.get::<Collider>().unwrap().0;
+                let frame = at.get::<Transform>().unwrap();
+                let along = frame.rotation * Vec3::Z * (shape.height / 2.0 + shape.radius);
+                let (head, tip) = (frame.translation - along, frame.translation + along);
+
+                assert!(
+                    head.distance(Vec3::new(0.0, 0.0, config.trunk_height)) < 1e-5,
+                    "{config:?} arm {arm} starts off the head: {head}"
+                );
+                assert!(
+                    (tip.x - sign as f32 * config.cordon_reach).abs() < 1e-5
+                        && tip.y.abs() < 1e-5
+                        && tip.z < config.trunk_height,
+                    "{config:?} arm {arm} ends off the tip: {tip}"
+                );
+                assert_eq!(shape.radius, config.cordon_radius);
+            }
+        }
+
+        let replant = VineConfig {
+            established: 0.6,
+            ..config()
+        };
+        assert!(cordon_collider(&replant, 1.0).is_none());
     }
 
     // ─── The layer ──────────────────────────────────────────────────

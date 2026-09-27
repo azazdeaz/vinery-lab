@@ -49,6 +49,9 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
    two pieces apart like a wedge rather than crushing them. A cane the blade
    never reaches, pushed out of the mouth on the way in or never in it, is a
    miss.
+5. **The fall.** The piece meets its own vine -- the stub, the other canes,
+   the cordon -- and the ground, and passes through everything else: it
+   catches on the stub for a moment, tips, and slides down beside it.
 
 The score is printed after every vine, and against the paper's at the end:
 cuts reachable, cuts made, cuts made at the right place -- the kept bud still

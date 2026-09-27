@@ -24,9 +24,10 @@ capsule's new length, and whatever hangs off the shortened segment past the
 cut -- a leaf -- is hidden, since a prim cannot move to the piece that carries
 on without it.
 
-A piece that falls lands on the ground like any body (see
-`physics.SHOOT_GROUP`). VBD has no rolling friction, so a straight one on a
-slope can roll on downhill, off the edge of the terrain if nothing stops it.
+A piece that falls meets its own vine's stub, canes and wood, the trellis and
+the ground, and passes through every other vine (see `physics.VINE_GROUPS`).
+VBD has no rolling friction, so a straight one on a slope can roll on
+downhill, off the edge of the terrain if nothing stops it.
 """
 
 from __future__ import annotations

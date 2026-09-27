@@ -31,7 +31,7 @@ from isaaclab_newton.physics import (  # noqa: E402
     VBDSolverCfg,
 )
 from isaaclab_physx.physics import PhysxCfg  # noqa: E402
-from newton import GeoType, JointType  # noqa: E402
+from newton import JointType  # noqa: E402
 
 VINEYARD = "/World/Vineyard"
 ROBOT = "/World/envs/env_0/Robot"
@@ -156,6 +156,9 @@ def test_a_vineyard_with_nothing_to_bend_is_spawned_as_it_is(running):
     assert not running.tuned
 
 
+VINE_0 = f"{VINEYARD}/Planting/Row_00/{physics.VINE}_000"
+
+
 @pytest.fixture
 def builder(monkeypatch) -> object:
     """A model builder holding one rod joint between two of something else.
@@ -165,9 +168,10 @@ def builder(monkeypatch) -> object:
     instead, and nothing about that fails loudly.
 
     Bodies 0 and 1 are the rod's, carrying shapes 0 and 1; bodies 2 and 3 stand
-    for the robot, carrying shapes 2 and 3; shapes 4 and 5 are the static scene,
-    which is body -1 because a static shape has no body: the ground and a post.
-    The other two joints are there to be walked past.
+    for the robot, carrying shapes 2 and 3; shapes 4 to 7 are the static scene,
+    which is body -1 because a static shape has no body: the ground, a post,
+    the trunk of the rod's vine and the trunk of another. The other two joints
+    are there to be walked past.
     """
     builder = types.SimpleNamespace(
         joint_type=[JointType.D6, JointType.ROD, JointType.REVOLUTE],
@@ -176,9 +180,25 @@ def builder(monkeypatch) -> object:
         joint_target_kd=[0.0] * 11,
         joint_parent=[3, 0, 2],
         joint_child=[2, 1, 3],
-        body_shapes={-1: [4, 5], 0: [0], 1: [1], 2: [2], 3: [3]},
-        shape_collision_group=[1] * 6,
-        shape_type=[GeoType.CAPSULE] * 4 + [GeoType.HFIELD, GeoType.CAPSULE],
+        body_count=4,
+        body_label=[
+            f"{VINE_0}/Shoot_00_0/{physics.CABLE}_edge_body_0",
+            f"{VINE_0}/Shoot_00_0/{physics.CABLE}_edge_body_1",
+            f"{ROBOT}/base",
+            f"{ROBOT}/arm",
+        ],
+        body_shapes={-1: [4, 5, 6, 7], 0: [0], 1: [1], 2: [2], 3: [3]},
+        shape_label=[
+            f"{VINE_0}/Shoot_00_0/{physics.CABLE}_edge_capsule_0",
+            f"{VINE_0}/Shoot_00_0/{physics.CABLE}_edge_capsule_1",
+            f"{ROBOT}/base/collision",
+            f"{ROBOT}/arm/collision",
+            f"{VINEYARD}/Terrain/Geom",
+            f"{VINEYARD}/Planting/Row_00/Pole_000/Collision",
+            f"{VINE_0}/Collision",
+            f"{VINEYARD}/Planting/Row_00/{physics.VINE}_001/Collision",
+        ],
+        shape_collision_group=[1] * 8,
     )
     monkeypatch.setattr(NewtonManager, "_builder", builder, raising=False)
     # `tune_shoots` registers a callback per call, and nothing here deregisters.
@@ -218,29 +238,35 @@ def test_tune_shoots_registers_once_while_its_registration_stands(builder):
     assert physics.tune_shoots() is not first
 
 
-def test_the_rod_capsules_and_the_static_scene_but_the_ground_share_a_group(builder):
-    """The robot and the ground have to keep the default group: they are what
-    the rods are left colliding with. A walk that reached the robot's bodies --
+def test_a_vine_and_its_wood_share_a_group_and_the_rest_meets_every_rod(builder):
+    """Two vines get two groups, so their segments never pair. The ground and
+    the post are negative, so every rod lands on them. The robot's bodies are
+    negative and distinct, so they pair with each other as the default group
+    had them, and with every rod. A walk that reached the robot's bodies --
     following the wrong joints, or a rod joint's own DoF index instead of its
-    bodies -- would take it out of the rods' reach and nothing would report
-    it."""
+    bodies -- would put them in a vine's group, and nothing would report it."""
     physics.tune_shoots()
     NewtonManager.dispatch_event(PhysicsEvent.MODEL_INIT)
 
-    group = physics.SHOOT_GROUP
-    assert builder.shape_collision_group == [group, group, 1, 1, 1, group]
+    vine, other, scene = physics.VINE_GROUPS, physics.VINE_GROUPS + 1, physics.SCENE_GROUP
+    groups = builder.shape_collision_group
+    assert groups[:2] == [vine, vine]
+    assert groups[4:] == [scene, scene, vine, other]
+    assert all(group < 0 and group != scene for group in groups[2:4])
+    assert groups[2] != groups[3]
 
 
-def test_the_shoot_group_drops_rod_pairs_and_keeps_the_robot(builder):
+def test_the_groups_pair_what_they_are_meant_to():
     """Pinned against Newton's own test rather than restated, because the
     convention is a bare integer sign with nothing to make a change in it
-    fail: were negative groups to start colliding with their own, the scene
-    would still run and quietly cost N(N-1)/2 candidate pairs again."""
+    fail: were two positive groups to start meeting, the scene would still run
+    and quietly cost N(N-1)/2 candidate pairs again."""
     from newton import ModelBuilder
 
     collides = ModelBuilder()._test_group_pair
-    robot = 1  # `ModelBuilder.ShapeConfig.collision_group`'s default.
+    vine, other, scene = physics.VINE_GROUPS, physics.VINE_GROUPS + 1, physics.SCENE_GROUP
+    base, arm = -2, -3  # two of the robot's bodies
 
-    assert not collides(physics.SHOOT_GROUP, physics.SHOOT_GROUP)
-    assert collides(physics.SHOOT_GROUP, robot)
-    assert collides(robot, physics.SHOOT_GROUP)
+    assert collides(vine, vine) and not collides(vine, other)
+    assert collides(vine, scene) and collides(vine, base) and collides(base, scene)
+    assert collides(base, arm) and not collides(base, base)

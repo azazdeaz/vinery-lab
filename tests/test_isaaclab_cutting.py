@@ -29,15 +29,18 @@ GRAVITY = 9.81
 
 
 class Rig:
-    """A straight rod of four 10 cm segments along x, a meter up, its first
-    body held still the way the importer bolts a shoot to the wood. A ground,
-    if `ground` is given, that many meters up."""
+    """A straight rod of four 10 cm segments along x, a meter up -- or up z
+    from a meter, `upright` -- its first body held still the way the importer
+    bolts a shoot to the wood. A ground, if `ground` is given, that many
+    meters up. Its segments share the default group, so they collide, but for
+    each pair a joint ties."""
 
-    def __init__(self, monkeypatch, ground: float | None = None):
+    def __init__(self, monkeypatch, ground: float | None = None, upright: bool = False):
         builder = ModelBuilder(gravity=(0.0, 0.0, -GRAVITY))
         if ground is not None:
             builder.add_ground_plane(height=ground)
-        positions = [wp.vec3(SEGMENT * i, 0.0, 1.0) for i in range(5)]
+        along = wp.vec3(0.0, 0.0, 1.0) if upright else wp.vec3(1.0, 0.0, 0.0)
+        positions = [wp.vec3(0.0, 0.0, 1.0) + along * (SEGMENT * i) for i in range(5)]
         self.bodies, self.joints = builder.add_rod(
             positions,
             radius=0.01,
@@ -146,3 +149,16 @@ def test_a_cut_piece_lands_on_the_ground_and_lies_there(monkeypatch):
     start, end = rig.shears._capsules()
     assert np.concatenate([start[2:, 2], end[2:, 2]]) == pytest.approx(0.8 + 0.01, abs=2e-3)
     assert np.abs(rig.state.body_qd.numpy()[rig.bodies[2:]]).max() < 0.01
+
+
+def test_a_cut_piece_catches_on_the_rod_it_was_cut_from(monkeypatch):
+    """A piece dropping straight down its own rod passes the shortened stub
+    segment, whose pair the joint filters, and stops on the segment below it,
+    cap on cap -- the way a piece catches on its vine instead of falling
+    through it. Newton's rod-on-rod contact is what this pins."""
+    rig = Rig(monkeypatch, upright=True)
+    rig.shears.cut(rig.bodies[2], 0.5)
+    rig.step(1.0)
+
+    start, end = rig.shears._capsules()
+    assert start[3, 2] == pytest.approx(end[1, 2] + 2 * 0.01, abs=3e-3)
