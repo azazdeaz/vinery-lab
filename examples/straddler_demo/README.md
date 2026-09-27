@@ -119,7 +119,6 @@ the wheels — so there is no manufacturer's description in here to be bound by.
 | `straddler.py` | the robot: its dimensions, the URDF built from them, the actuators, the trimmer |
 | `route.py` | waypoints down every row, read off the trellis posts |
 | `driver.py` | waypoint following and swerve kinematics |
-| `newton_patches.py` | workarounds for Newton backend bugs |
 
 `DEVELOPMENT.md` in `../isaaclab_demo` covers the pinned Isaac Lab revision,
 which this example shares.

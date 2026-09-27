@@ -34,10 +34,10 @@ from vinerylab.isaaclab import (
     VineyardCfg,
     make_physics_cfg_newton,
 )
+from vinerylab.isaaclab.newton_patches import fix_heightfield_offsets
 from vinerylab.isaaclab.physics import steps_rods
 
 from driver import DECIMATION, SIM_DT, Driver
-from newton_patches import fix_heightfield_offsets
 from route import row_route
 from straddler import Straddler, Trimmer, set_finish, straddler_cfg
 

@@ -1,14 +1,22 @@
-"""Tests for the demo's workarounds for Newton backend bugs."""
+"""Tests for the workarounds for Newton backend bugs.
+
+Requires Isaac Lab; skipped entirely where it isn't installed.
+"""
 
 from __future__ import annotations
 
 import sys
 import types
 
-import numpy as np
 import pytest
 
-import newton_patches
+pytest.importorskip("isaaclab", reason="Isaac Lab is not installed")
+
+# Past the skip: `vinerylab` itself needs only usd-core, so numpy comes with
+# Isaac Lab or not at all.
+import numpy as np  # noqa: E402
+
+from vinerylab.isaaclab import newton_patches  # noqa: E402
 
 
 class FakeArray:

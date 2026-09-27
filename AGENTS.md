@@ -58,6 +58,7 @@ that need it skip themselves; run those from a demo venv — see
 | [isaaclab/vineyard.py](python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
 | [isaaclab/physics.py](python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
 | [isaaclab/cutting.py](python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
+| [isaaclab/newton_patches.py](python/vinerylab/isaaclab/newton_patches.py) | workarounds for the pinned Newton, applied by the demos; not imported by the package |
 | [_core.pyi](python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
 
 Only `vinerylab.isaaclab` imports Isaac Lab, so plain `import vinerylab` works
