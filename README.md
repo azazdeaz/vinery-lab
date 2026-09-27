@@ -90,6 +90,14 @@ The same robot with a hedger hung under it, trimming the stray shoots back to th
 uv run main.py --trim
 ```
 
+Prune a dormant vineyard with a UGV-mounted arm, Bumblebee style: every cane
+cut back to two buds, planned from the scene's own bud positions. See its
+[README](examples/pruning_demo/README.md) for more detail.
+```bash
+cd examples/pruning_demo/
+uv run main.py
+```
+
 
 ## How it works (main points)
 

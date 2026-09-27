@@ -71,6 +71,7 @@ without it.
 | [tests/](tests/) | Python tests: the params, the USD build, the Isaac Lab cfg and physics |
 | [examples/isaaclab_demo/](examples/isaaclab_demo/) | a quadruped walking the alleys; its own uv project |
 | [examples/straddler_demo/](examples/straddler_demo/) | a straddling robot driving every row, `--trim` to hedge it; its own uv project |
+| [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs; its own uv project |
 | [assets/leaves/](assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
 

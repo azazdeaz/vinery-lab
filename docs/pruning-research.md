@@ -9,9 +9,10 @@ straddler demo's `--trim` hedger, and a list of what could be built on them.
 
 | Topic | In the literature | Here |
 | --- | --- | --- |
-| Where to cut | Picked from the plant's structure: "between the Nth and N+1th bud", "above the second node", a node graph plus an offset | `Shears.cut(body, at)`: a rod segment and a fraction along it |
+| Where to cut | Picked from the plant's structure: "between the Nth and N+1th bud", "above the second node", a node graph plus an offset | A dormant vineyard carries a `Bud_NN` prim at every node; the pruning demo cuts midway between the second and the third, Bumblebee's rule |
 | Cutting a flexible stem | Not simulated. A cut is a pose check, or breaks a joint placed in advance | Any point on a rod, while the simulation runs |
 | Non-selective trimming | Hedgers cut the canopy's sides to a plane at 3–6 km/h | `Shears.cut_through`, driven by the straddler's bars at about 4 km/h |
+| A pruning robot | A UGV in the alley with an arm on a slide and a shear: stand off 15 cm, close in on a straight line, nearest cut first | `examples/pruning_demo`: the same layout from primitives, planned from the scene's ground truth, scored the paper's way |
 | What falls | Collected or left on the ground | Falls onto the terrain and lies there, a rod of its own |
 
 ## Green canopy: hedgers and trimmers
@@ -140,18 +141,15 @@ rest of the scene.
 
 ## What this suggests next
 
-- **Spur and cane pruning rules.** Walk a rod from the cordon and cut at a
-  given arc length or segment count, the way the dormant-pruning robots count
-  buds. `Shears.cut(body, at)` already takes that position.
+- **Spur selection.** The demo keeps two buds on every cane; a pruner also
+  chooses which cane of a spur to keep, the lowest one thick enough, and
+  takes the rest off at the base.
 - **A force gate.** Refuse a cut the tool cannot make, from the stem's
   diameter and a per-crop force: about 320 N at 8 mm for dormant cane, at
   most about 60 N for a tomato peduncle.
-- **Approach, then cut.** For an arm-mounted cutter, fire the cut only once
-  the jaws are within a pose tolerance of the target (5–7 cm and 30° above),
-  or once contact force passes a threshold, rather than on reaching a point.
-- **Separate metrics.** Score "chose the right cut" apart from "made the
-  cut". A real robot's accuracy folds the two together; a simulation has the
-  ground truth to split them.
+- **Perception.** The demo plans from the buds the generator authored;
+  detecting them from a camera, as Bumblebee does, is the next step, and
+  the authored buds are its ground truth.
 - **Topping and full-face hedging.** Build the trellised shoots as rods, or
   keep a pool of spare bodies to hand them to, so a bar can cut the held
   canopy too.
