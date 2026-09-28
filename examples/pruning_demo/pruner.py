@@ -14,9 +14,9 @@ the cuts on a vine are taken nearest neighbour first. Then the shear closes,
 and the moving blade cuts what it sweeps through: the cut is wherever the
 blade reaches a cane, made by `Shears` at that point, and a cane the blade
 never reaches -- pushed out of the mouth on the way in, or never in it -- is
-a miss. `Pruning` runs that sequence one vine at a time, and `Tally` keeps
-the paper's own score: cuts made, cuts made at the right place, and how long
-a vine took.
+a miss. `Stroke` is that closing and opening, a tick at a time; `Pruning`
+runs the whole sequence one vine at a time, and `Tally` keeps the paper's own
+score: cuts made, cuts made at the right place, and how long a vine took.
 """
 
 from __future__ import annotations
@@ -182,6 +182,19 @@ class Cut:
         return pose
 
 
+def squared(point: np.ndarray, tangent: np.ndarray, approach: np.ndarray) -> np.ndarray:
+    """The mouth's frame at `point`, squared up to a cane along `tangent`
+    approached along `approach`, unit vectors at right angles: the pivot
+    along the cane and the blades along the approach, so the cane lies
+    across the mouth."""
+    pose = np.eye(4)
+    pose[:3, 0] = tangent
+    pose[:3, 1] = np.cross(approach, tangent)
+    pose[:3, 2] = approach
+    pose[:3, 3] = point
+    return pose
+
+
 def plan(vine: Vine, shears: Shears, side: np.ndarray) -> list[Cut]:
     """The cuts that prune `vine` to `KEEP_BUDS` a cane, unordered.
 
@@ -201,12 +214,7 @@ def plan(vine: Vine, shears: Shears, side: np.ndarray) -> list[Cut]:
         if np.linalg.norm(approach) < 1e-3:
             continue
         approach /= np.linalg.norm(approach)
-        pose = np.eye(4)
-        pose[:3, 0] = tangent
-        pose[:3, 1] = np.cross(approach, tangent)
-        pose[:3, 2] = approach
-        pose[:3, 3] = (below + above) / 2
-        cuts.append(Cut(cane, pose, kept, removed))
+        cuts.append(Cut(cane, squared((below + above) / 2, tangent, approach), kept, removed))
     return cuts
 
 
@@ -221,6 +229,52 @@ def nearest_first(cuts: list[Cut], start: np.ndarray) -> list[Cut]:
         ordered.append(nearest)
         here = nearest.pose[:3, 3]
     return ordered
+
+
+def reached(result: tuple[np.ndarray, float, float]) -> bool:
+    """Whether a `solve` result got its pose, within `REACH_TOLERANCE`."""
+    return result[1] <= REACH_TOLERANCE[0] and result[2] <= REACH_TOLERANCE[1]
+
+
+def reach(chain, tool: np.ndarray, pose: np.ndarray, q) -> tuple[np.ndarray, bool]:
+    """Joint positions for `pose`, in the chain's base frame, from `q` or,
+    failing that, from each of `SEEDS` with the slide left where it is; and
+    whether any of them reached it. The closest try either way."""
+    best = solve(chain, tool, pose, q)
+    for seed in SEEDS:
+        if reached(best):
+            break
+        best = min(best, solve(chain, tool, pose, [q[0], *seed]), key=lambda r: r[1])
+    return best[0], reached(best)
+
+
+class Stroke:
+    """The shear's moving blade, driven a control tick at a time: shut,
+    cutting what it sweeps through, or open again."""
+
+    def __init__(self, machine: Bumblebee, shears: Shears):
+        self.machine, self.shears = machine, shears
+        self.jaw = machine.shear.opening
+        """The blade angle to hold."""
+        self.swept = 0
+        """Canes cut on the way shut; cleared once the blade is sent open."""
+
+    def tick(self, hand: np.ndarray, shear: float, closing: bool) -> bool:
+        """Turn the target a `BLADE_STEP` shut, or open. `hand` is the pose
+        of the body the shear is on in world coordinates and `shear` the
+        blade's angle: shutting, the plate at that angle cuts whatever it has
+        reached since the last tick. Returns whether the blade has got there
+        -- the two blades met, or the mouth fully open."""
+        opening = self.machine.shear.opening
+        if not closing:
+            self.jaw, self.swept = min(self.jaw + BLADE_STEP, opening), 0
+            return shear > opening - 0.05
+        self.jaw = max(self.jaw - BLADE_STEP, 0.0)
+        corner, across, up = self.machine.blade(shear)
+        self.swept += self.shears.cut_through(
+            hand[:3, 3] + hand[:3, :3] @ corner, hand[:3, :3] @ across, hand[:3, :3] @ up
+        )
+        return shear < 0.05
 
 
 @dataclasses.dataclass
@@ -266,13 +320,11 @@ class Pruning:
         stage: Usd.Stage,
         tally: Tally,
     ):
-        self.machine = machine
         self.chain, self.tool = machine.chain, machine.tool
         self.shears, self.stage, self.tally = shears, stage, tally
         self.base = base
         self.q = np.array(q, dtype=float)
-        self.jaw = machine.shear.opening
-        self.swept = 0
+        self.stroke = Stroke(machine, shears)
         self.cuts = self._reachable(cuts)
         self.tally.planned += len(cuts)
         self.tally.reachable += len(self.cuts)
@@ -290,17 +342,9 @@ class Pruning:
         ]
 
     def _solve(self, pose: np.ndarray) -> tuple[np.ndarray, bool]:
-        """Joint positions for `pose`, from where the arm is or, failing that,
-        from each of `SEEDS`, and whether any of them reached it."""
-        local = self._local(pose)
-        best = solve(self.chain, self.tool, local, self.q)
-        for seed in SEEDS:
-            if best[1] <= REACH_TOLERANCE[0] and best[2] <= REACH_TOLERANCE[1]:
-                break
-            best = min(
-                best, solve(self.chain, self.tool, local, [self.q[0], *seed]), key=lambda r: r[1]
-            )
-        return best[0], best[1] <= REACH_TOLERANCE[0] and best[2] <= REACH_TOLERANCE[1]
+        """Joint positions for the world pose `pose`, from where the arm is,
+        and whether it reaches it."""
+        return reach(self.chain, self.tool, self._local(pose), self.q)
 
     def _local(self, pose: np.ndarray) -> np.ndarray:
         """`pose` in the robot's base frame."""
@@ -328,7 +372,7 @@ class Pruning:
         to hold."""
         self.q = np.array(q, dtype=float)
         if self.cut is None:
-            return self.target, self.jaw
+            return self.target, self.stroke.jaw
         cut = self.cut
         self.ticks += 1
         if self.ticks > PATIENCE:
@@ -342,7 +386,7 @@ class Pruning:
                 self.target = self.target + np.clip(
                     self.goal - self.target, -JOINT_STEP, JOINT_STEP
                 )
-                return self.target, self.jaw
+                return self.target, self.stroke.jaw
         if self.stage_name in ("approach", "retract"):
             # The straight line, a step of the mouth at a time, solved from
             # where the arm is so each step starts from the last -- and the
@@ -352,7 +396,7 @@ class Pruning:
             distance = np.linalg.norm(gap)
             if distance < 1e-6 and np.abs(self.target - self.q).max() < ARRIVED:
                 self.stage_name = "close" if self.stage_name == "approach" else "next"
-                self.ticks, self.swept = 0, 0
+                self.ticks = 0
             else:
                 self.line = self.line + gap * min(CLOSE_IN / max(distance, 1e-9), 1.0)
                 pose = cut.pose.copy()
@@ -360,17 +404,11 @@ class Pruning:
                 self.target, _, _ = solve(
                     self.chain, self.tool, self._local(pose), self.q, iterations=50
                 )
-        opening = self.machine.shear.opening
         if self.stage_name == "close":
-            # The blade shuts a step at a time, cutting whatever its plate
-            # has reached since the last tick, where it crossed it.
-            self.jaw = max(self.jaw - BLADE_STEP, 0.0)
-            corner, across, up = self.machine.blade(shear)
-            self.swept += self.shears.cut_through(
-                hand[:3, 3] + hand[:3, :3] @ corner, hand[:3, :3] @ across, hand[:3, :3] @ up
-            )
-            if shear < 0.05:
-                made = self.swept > 0
+            # Once the blades have met, the cut is scored by the buds either
+            # side of where it was planned.
+            if self.stroke.tick(hand, shear, closing=True):
+                made = self.stroke.swept > 0
                 self.tally.made += made
                 self.tally.correct += made and (
                     attached(cut.kept, self.shears, self.stage)
@@ -378,12 +416,12 @@ class Pruning:
                 )
                 self.stage_name = "open"
         else:
-            self.jaw = min(self.jaw + BLADE_STEP, opening)
-            if self.stage_name == "open" and shear > opening - 0.05:
+            opened = self.stroke.tick(hand, shear, closing=False)
+            if self.stage_name == "open" and opened:
                 self.stage_name = "retract"
             elif self.stage_name == "next":
                 self._next()
-        return self.target, self.jaw
+        return self.target, self.stroke.jaw
 
 
 def _rotate(quat: np.ndarray, v: np.ndarray) -> np.ndarray:

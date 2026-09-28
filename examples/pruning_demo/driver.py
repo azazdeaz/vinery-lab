@@ -106,12 +106,12 @@ class Driver:
                 wanted = self.heading + np.sign(speed) * np.clip(ALIGN_GAIN * across, -0.4, 0.4)
                 error = wrap_to_pi(torch.tensor(wanted - _yaw(self.robot.data.root_quat_w.torch)))
                 yaw_rate = float(np.clip(YAW_GAIN * error.item(), -MAX_YAW_RATE, MAX_YAW_RATE))
-        self._drive(speed, yaw_rate)
+        self.drive(speed, yaw_rate)
         return parked
 
-    def _drive(self, speed: float, yaw_rate: float) -> None:
-        """Wheel speeds for a body speed and a turn rate: the outer side of a
-        turn runs faster by the track times the rate."""
+    def drive(self, speed: float, yaw_rate: float) -> None:
+        """Wheel speeds for a body speed and a turn rate, in m/s and rad/s:
+        the outer side of a turn runs faster by the track times the rate."""
         m = self.machine
         half = yaw_rate * m.track / 2
         for joints, wheel in ((self.left, speed - half), (self.right, speed + half)):
