@@ -25,6 +25,30 @@ Only the default backend, Newton coupled with VBD, bends a cane and so can cut
 one. Under any other the canes spawn static and the robot drives the row with
 nothing to do.
 
+## Teleoperation
+
+```bash
+uv run main.py --teleop
+```
+
+The planner stands down and the keyboard has the robot, with the Kit window
+focused: the left hand drives, the right hand cuts.
+
+| key | what it does |
+| --- | --- |
+| `W` / `S` | drive forward / back |
+| `A` / `D` | turn left / right |
+| `↑` / `↓` | jog the mouth forward / back along the robot |
+| `←` / `→` | jog it toward the row / away from it |
+| `Page Up` / `Page Down` | jog it up / down |
+| `Enter` | close the shear, cutting what the blade sweeps through, and open it again |
+
+The mouth is a gantry head rather than a wrist: it stays squared up to the
+row -- blades out over the rail, pivot upright, so an upright cane lies across
+it -- and its position is held in the robot's own frame, so it rides along
+when the base drives. It starts out over the rail at spur height, a stand-off
+short of the row, and a jog the arm cannot reach is refused.
+
 ## What it shows
 
 The layout is [Bumblebee's](https://arxiv.org/abs/2112.00291) (Silwal et al.,
@@ -87,6 +111,7 @@ shorter road.
 | `kinematics.py` | forward and inverse kinematics of the generated chain |
 | `pruner.py` | the ground truth off the stage, the rule, the cut sequence, the score |
 | `driver.py` | driving the skid steer from stop to stop |
+| `teleop.py` | the keyboard driving the base, jogging the mouth and working the shear |
 
 `DEVELOPMENT.md` in `../isaaclab_demo` covers the pinned Isaac Lab revision,
 which this example shares.

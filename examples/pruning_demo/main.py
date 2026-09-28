@@ -5,7 +5,8 @@ each vine, and prunes it with the arm on its slide: every cane cut back to two
 buds, each cut approached from a stand-off on a straight line and made by the
 shear closing on the cane. The robot is `bumblebee`, the driving `driver`,
 and the planning -- from the scene's own ground truth, not from a sensor --
-and the cutting `pruner`.
+and the cutting `pruner`. With `--teleop` the keyboard drives and cuts
+instead: `teleop`.
 
 The row pruned, the physics backend and the viewer are command-line choices;
 `--help` lists the full launcher set. The default backend is Newton coupled
@@ -46,6 +47,7 @@ from bumblebee import (
 )
 from driver import DECIMATION, SIM_DT, Driver
 from pruner import Pruning, Tally, Vine, nearest_first, plan, read_vines
+from teleop import Teleop
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
@@ -85,6 +87,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="The row to prune, numbered as the scene names them -- Row_000 first.",
+    )
+    parser.add_argument(
+        "--teleop",
+        action="store_true",
+        help=(
+            "Hand the robot to the keyboard instead of the planner: the left hand drives, "
+            "the right hand jogs the shear and cuts. The keys are in the README."
+        ),
     )
     parser.add_argument(
         "--physics",
@@ -191,8 +201,10 @@ def run_simulator(
     vines: list[Vine],
     to_row: np.ndarray,
     shears,
+    teleop: Teleop | None = None,
 ):
-    """Drive from vine to vine, pruning each, then stand at the end."""
+    """Drive from vine to vine, pruning each, then stand at the end -- or,
+    with a `teleop`, do as the keyboard says for as long as the run lasts."""
     stage = sim_utils.get_current_stage()
     arm, _ = robot.find_joints([SLIDE_JOINT, *ARM_JOINTS], preserve_order=True)
     shear, _ = robot.find_joints([SHEAR_JOINT])
@@ -207,7 +219,7 @@ def run_simulator(
     home = torch.tensor([[0.0, *ARM_HOME]], dtype=torch.float32, device=robot.device)
     robot.set_joint_position_target_index(target=home, joint_ids=arm)
     tally = Tally()
-    pruning: Pruning | None = None
+    pruning: Pruning | Teleop | None = teleop
     started = 0.0
     step = 0
     while sim.is_headless_or_exist_active_visualizer():
@@ -300,8 +312,12 @@ def main():
             eye=(first + [*(-4.0 * driver.forward - 2.5 * to_row), 2.5]).tolist(),
             target=(first + [0.0, 0.0, 1.0]).tolist(),
         )
+        teleop = None
+        if args_cli.teleop:
+            teleop = Teleop(machine, driver, shears)
+            teleop.listen()
         print(f"[INFO]: Setup complete, {len(vines)} vines to prune...")
-        run_simulator(sim, robot, machine, driver, vines, to_row, shears)
+        run_simulator(sim, robot, machine, driver, vines, to_row, shears, teleop)
 
 
 if __name__ == "__main__":
