@@ -2,7 +2,8 @@
 
 One `@configclass` fragment per element, mirroring the `*Params` pyclasses in
 `vinerylab._core` field for field. The fragments and `VineyardCfg`'s fields are
-generated from the Rust params structs -- see `docs/editing-parameters.md`;
+generated from the Rust params structs -- see
+`crates/misina-lab/docs/editing-parameters.md`;
 `VineyardCfg` below is hand-written, over the core's `GeneratedSceneCfg`,
 which says why the fragments are dataclasses rather than the pyclasses.
 """

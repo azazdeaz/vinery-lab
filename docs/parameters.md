@@ -1,5 +1,5 @@
 <!-- Generated from the Rust params structs by `cargo test regen_params -- --ignored`.
-     Edit the structs, not this file: docs/editing-parameters.md says how. -->
+     Edit the structs, not this file: misina-lab's docs/editing-parameters.md says how. -->
 
 # Parameters
 

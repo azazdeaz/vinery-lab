@@ -326,7 +326,7 @@ pub mod fixture {
                     PreUpdate,
                     build
                         .run_if(
-                            resource_changed::<BoxParams>.or_else(resource_changed::<SceneParams>),
+                            resource_changed::<BoxParams>.or_eager(resource_changed::<SceneParams>),
                         )
                         .in_set(Build),
                 );

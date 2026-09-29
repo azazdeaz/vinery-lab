@@ -14,8 +14,8 @@ re-exports. Only the `isaaclab` subpackages import Isaac Lab, so plain
 `import vinerylab` stays usable without it.
 
 How the binding surface is shaped — why fragments are `Py<T>`, what
-`write_usd` releases the GIL around — is in
-[architecture.md](architecture.md#python-bindings).
+`write_usd` releases the GIL around — is in the framework's
+[generators.md](../crates/misina-lab/docs/generators.md#the-python-module).
 
 ### Iterating on the wrapper itself
 
@@ -54,7 +54,7 @@ default feature set, so a plain `cargo clippy` never sees it.
 `cargo test` also fails while the Python stub, the Isaac Lab cfg classes or
 `docs/parameters.md` are stale against the Rust params structs they are
 generated from. `cargo test regen_params -- --ignored` rewrites them — see
-[editing-parameters.md](editing-parameters.md).
+[editing-parameters.md](../crates/misina-lab/docs/editing-parameters.md).
 
 Isaac Lab is not installed on the runner, so `tests/test_isaaclab_cfg.py` skips
 itself there. It runs locally, from the demo venv:
@@ -80,7 +80,7 @@ in front of a commit.
 The panel is built from the params structs: one section per fragment of
 `VineyardParams`, one control per field, with the caption, range and tooltip
 read off the field's declaration — see `crates/misina-lab/src/ui.rs` and
-[editing-parameters.md](editing-parameters.md). Sliders write a
+[editing-parameters.md](../crates/misina-lab/docs/editing-parameters.md). Sliders write a
 staged copy of the params; a value reaches the live resources once it has held
 still for 150 ms, and re-runs the layers below it. Dragging one is a single
 rebuild rather than one per frame.

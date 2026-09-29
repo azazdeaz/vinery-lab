@@ -384,7 +384,7 @@ fn docs_page<G: Generator>() -> String {
     let (name, package) = (G::NAME, G::PACKAGE);
     let mut out = format!(
         "<!-- Generated from the Rust params structs by `cargo test regen_params -- --ignored`.\n\
-         \x20    Edit the structs, not this file: docs/editing-parameters.md says how. -->\n\n\
+         \x20    Edit the structs, not this file: misina-lab's docs/editing-parameters.md says how. -->\n\n\
          # Parameters\n\n\
          Every parameter is reachable three ways under one name: as a control in the viewer\n\
          (`cargo run --release`), as an attribute of a `{package}.{name}Params` fragment,\n\

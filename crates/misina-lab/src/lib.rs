@@ -1,20 +1,4 @@
-//! `misina-lab` — what a scene generator is built from.
-//!
-//! A generator such as `vinerylab` builds its scene in Bevy as ordinary meshes
-//! and transforms and exports it as a [`SceneDoc`](scene::doc::SceneDoc), the
-//! JSON its Python package turns into a USD stage. This crate holds the parts
-//! of that which know nothing about what is being grown: the geometry kernels,
-//! the quantizer, the seeded random stream, the scene graph and its export, the
-//! viewer with its parameter panel, and the surfaces read off a params struct —
-//! the Python classes, the config snippet, the generated stub and docs.
-//!
-//! A generator is one type implementing [`Generator`]: a marker naming its
-//! params aggregate, its scene and its Python package, and the plugin that
-//! adds its element plugins. Everything here is keyed on it —
-//! [`viewer::app`], [`generate::scene`], [`ui::plugin`], [`snippet::cfg`],
-//! [`codegen::targets`], [`testing::grown`]. The aggregate itself is declared
-//! once, with [`generator!`], which writes the apply/read-back and the PyO3
-//! glue from the field list.
+#![doc = include_str!("../README.md")]
 
 pub mod codegen;
 pub mod generate;
