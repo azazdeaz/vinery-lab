@@ -15,7 +15,7 @@
 //!
 //! Every part is a [`Strand`]: a polyline of control points with a radius at
 //! each, skinned into a closed tube. So this module places control points and
-//! nothing else — [`strand`](super::util::strand) owns everything about turning
+//! nothing else — [`strand`](misina_lab::geometry::strand) owns everything about turning
 //! them into triangles. Trunk, cordon and spur differ only in where their
 //! points go.
 //!
@@ -65,16 +65,16 @@ use nalgebra::{Point3, Vector3};
 
 use super::shoot;
 use crate::params::{Label, Slider};
-use crate::quantize::{Metric, farthest_first};
 use crate::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, capsule_between, configs_changed, placed,
 };
+use misina_lab::quantize::{Metric, farthest_first};
 
-use super::util::mesh::merge_meshes;
 use super::util::parcel::ParcelParams;
-use super::util::strand::{Bark, Bulge, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
+use misina_lab::geometry::mesh::merge_meshes;
+use misina_lab::geometry::strand::{Bark, Bulge, Strand, strand_mesh};
 
 /// The mesh-library prefix this element registers its wood under.
 pub const PART: &str = "Vine";
@@ -1044,9 +1044,9 @@ fn surface(seed: u64) -> Surface {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::mesh::MeshData;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::scene::{Collider, Prototypes, UsdReference};
+    use misina_lab::geometry::mesh::MeshData;
 
     fn params() -> VineParams {
         VineParams::default()

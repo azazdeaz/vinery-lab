@@ -39,12 +39,12 @@ jobs:
 
       - run: cargo fmt --all -- --check
 
-      # `--features python` is what pulls in src/python.rs; unlike
+      # `--features vinerylab/python` is what pulls in src/python.rs; unlike
       # `extension-module` it still links libpython, so it works outside a wheel
       # build. `--all-targets` reaches the test modules and the viewer binary.
-      - run: cargo clippy --all-targets --features python -- -D warnings
+      - run: cargo clippy --workspace --all-targets --features vinerylab/python -- -D warnings
 
-      - run: cargo test
+      - run: cargo test --workspace
 
       - uses: astral-sh/setup-uv@v7
 

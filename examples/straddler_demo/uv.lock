@@ -5051,7 +5051,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "isaaclab", extras = ["isaacsim", "all"], git = "https://github.com/isaac-sim/IsaacLab.git?subdirectory=tools%2Fwheel_builder&rev=ab34e8c5e3ee7a2c5f260d1511714e5be3bed3eb" },
-    { name = "vinerylab", editable = "../../" },
+    { name = "vinerylab", editable = "../../crates/vinerylab" },
 ]
 
 [package.metadata.requires-dev]
@@ -5392,7 +5392,7 @@ wheels = [
 
 [[package]]
 name = "vinerylab"
-source = { editable = "../../" }
+source = { editable = "../../crates/vinerylab" }
 dependencies = [
     { name = "usd-core" },
 ]

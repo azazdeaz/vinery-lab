@@ -225,7 +225,7 @@ mod tests {
     use bevy::math::Vec3;
     use bevy::mesh::VertexAttributeValues;
 
-    use crate::elements::util::testing::{bounds, face_centroid, face_normal, faces};
+    use crate::testing::{bounds, face_centroid, face_normal, faces};
 
     #[test]
     fn box_mesh_is_a_well_formed_hexahedron() {

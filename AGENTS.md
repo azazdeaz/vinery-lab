@@ -15,8 +15,8 @@ repo itself.
 ```bash
 cargo run --release                                          # viewer / parameter editor
 cargo fmt --all
-cargo clippy --all-targets --features python -- -D warnings
-cargo test
+cargo clippy --workspace --all-targets --features vinerylab/python -- -D warnings
+cargo test --workspace
 uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pytest tests -q
@@ -31,35 +31,44 @@ that need it skip themselves; run those from a demo venv — see
 
 ### Rust
 
-| Path | What it is |
-| --- | --- |
-| [src/lib.rs](src/lib.rs) | crate root; the architecture in one paragraph |
-| [src/main.rs](src/main.rs) | the `vinerylab` binary; calls `viewer::run` |
-| [src/viewer.rs](src/viewer.rs) | the interactive Bevy app |
-| [src/ui.rs](src/ui.rs) | the parameter panel, built by walking the params structs |
-| [src/params.rs](src/params.rs) | what a params field declares: caption, range, choices, tooltip |
-| [src/codegen.rs](src/codegen.rs) | generates the Python stub, the Isaac Lab cfg classes and `docs/parameters.md` |
-| [src/elements/](src/elements/) | one module per vineyard thing; `mod.rs` holds the pipeline contract |
-| [src/elements/util/](src/elements/util/) | geometry kernels, palette, layout solver — everything under `elements/` that is not an element |
-| [src/scene/](src/scene/) | `doc.rs` is the JSON contract with Python, `export.rs` the walk that fills it |
-| [src/quantize.rs](src/quantize.rs) | k-center clustering: a population of configs down to `variations` meshes |
-| [src/generate.rs](src/generate.rs) | one headless build cycle, for Python and for tests |
-| [src/snippet.rs](src/snippet.rs) | the viewer's **Copy Isaac Lab cfg** output |
-| [src/stats.rs](src/stats.rs), [src/perf.rs](src/perf.rs), [src/record.rs](src/record.rs) | scene footer, per-layer timing, window capture |
-| [src/python.rs](src/python.rs) | the PyO3 wrapper, behind the `python` feature |
-
-### Python, under `python/vinerylab/`
+Two crates in one Cargo workspace: `crates/misina-lab` is the framework —
+the parts that know nothing about vines — and `crates/vinerylab` is the
+vineyard built on it.
 
 | Path | What it is |
 | --- | --- |
-| [usd/build.py](python/vinerylab/usd/build.py) | scene document to stage; where every USD rule is written down |
-| [usd/ground.py](python/vinerylab/usd/ground.py) | `Ground`: the terrain height under any (x, y), read back off a stage |
-| [isaaclab/vineyard_cfg.py](python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
-| [isaaclab/vineyard.py](python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
-| [isaaclab/physics.py](python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
-| [isaaclab/cutting.py](python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
-| [isaaclab/newton_patches.py](python/vinerylab/isaaclab/newton_patches.py) | workarounds for the pinned Newton, applied by the demos; not imported by the package |
-| [_core.pyi](python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
+| [misina-lab/src/lib.rs](crates/misina-lab/src/lib.rs) | the framework's crate root |
+| [misina-lab/src/geometry/](crates/misina-lab/src/geometry/) | the geometry kernels: `mesh`, `strand`, `outline`, `shapes`, `scatter`, and `par_map` |
+| [misina-lab/src/quantize.rs](crates/misina-lab/src/quantize.rs) | k-center clustering: a population of configs down to `variations` meshes |
+| [misina-lab/src/rng.rs](crates/misina-lab/src/rng.rs) | the seeded stream every element draws from |
+| [misina-lab/src/scene/doc.rs](crates/misina-lab/src/scene/doc.rs) | the JSON contract with Python |
+| [misina-lab/src/testing.rs](crates/misina-lab/src/testing.rs) | mesh readers for tests, in either crate |
+| [vinerylab/src/lib.rs](crates/vinerylab/src/lib.rs) | crate root; the architecture in one paragraph |
+| [vinerylab/src/main.rs](crates/vinerylab/src/main.rs) | the `vinerylab` binary; calls `viewer::run` |
+| [vinerylab/src/viewer.rs](crates/vinerylab/src/viewer.rs) | the interactive Bevy app |
+| [vinerylab/src/ui.rs](crates/vinerylab/src/ui.rs) | the parameter panel, built by walking the params structs |
+| [vinerylab/src/params.rs](crates/vinerylab/src/params.rs) | what a params field declares: caption, range, choices, tooltip |
+| [vinerylab/src/codegen.rs](crates/vinerylab/src/codegen.rs) | generates the Python stub, the Isaac Lab cfg classes and `docs/parameters.md` |
+| [vinerylab/src/elements/](crates/vinerylab/src/elements/) | one module per vineyard thing; `mod.rs` holds the pipeline contract |
+| [vinerylab/src/elements/util/](crates/vinerylab/src/elements/util/) | palette, layout solver, planting walk — everything under `elements/` that is not an element |
+| [vinerylab/src/scene/](crates/vinerylab/src/scene/) | the scene graph's export directives, and `export.rs`, the walk that fills the document |
+| [vinerylab/src/generate.rs](crates/vinerylab/src/generate.rs) | one headless build cycle, for Python and for tests |
+| [vinerylab/src/snippet.rs](crates/vinerylab/src/snippet.rs) | the viewer's **Copy Isaac Lab cfg** output |
+| [vinerylab/src/stats.rs](crates/vinerylab/src/stats.rs), [vinerylab/src/perf.rs](crates/vinerylab/src/perf.rs), [vinerylab/src/record.rs](crates/vinerylab/src/record.rs) | scene footer, per-layer timing, window capture |
+| [vinerylab/src/python.rs](crates/vinerylab/src/python.rs) | the PyO3 wrapper, behind the `python` feature |
+
+### Python, under `crates/vinerylab/python/vinerylab/`
+
+| Path | What it is |
+| --- | --- |
+| [usd/build.py](crates/vinerylab/python/vinerylab/usd/build.py) | scene document to stage; where every USD rule is written down |
+| [usd/ground.py](crates/vinerylab/python/vinerylab/usd/ground.py) | `Ground`: the terrain height under any (x, y), read back off a stage |
+| [isaaclab/vineyard_cfg.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
+| [isaaclab/vineyard.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
+| [isaaclab/physics.py](crates/vinerylab/python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
+| [isaaclab/cutting.py](crates/vinerylab/python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
+| [isaaclab/newton_patches.py](crates/vinerylab/python/vinerylab/isaaclab/newton_patches.py) | workarounds for the pinned Newton, applied by the demos; not imported by the package |
+| [_core.pyi](crates/vinerylab/python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
 
 Only `vinerylab.isaaclab` imports Isaac Lab, so plain `import vinerylab` works
 without it.
@@ -72,7 +81,7 @@ without it.
 | [examples/isaaclab_demo/](examples/isaaclab_demo/) | a quadruped walking the alleys; its own uv project |
 | [examples/straddler_demo/](examples/straddler_demo/) | a straddling robot driving every row, `--trim` to hedge it; its own uv project |
 | [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs; its own uv project |
-| [assets/leaves/](assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
+| [assets/leaves/](crates/vinerylab/assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
 
 ## Docs
@@ -90,11 +99,11 @@ without it.
   snippet, the Python class, the stub and `docs/parameters.md` all derive from
   it. [docs/editing-parameters.md](docs/editing-parameters.md) is the how-to.
 - **Generated files are not hand-edited.** `cargo test` fails while
-  `python/vinerylab/_core.pyi`, `python/vinerylab/isaaclab/vineyard_cfg.py` or
+  `_core.pyi`, `isaaclab/vineyard_cfg.py` (both under `crates/vinerylab/python/vinerylab/`) or
   `docs/parameters.md` are stale; `cargo test regen_params -- --ignored`
   rewrites them.
 - **The `python` feature is off by default**, so a plain `cargo clippy` never
-  sees `src/python.rs`. Pass `--features python`, as CI does.
+  sees `src/python.rs`. Pass `--features vinerylab/python`, as CI does.
   `extension-module` is a different feature: it unlinks libpython, so it is
   for maturin builds only and breaks `cargo run` and `cargo test`.
 - **Rust tests are inline `#[cfg(test)]` modules** beside the code they cover.

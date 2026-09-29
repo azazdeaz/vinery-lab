@@ -5,19 +5,19 @@ Everything else reads that declaration:
 
 | Surface | How it gets there |
 |---|---|
-| Viewer panel: caption, slider range, tooltip | `src/ui.rs` walks the structs through Bevy reflection |
-| **Copy Isaac Lab cfg** snippet | `src/snippet.rs`, the same walk |
-| Python constructor `PoleParams(radius=0.05)` | `src/python.rs`, keyword arguments set fields by name |
-| Type stub `python/vinerylab/_core.pyi` | generated |
-| Isaac Lab `PoleCfg` in `python/vinerylab/isaaclab/vineyard_cfg.py` | generated |
+| Viewer panel: caption, slider range, tooltip | `crates/vinerylab/src/ui.rs` walks the structs through Bevy reflection |
+| **Copy Isaac Lab cfg** snippet | `crates/vinerylab/src/snippet.rs`, the same walk |
+| Python constructor `PoleParams(radius=0.05)` | `crates/vinerylab/src/python.rs`, keyword arguments set fields by name |
+| Type stub `crates/vinerylab/python/vinerylab/_core.pyi` | generated |
+| Isaac Lab `PoleCfg` in `crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py` | generated |
 | Re-exports in both `__init__.py` files | generated |
 | Reference page [`docs/parameters.md`](parameters.md) | generated |
 
-`src/params.rs` is the walk; `src/codegen.rs` is the generator.
+`crates/vinerylab/src/params.rs` is the walk; `crates/vinerylab/src/codegen.rs` is the generator.
 
 ## Change or add a parameter
 
-1. Edit the field on its struct, in the element's file under `src/elements/`.
+1. Edit the field on its struct, in the element's file under `crates/vinerylab/src/elements/`.
    A field needs a doc comment, a slider or a choice list, and a default:
 
    ```rust
@@ -79,10 +79,10 @@ and the budget knobs, `variations` and `detail`, last.
 A new element's params struct is a fragment. Beyond the element file itself:
 
 1. Derive `Reflect` on the struct and declare its fields as above.
-2. Add it to `VineyardParams` in `src/elements/mod.rs`, and to `apply` and
+2. Add it to `VineyardParams` in `crates/vinerylab/src/elements/mod.rs`, and to `apply` and
    `from_world` below it. A test moves every field through both and fails on
    a missed line.
-3. Add the type to the `py_params!` list in `src/python.rs` and a `Py<T>`
+3. Add the type to the `py_params!` list in `crates/vinerylab/src/python.rs` and a `Py<T>`
    field to `PyVineyardParams` beside it.
 4. Regenerate, as above. The stub, the cfg class, the `FRAGMENTS` table and
    every re-export come out of the walk.

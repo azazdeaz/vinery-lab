@@ -149,7 +149,7 @@ pub fn lying(yaw: f64, pitch: f64) -> Quat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::outline::outline_mesh;
+    use crate::geometry::outline::outline_mesh;
 
     fn all() -> Vec<(&'static str, Outline)> {
         vec![

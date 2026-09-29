@@ -38,7 +38,7 @@
 //! gauge, one mesh — the exemption [`terrain`](super::terrain) takes for the
 //! same reason.
 //!
-//! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
+//! [`cylinder_mesh`]: misina_lab::geometry::mesh::cylinder_mesh
 
 use crate::params::Slider;
 use crate::scene::{Library, Surface, configs_changed};
@@ -46,8 +46,8 @@ use bevy::prelude::*;
 
 use super::Grow;
 use super::pole;
-use super::util::mesh::cylinder_mesh;
 use super::util::{color, material};
+use misina_lab::geometry::mesh::cylinder_mesh;
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Wire";

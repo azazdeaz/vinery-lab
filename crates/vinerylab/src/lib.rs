@@ -1,7 +1,7 @@
 //! `vinerylab` — procedural vineyard scenes.
 //!
 //! The scene is built in Bevy as ordinary meshes and transforms, and comes out
-//! as a [`SceneDoc`](scene::doc::SceneDoc): a plain JSON description that
+//! as a [`SceneDoc`](misina_lab::scene::doc::SceneDoc): a plain JSON description that
 //! `python/vinerylab/usd/build.py` turns into a USD stage. Usable either as an
 //! interactive viewer ([`viewer::run`]) or headlessly from Python ([`python`],
 //! behind the `python` feature).
@@ -11,7 +11,6 @@ pub mod elements;
 pub mod generate;
 pub mod params;
 pub mod perf;
-pub mod quantize;
 // Pipes frames to an `ffmpeg` child process, which the web has neither of.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod record;

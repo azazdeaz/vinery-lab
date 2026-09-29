@@ -32,6 +32,7 @@ use bevy::prelude::*;
 
 use crate::elements::terrain::{Ground, TerrainParams};
 use crate::params::Slider;
+pub use misina_lab::geometry::scatter::Band;
 
 /// How vineyard rows are laid out across the terrain.
 ///
@@ -149,48 +150,6 @@ impl Row {
             end: self.end,
             half_width,
         }
-    }
-}
-
-/// A strip of ground: a centerline in plan view and how far it reaches either
-/// side of it.
-///
-/// A row's under-vine strip is one, the alley between two rows is one, and so
-/// is a tile of sward — anything placed *within* a zone rather than *along* a
-/// line takes its frame from here. See [`scatter`](super::scatter).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Band {
-    pub start: Vec2,
-    pub end: Vec2,
-    pub half_width: f32,
-}
-
-impl Band {
-    pub fn length(&self) -> f32 {
-        self.start.distance(self.end)
-    }
-
-    /// Unit vector along the band, in plan view.
-    pub fn direction(&self) -> Vec2 {
-        (self.end - self.start).normalize_or_zero()
-    }
-
-    /// Unit vector across the band: a quarter turn counter-clockwise from
-    /// [`direction`](Self::direction).
-    pub fn across(&self) -> Vec2 {
-        self.direction().perp()
-    }
-
-    /// `p` in the band's own frame: meters along from `start`, meters across
-    /// from the centerline.
-    pub fn local(&self, p: Vec2) -> Vec2 {
-        let d = p - self.start;
-        Vec2::new(d.dot(self.direction()), d.dot(self.across()))
-    }
-
-    pub fn contains(&self, p: Vec2) -> bool {
-        let local = self.local(p);
-        (0.0..=self.length()).contains(&local.x) && local.y.abs() <= self.half_width
     }
 }
 

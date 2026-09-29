@@ -52,13 +52,13 @@ use std::f64::consts::{PI, TAU};
 use anyhow::Context;
 use bevy::prelude::*;
 
-use super::util::mesh::{MeshData, bend};
-use super::util::outline::{Outline, outline_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng};
 use crate::params::Slider;
-use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
+use misina_lab::geometry::mesh::{MeshData, bend};
+use misina_lab::geometry::outline::{Outline, outline_mesh};
+use misina_lab::quantize::{Metric, farthest_first};
 
 /// The mesh-library prefix this element registers its blades under.
 pub const PART: &str = "Leaf";
@@ -76,7 +76,7 @@ pub const PART: &str = "Leaf";
 /// fifteen kilobytes.
 ///
 /// Adding a shape is one line here. See
-/// [`outline`](super::util::outline) for the frame a file has to be drawn in.
+/// [`outline`](misina_lab::geometry::outline) for the frame a file has to be drawn in.
 pub const OUTLINES: &[&str] = &[
     include_str!("../../assets/leaves/leaf_1.svg"),
     include_str!("../../assets/leaves/leaf_2.svg"),

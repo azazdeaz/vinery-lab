@@ -14,7 +14,7 @@
 //! tube surface is then stitched directly from a ring per frame.
 //!
 //! Deliberately *not* `try_sweep`/`try_loft` + `regular_tessellate`, which is
-//! how [`terrain`](crate::elements::terrain) builds its surface. `try_loft`
+//! how `terrain` builds its surface. `try_loft`
 //! interpolates *across* the sections it is given and `regular_tessellate`
 //! then re-samples the result, so the mesh's rings would not be the rings we
 //! placed. That is fine for terrain, whose input is already a smooth field,
@@ -31,7 +31,7 @@ use curvo::prelude::*;
 use nalgebra::Point3;
 
 use super::mesh::MeshData;
-use crate::elements::Rng;
+use crate::rng::Rng;
 
 /// Degree of the fitted centerline, clamped down when a strand has too few
 /// control points to support it (a 2-point strand is a straight line).
@@ -449,7 +449,7 @@ fn push_ring(
 ///
 /// Adjacent bands **share** their ring of vertices — the tube is
 /// `stations * sides` points, indexed `station * sides + side`. Two reasons:
-/// [`author_mesh`](super::usd::author_mesh) leaves normals unauthored and
+/// `author_mesh` in the USD builder leaves normals unauthored and
 /// relies on a smooth-normal fallback, which needs shared vertices to round
 /// the tube off; and it makes the mesh genuinely closed, which is what gives
 /// the watertightness test something to check.
@@ -499,7 +499,7 @@ fn tube_faces(stations: usize, sides: usize) -> (Vec<i32>, Vec<i32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::testing::{face_centroid, face_normal, faces};
+    use crate::testing::{face_centroid, face_normal, faces};
     use bevy::math::Vec3;
     use std::collections::HashMap;
 

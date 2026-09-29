@@ -72,7 +72,7 @@ machines and papers this draws on.
 
 `Trimmer` in `straddler.py` holds the bars' reach, bottom, width and
 thickness. The cut itself is
-[`vinerylab.isaaclab.cutting`](../../python/vinerylab/isaaclab/cutting.py),
+[`vinerylab.isaaclab.cutting`](../../crates/vinerylab/python/vinerylab/isaaclab/cutting.py),
 which any script can use on a running simulation:
 
 ```python

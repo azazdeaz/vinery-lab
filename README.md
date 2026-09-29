@@ -101,7 +101,7 @@ uv run main.py
 
 ## How it works (main points)
 
- - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object,
+ - The vineyard can be composed with a [`VineyardCfg`](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) object,
  which is a standard Isaac Lab `FileCfg` config class. See the [example](examples/isaaclab_demo/main.py#L43).
  - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.

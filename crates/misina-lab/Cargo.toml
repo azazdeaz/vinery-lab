@@ -1,0 +1,17 @@
+[package]
+name = "misina-lab"
+description = "The framework under vinerylab: what a scene generator is built from."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+curvo = { workspace = true }
+nalgebra = { workspace = true }
+spade = { workspace = true }
+usvg = { workspace = true }

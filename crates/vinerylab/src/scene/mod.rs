@@ -41,8 +41,9 @@
 //! that understands one turns into bodies of its own. It replaces the mesh
 //! rather than standing in for it, so it is geometry and collider at once.
 
-pub mod doc;
 pub mod export;
+
+pub use misina_lab::scene::doc;
 
 use std::collections::BTreeMap;
 use std::f32::consts::FRAC_PI_2;

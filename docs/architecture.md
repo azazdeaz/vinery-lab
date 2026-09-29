@@ -6,14 +6,14 @@ plain JSON **scene document**, and turned into USD by Python:
 ```
 params → Bevy entities (Transform, Mesh3d, Name, UsdReference)
               ↓                              ↓
-     the viewer renders them      src/scene/export.rs → SceneDoc (JSON)
+     the viewer renders them      crates/vinerylab/src/scene/export.rs → SceneDoc (JSON)
                                              ↓
-                            python/vinerylab/usd/build.py → .usd
+                            crates/vinerylab/python/vinerylab/usd/build.py → .usd
 ```
 
 Rust owns the *scene* — what geometry exists, where it goes, what references
 what. Python owns *USD* — prim types, schemas, composition arcs, stage
-metadata. `src/scene/doc.rs` is the whole contract between them, and
+metadata. `crates/misina-lab/src/scene/doc.rs` is the whole contract between them, and
 `build.py`'s module docstring is where every USD rule is written down.
 
 There is no intermediate representation on the Rust side and no second scene
@@ -31,10 +31,10 @@ along the fruiting wire; the short pruning stubs on a cordon are **spurs**, and
 the annual growth off those is **canes** and **shoots**. A vine with one cordon
 is *unilateral*, with two *bilateral*.
 
-Each element is a single file directly under `src/elements/`:
+Each element is a single file directly under `crates/vinerylab/src/elements/`:
 
 ```rust
-// src/elements/grape.rs
+// crates/vinerylab/src/elements/grape.rs
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Grape";
@@ -76,23 +76,26 @@ and the docs page all follow from the struct — the params struct is the one
 place a parameter is declared. [editing-parameters.md](editing-parameters.md)
 is the how-to, and `cargo test` fails on whatever was missed.
 
-Everything under `src/elements/` that *isn't* an element lives in
-`src/elements/util/`: the geometry kernels (`strand` skins a polyline of radii
-into a tube, `outline` fills a shape traced in SVG, `shapes` builds outlines in
-code and folds them, `mesh` holds the type they all produce), the palette
-(`color` for hue, `material` for how a surface responds to light), the
-row-layout solver (`parcel`, which also hands out the *bands* — a row's strip,
-an alley — that ground layers place within), the scatter over a band
-(`scatter`) and the pass that walks the layout and places a config on every
-plant and post (`planting`). The dividing line is identity, not file size —
-nothing there corresponds to a thing that exists in a vineyard, so nothing
-there gets a mesh library or a line in `elements::plugin`.
+What elements are built *from* is split by what it knows. The geometry
+kernels know no botany and live in the framework, under
+`crates/misina-lab/src/geometry/`: `strand` skins a polyline of radii into a
+tube, `outline` fills a shape traced in SVG, `shapes` builds outlines in code
+and folds them, `scatter` spreads points over a *band* of ground, and `mesh`
+holds the type they all produce. What knows the vineyard but isn't an element
+lives in `crates/vinerylab/src/elements/util/`: the palette (`color` for hue,
+`material` for how a surface responds to light), the row-layout solver
+(`parcel`, which also hands out the bands — a row's strip, an alley — that
+ground layers place within) and the pass that walks the layout and places a
+config on every plant and post (`planting`). The dividing line is identity,
+not file size — nothing there corresponds to a thing that exists in a
+vineyard, so nothing there gets a mesh library or a line in
+`elements::plugin`.
 
 ### Drawn shapes
 
 Some shapes are cheaper to draw than to generate. A leaf blade is one, so
-`assets/leaves/*.svg` holds one traced outline per leaf shape and
-`util::outline` turns each into a filled mesh. A file holds one closed shape,
+`crates/vinerylab/assets/leaves/*.svg` holds one traced outline per leaf shape and
+`geometry::outline` turns each into a filled mesh. A file holds one closed shape,
 standing up the page and hanging by the point it attaches at — the bottom of
 the drawing; nothing else about it matters, since its own scale is normalized
 away and every transform in it is resolved on load. Outlines are pulled in
@@ -153,7 +156,7 @@ node in place of the leaf, under the rod segment that carries it.
 
 ### Quantization
 
-`src/quantize.rs` is the whole of it, and knows nothing about Bevy or botany:
+`crates/misina-lab/src/quantize.rs` is the whole of it, and knows nothing about Bevy or botany:
 
 ```rust
 pub trait Metric<T> { fn distance(&self, a: &T, b: &T) -> f32; }
@@ -301,7 +304,7 @@ to know.
 
 ## Export
 
-`src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
+`crates/vinerylab/src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
 `SceneDoc`. Unnamed entities and their subtrees are skipped, which is how the
 Y-up correction stays out of the file. Siblings are emitted in name order
 rather than spawn order, so a layer that rebuilt itself last does not move in

@@ -2,7 +2,7 @@
 
 What robots and machines that cut vines, branches and fruit stems do, and how
 simulators have modelled a cut. It is the background to
-[`vinerylab.isaaclab.cutting`](../python/vinerylab/isaaclab/cutting.py) and the
+[`vinerylab.isaaclab.cutting`](../crates/vinerylab/python/vinerylab/isaaclab/cutting.py) and the
 straddler demo's `--trim` hedger, and a list of what could be built on them.
 
 ## Where this leaves LeVinery

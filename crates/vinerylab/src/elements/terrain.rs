@@ -31,9 +31,9 @@ use crate::scene::doc::TRIANGLE_MESH;
 use crate::scene::{Library, PrimRoot};
 use bevy::prelude::*;
 
-use super::Grow;
-use super::util::mesh::MeshData;
 use super::util::{color, material, parcel, planting};
+use super::{Grow, Rng};
+use misina_lab::geometry::mesh::MeshData;
 
 /// The prim this element owns under the scene root.
 pub const TERRAIN: &str = "Terrain";
@@ -457,11 +457,10 @@ fn segment(axis: &[f32], v: f32) -> (usize, usize, f32) {
 /// corner's coordinates.
 fn gradient(ix: i64, iy: i64) -> (f64, f64) {
     // Odd multipliers, so the two coordinates cannot cancel each other out.
-    let mut state = SEED
+    let state = SEED
         ^ (ix as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ (iy as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
-    // Top 53 bits, the mantissa width of an f64, for a uniform unit float.
-    let unit = (super::split_mix_64(&mut state) >> 11) as f64 / (1u64 << 53) as f64;
+    let unit = Rng::new(state).unit();
     let angle = unit * std::f64::consts::TAU;
     (angle.cos(), angle.sin())
 }
@@ -469,7 +468,7 @@ fn gradient(ix: i64, iy: i64) -> (f64, f64) {
 /// Perlin gradient noise over the unit lattice, in about `-0.7..=0.7`.
 ///
 /// Written out rather than pulled from a crate, for the same reason the
-/// variation picker inlines SplitMix64 (see [`super::split_mix_64`]): the
+/// variation picker inlines SplitMix64 (see [`Rng`]): the
 /// generated stage has to be byte-identical across machines and across
 /// dependency updates, and a noise crate is free to change what it returns
 /// between versions.

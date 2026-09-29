@@ -62,7 +62,7 @@ pub const TARGETS: &[Target] = &[
         render: isaaclab_all,
     },
     Target {
-        path: "docs/parameters.md",
+        path: "../../docs/parameters.md",
         region: None,
         render: docs,
     },

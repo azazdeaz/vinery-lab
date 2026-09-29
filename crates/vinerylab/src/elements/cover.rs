@@ -36,15 +36,15 @@ use bevy::prelude::*;
 use nalgebra::Point3;
 
 use super::terrain::Ground;
-use super::util::mesh::{MeshData, merge_meshes};
 use super::util::parcel::{Band, VineyardLayout};
-use super::util::scatter::jittered_grid;
-use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map, shapes};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::params::{Choices, Label, Slider};
-use crate::quantize::{Metric, farthest_first};
 use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed};
+use misina_lab::geometry::mesh::{MeshData, merge_meshes};
+use misina_lab::geometry::scatter::jittered_grid;
+use misina_lab::geometry::strand::{Bark, Strand, strand_mesh};
+use misina_lab::quantize::{Metric, farthest_first};
 
 /// The mesh-library prefix the tiles are registered under.
 pub const PART: &str = "Sward";

@@ -98,13 +98,13 @@ use bevy::prelude::*;
 use nalgebra::Point3;
 
 use super::leaf;
-use super::util::mesh::{MeshData, cylinder_mesh};
-use super::util::strand::{Bark, Strand, strand_mesh};
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
 use crate::params::{Label, Slider};
-use crate::quantize::{Metric, farthest_first};
 use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
+use misina_lab::geometry::mesh::{MeshData, cylinder_mesh};
+use misina_lab::geometry::strand::{Bark, Strand, strand_mesh};
+use misina_lab::quantize::{Metric, farthest_first};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -1326,10 +1326,10 @@ fn bud_mesh() -> MeshData {
 mod tests {
     use super::*;
     use crate::elements::VineyardParams;
-    use crate::elements::util::mesh::MeshData;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::vine;
     use crate::scene::{Cable, Prototypes, UsdReference};
+    use misina_lab::geometry::mesh::MeshData;
 
     fn params() -> ShootParams {
         ShootParams::default()

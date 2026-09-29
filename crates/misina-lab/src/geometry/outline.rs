@@ -341,7 +341,7 @@ pub fn outline_mesh(outline: &Outline, max_triangle_area: f64) -> Result<MeshDat
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::testing::{face_normal, faces};
+    use crate::testing::{face_normal, faces};
 
     /// A square, drawn the way the outlines under `assets/` are: standing up
     /// the page and hanging by its bottom edge, in SVG's y-down space.

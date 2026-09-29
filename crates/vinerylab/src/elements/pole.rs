@@ -6,7 +6,7 @@
 //! one from, that silhouette is the whole of a post.
 //!
 //! So a pole is a plain grey cylinder — [`cylinder_mesh`], not
-//! [`strand`](super::util::strand). A post is straight by construction, and
+//! [`strand`](misina_lab::geometry::strand). A post is straight by construction, and
 //! the tube skinner exists to fit a curve through control points and rough its
 //! surface into bark, neither of which a machined post has any use for.
 //!
@@ -34,17 +34,17 @@
 //! object, identical to its neighbour except in how it was driven.
 //!
 //! [`ParcelParams::trellis_height`]: super::util::parcel::ParcelParams::trellis_height
-//! [`cylinder_mesh`]: super::util::mesh::cylinder_mesh
+//! [`cylinder_mesh`]: misina_lab::geometry::mesh::cylinder_mesh
 
 use crate::params::Slider;
-use crate::quantize::{Metric, farthest_first};
 use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 use bevy::prelude::*;
+use misina_lab::quantize::{Metric, farthest_first};
 
 use super::Grow;
-use super::util::mesh::{MeshData, cylinder_mesh};
 use super::util::parcel::ParcelParams;
 use super::util::{color, material};
+use misina_lab::geometry::mesh::{MeshData, cylinder_mesh};
 
 /// The mesh-library prefix this element registers its geometry under.
 pub const PART: &str = "Pole";
