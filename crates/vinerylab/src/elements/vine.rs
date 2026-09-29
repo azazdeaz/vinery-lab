@@ -423,8 +423,8 @@ impl Default for VineParams {
 }
 
 pub fn plugin(app: &mut App) {
-    // `ParcelParams` is deliberately not initialized here — `terrain::plugin`
-    // owns it, and `elements::plugin` adds terrain first.
+    // `ParcelParams` is deliberately not initialized here — `elements::plugin`
+    // owns it, with the layout wiring.
     //
     // `SceneParams` is not gated on here although `build` reads the seed:
     // `planting::plant` gates on it and respawns every vine when it moves, so

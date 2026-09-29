@@ -81,9 +81,12 @@ kernels know no botany and live in the framework, under
 `crates/misina-lab/src/geometry/`: `strand` skins a polyline of radii into a
 tube, `outline` fills a shape traced in SVG, `shapes` builds outlines in code
 and folds them, `scatter` spreads points over a *band* of ground, and `mesh`
-holds the type they all produce. What knows the vineyard but isn't an element
-lives in `crates/vinerylab/src/elements/util/`: the palette (`color` for hue,
-`material` for how a surface responds to light), the row-layout solver
+holds the type they all produce, and `palette` beside them turns a hex
+colour linear, jitters it per mesh and pairs it with a surface response. The
+ground is the framework's too, `crates/misina-lab/src/terrain.rs`, staged
+first by every generator. What knows the vineyard but isn't an element
+lives in `crates/vinerylab/src/elements/util/`: the named palette (`color`
+for hue, `material` for how a surface responds to light), the row-layout solver
 (`parcel`, which also hands out the bands — a row's strip, an alley — that
 ground layers place within) and the pass that walks the layout and places a
 config on every plant and post (`planting`). The dividing line is identity,

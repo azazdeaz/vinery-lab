@@ -162,8 +162,8 @@ impl Default for PoleParams {
 }
 
 pub fn plugin(app: &mut App) {
-    // `ParcelParams` is deliberately not initialized here — `terrain::plugin`
-    // owns it, and `elements::plugin` adds terrain first.
+    // `ParcelParams` is deliberately not initialized here — `elements::plugin`
+    // owns it, with the layout wiring.
     app.init_resource::<PoleParams>().add_systems(
         PreUpdate,
         build

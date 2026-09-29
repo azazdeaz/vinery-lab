@@ -1,4 +1,5 @@
-//! Terrain element — the ground surface everything else sits on.
+//! The ground: a Perlin height field the scene stands on, and the one part
+//! that is its own collider.
 //!
 //! The ground is a Perlin noise field sampled on a regular XY grid. The wave
 //! has a size in meters (`feature_size`) and the field is anchored in world
@@ -6,34 +7,26 @@
 //! of stretching one undulation across it, and the amplitude solved from
 //! `max_inclination` holds the steepness at any size. Bumps ride on top of
 //! the hills: a second band of shorter waves, `roughness` meters tall, so a
-//! wheel or a foot has something to ride over. That one grid is both
-//! the mesh handed to the exporter and the [`Ground`] resource, the
-//! height-field sampler [`parcel`](super::parcel) uses to drape row layouts
-//! onto the surface.
+//! wheel or a foot has something to ride over. That one grid is both the
+//! mesh handed to the exporter and the [`Ground`] resource, the height-field
+//! sampler everything placed on the ground drapes onto. Zero inclination and
+//! zero roughness is a flat floor.
 //!
-//! The scene root `/Vineyard` is not this element's to define —
-//! [`crate::stage::new_stage`] authors it, along with the default prim it
-//! becomes. This element only rewrites subtrees beneath it, which leaves room
-//! for sibling elements to place themselves under `/Vineyard` too.
-//!
-//! # Two subtrees
-//!
-//! Terrain also owns `/Vineyard/Planting`, through
-//! [`planting`](super::util::planting) — everything standing *on* the ground,
-//! placed against the rows [`parcel`](super::util::parcel) solves. Both
-//! helpers are wired from this element's [`plugin`] rather than given
-//! [`Grow`] slots of their own, because both need the terrain's extent and
-//! the [`Ground`] field, and chaining them here guarantees the ordering that
-//! system-ordering-across-elements would only imply.
+//! [`build`] is a plain system rather than a plugin: the generator puts it in
+//! a stage of its own, gated on [`TerrainParams`] changing, and initialises
+//! both resources, so what stands on the ground is wired after it in one
+//! place. Terrain only rewrites the subtree it owns under the scene root,
+//! which leaves room for the generator's elements to place themselves there
+//! too.
 
 use bevy::prelude::*;
-use misina_lab::params::{Label, Slider};
-use misina_lab::scene::doc::TRIANGLE_MESH;
-use misina_lab::scene::{Library, PrimRoot};
 
-use super::util::{color, material, parcel, planting};
-use super::{Grow, Rng};
-use misina_lab::geometry::mesh::MeshData;
+use crate::geometry::mesh::MeshData;
+use crate::palette::{Response, srgb};
+use crate::params::{Label, Slider};
+use crate::rng::Rng;
+use crate::scene::doc::TRIANGLE_MESH;
+use crate::scene::{Library, PrimRoot};
 
 /// The prim this element owns under the scene root.
 pub const TERRAIN: &str = "Terrain";
@@ -67,7 +60,7 @@ const MIN_FEATURE_SIZE: f64 = 0.5;
 ///
 /// It is also the ceiling on how short a bump can be: a large field hits the
 /// cap before `detail` reaches a fine spacing, and the roughness band stops
-/// where the grid does. Clod-scale texture needs a small parcel until the
+/// where the grid does. Clod-scale texture needs a small field until the
 /// collider's resolution is decoupled from the mesh's.
 const MAX_SAMPLES: usize = 256;
 
@@ -82,13 +75,24 @@ const ROUGHNESS_FALLOFF: f64 = 0.5;
 /// have -- so the band stops above it rather than aliasing below it.
 const SAMPLES_PER_BUMP: f64 = 4.0;
 
+/// Bare cultivated ground. Worked loam, dark enough that anything standing on
+/// it reads against it.
+const LOAM: u32 = 0x6B5744;
+
+/// Dry cultivated loam: the roughest and the least reflective thing in a
+/// scene, since dust has no sheen at any angle.
+pub const GROUND: Response = Response {
+    roughness: 0.95,
+    reflectance: 0.2,
+};
+
 /// Lattice shift between consecutive roughness octaves, in lattice units.
 /// [`perlin`] is exactly zero at every lattice point, and each octave's
 /// lattice contains the one above it, so unshifted octaves would all vanish
 /// together on a regular grid of flat spots.
 const OCTAVE_SHIFT: f64 = 0.37;
 
-/// The ground surface the vineyard stands on: hills the field is laid over,
+/// The ground surface the scene stands on: hills the field is laid over,
 /// with tillage bumps riding on them.
 ///
 /// `length` runs along X, the direction rows take at orientation 0, and
@@ -103,7 +107,7 @@ const OCTAVE_SHIFT: f64 = 0.37;
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct TerrainParams {
-    /// Extent along X, in meters. Rows run along it at orientation 0.
+    /// Extent along X, in meters.
     #[reflect(@Slider { min: 5.0, max: 200.0, step: 1.0 })]
     pub length: f32,
     /// Extent along Y, in meters.
@@ -141,6 +145,8 @@ pub struct TerrainParams {
     pub detail: u32,
 }
 
+crate::fragment_python!(TerrainParams);
+
 impl Default for TerrainParams {
     fn default() -> Self {
         Self {
@@ -155,57 +161,13 @@ impl Default for TerrainParams {
     }
 }
 
-pub fn plugin(app: &mut App) {
-    app.init_resource::<TerrainParams>()
-        .init_resource::<Ground>()
-        .init_resource::<parcel::ParcelParams>()
-        .init_resource::<parcel::VineyardLayout>()
-        .init_resource::<planting::PlantingParams>()
-        // `or_eager`, never `or_else`: a short-circuited condition system does
-        // not advance its `last_run`, so the change it skipped still reads as
-        // new the next frame and rebuilds the layer a second time.
-        .add_systems(
-            PreUpdate,
-            (
-                build.run_if(resource_changed::<TerrainParams>),
-                parcel::author.run_if(
-                    resource_changed::<parcel::ParcelParams>.or_eager(resource_changed::<Ground>),
-                ),
-            )
-                .chain()
-                .in_set(Grow::Terrain),
-        )
-        // Planting authors every plant's and post's config, so it re-runs
-        // whenever the layout moves or any of the params those configs are
-        // built from change. `ParcelParams` is not among them: `author` above
-        // rewrites the layout on every run, so a parcel edit reaches here as a
-        // layout change in the same frame.
-        //
-        // `SceneParams` is: `plant` draws the gaps, the replants and the post
-        // jitter off the scene seed, and it is the topmost layer that reads
-        // the seed at all — so this gate is the whole panel's seed slider.
-        // The layers below it read the seed too, and reach it through the
-        // respawn here rather than through gates of their own.
-        .add_systems(
-            PreUpdate,
-            planting::plant.in_set(Grow::Planting).run_if(
-                resource_changed::<planting::PlantingParams>
-                    .or_eager(resource_changed::<super::SceneParams>)
-                    .or_eager(resource_changed::<parcel::VineyardLayout>)
-                    .or_eager(resource_changed::<super::vine::VineParams>)
-                    .or_eager(resource_changed::<super::pole::PoleParams>)
-                    .or_eager(resource_changed::<super::wire::WireParams>),
-            ),
-        );
-}
-
 /// Builds the ground surface and publishes the height field under it.
 ///
 /// The one layer with nothing to quantize: there is a single ground, so it is
 /// its own single representative and the mesh library gets exactly one entry
-/// from here. It still goes through [`Prototypes`] rather than inlining its
+/// from here. It still goes through [`Prototypes`](crate::scene::Prototypes) rather than inlining its
 /// geometry, so that every element reaches the export by the same route.
-pub(crate) fn build(
+pub fn build(
     mut commands: Commands,
     mut library: Library,
     params: Res<TerrainParams>,
@@ -225,7 +187,7 @@ pub(crate) fn build(
         mesh_data(&field).to_mesh(),
         // Unjittered: there is one ground, so nothing for a per-mesh drift to
         // tell apart.
-        material::GROUND.surface(color::srgb(color::GROUND)),
+        GROUND.surface(srgb(LOAM)),
     );
 
     // The ground is the one part whose mesh is also what a robot stands on, so
@@ -244,7 +206,7 @@ pub(crate) fn build(
     Ok(())
 }
 
-/// Samples the noise field over the parcel's extent: the grid that is both
+/// Samples the noise field over the requested extent: the grid that is both
 /// the ground mesh and the height-field sampler.
 fn terrain_grid(params: &TerrainParams) -> Ground {
     let feature = (params.feature_size as f64).max(MIN_FEATURE_SIZE);
@@ -356,15 +318,13 @@ fn mesh_data(ground: &Ground) -> MeshData {
     }
 }
 
-/// The terrain's height field, sampled on a rectilinear XY grid.
+/// The ground's height field, sampled on a rectilinear XY grid.
 ///
 /// The same grid the ground mesh is built from, so height lookup is two
 /// binary searches and a bilinear blend, and it agrees exactly with the
-/// collision geometry at the grid points.
-///
-/// Rows are drawn in plan view and lifted onto this field afterwards, rather
-/// than following the ground as they go: see [`parcel`](super::parcel) for
-/// where that happens.
+/// collision geometry at the grid points. A consumer places in plan view and
+/// lifts the result onto the field with [`Ground::lift`], rather than
+/// following the ground as it goes.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct Ground {
     /// Strictly increasing x coordinates of the grid columns.
@@ -381,7 +341,7 @@ impl Ground {
     ///
     /// Each axis rounds its own spacing to whole spans, so this is not simply
     /// `feature_size / detail`. Resampling the field -- which is what
-    /// [`Library::heightfield`](misina_lab::scene::Library::heightfield) has a
+    /// [`Library::heightfield`](crate::scene::Library::heightfield) has a
     /// consumer do -- has to match the narrower of the two to resolve every
     /// span the mesh carries.
     pub fn finest_spacing(&self) -> f32 {
@@ -495,14 +455,15 @@ fn perlin(x: f64, y: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::util::testing::{bounds, face_normal, faces, scene_app};
-    use misina_lab::scene::doc::SceneDoc;
-    use misina_lab::scene::export::scene_doc;
+    use crate::scene::doc::SceneDoc;
+    use crate::scene::export::scene_doc;
+    use crate::testing::fixture::Boxes;
+    use crate::testing::{bounds, face_normal, faces, scene_app};
 
     /// Builds the terrain once, and hands back the app together with what the
     /// export would make of it.
     fn built(params: TerrainParams) -> (App, SceneDoc) {
-        let mut app = scene_app();
+        let mut app = scene_app::<Boxes>();
         app.insert_resource(params)
             .init_resource::<Ground>()
             .add_systems(Update, build);

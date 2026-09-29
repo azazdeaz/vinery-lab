@@ -84,7 +84,10 @@ A new element's params struct is a fragment. Beyond the element file itself:
 2. Add one line to the `misina_lab::generator!` call in
    `crates/vinerylab/src/elements/mod.rs`, `pub weed: weed::WeedParams,`.
    The macro writes the apply, the read-back and the Python classes from
-   that list; a test moves every field through the first two.
+   that list; a test moves every field through the first two. A fragment
+   the framework declares, like `terrain::TerrainParams`, carries its own
+   Python constructor and is listed `as core`, which keeps the macro
+   from writing a second one.
 3. Regenerate, as above. The stub, the cfg class, the `FRAGMENTS` table and
    every re-export come out of the walk.
 

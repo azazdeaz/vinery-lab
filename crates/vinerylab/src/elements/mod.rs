@@ -28,7 +28,6 @@ pub mod cover;
 pub mod leaf;
 pub mod pole;
 pub mod shoot;
-pub mod terrain;
 pub mod util;
 pub mod vine;
 pub mod weed;
@@ -38,6 +37,10 @@ use bevy::prelude::*;
 use misina_lab::Build;
 use misina_lab::params::{Label, Slider};
 pub use misina_lab::rng::{Rng, salt};
+/// The ground is the core's element; it stands in the pipeline as any other.
+pub use misina_lab::terrain;
+
+use util::{parcel, planting};
 
 /// Build order. Every layer's build system goes in exactly one of these, and
 /// they run chained in `PreUpdate`, inside [`Build`].
@@ -68,7 +71,12 @@ pub enum Grow {
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<SceneParams>();
+    app.init_resource::<SceneParams>()
+        .init_resource::<terrain::TerrainParams>()
+        .init_resource::<terrain::Ground>()
+        .init_resource::<parcel::ParcelParams>()
+        .init_resource::<parcel::VineyardLayout>()
+        .init_resource::<planting::PlantingParams>();
 
     app.configure_sets(
         PreUpdate,
@@ -84,8 +92,48 @@ pub fn plugin(app: &mut App) {
             .chain()
             .in_set(Build),
     )
+    // The ground, and the layout solved over it. Both need the terrain's
+    // extent and `Ground`, so they are chained here rather than ordered
+    // across elements.
+    //
+    // `or_eager`, never `or_else`: a short-circuited condition system does
+    // not advance its `last_run`, so the change it skipped still reads as
+    // new the next frame and rebuilds the layer a second time.
+    .add_systems(
+        PreUpdate,
+        (
+            terrain::build.run_if(resource_changed::<terrain::TerrainParams>),
+            parcel::author.run_if(
+                resource_changed::<parcel::ParcelParams>
+                    .or_eager(resource_changed::<terrain::Ground>),
+            ),
+        )
+            .chain()
+            .in_set(Grow::Terrain),
+    )
+    // Planting authors every plant's and post's config, so it re-runs
+    // whenever the layout moves or any of the params those configs are
+    // built from change. `ParcelParams` is not among them: `author` above
+    // rewrites the layout on every run, so a parcel edit reaches here as a
+    // layout change in the same frame.
+    //
+    // `SceneParams` is: `plant` draws the gaps, the replants and the post
+    // jitter off the scene seed, and it is the topmost layer that reads
+    // the seed at all — so this gate is the whole panel's seed slider.
+    // The layers below it read the seed too, and reach it through the
+    // respawn here rather than through gates of their own.
+    .add_systems(
+        PreUpdate,
+        planting::plant.in_set(Grow::Planting).run_if(
+            resource_changed::<planting::PlantingParams>
+                .or_eager(resource_changed::<SceneParams>)
+                .or_eager(resource_changed::<parcel::VineyardLayout>)
+                .or_eager(resource_changed::<vine::VineParams>)
+                .or_eager(resource_changed::<pole::PoleParams>)
+                .or_eager(resource_changed::<wire::WireParams>),
+        ),
+    )
     .add_plugins((
-        terrain::plugin,
         pole::plugin,
         wire::plugin,
         shoot::plugin,
@@ -143,9 +191,9 @@ misina_lab::generator! {
     /// generation, and the viewer panel's staged copy.
     pub struct VineyardParams as PyVineyardParams("VineyardParams") for crate::Vineyard {
         pub scene: SceneParams,
-        pub terrain: terrain::TerrainParams,
-        pub parcel: util::parcel::ParcelParams,
-        pub planting: util::planting::PlantingParams,
+        pub terrain: terrain::TerrainParams as core,
+        pub parcel: parcel::ParcelParams,
+        pub planting: planting::PlantingParams,
         pub pole: pole::PoleParams,
         pub wire: wire::WireParams,
         pub vine: vine::VineParams,

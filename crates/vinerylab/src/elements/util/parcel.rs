@@ -7,12 +7,10 @@
 //! [`VineyardLayout`] resource for later elements (trunk, pole, cover-crop)
 //! to place their geometry against.
 //!
-//! Wired from [`terrain`] rather than given its own [`Grow`] slot: it needs
-//! the terrain's extent to know what rectangle it's filling, and terrain
-//! already owns the [`Ground`] height field rows get draped onto, so
-//! chaining after `terrain::author` avoids relying on
-//! system-ordering-across-elements for something one element's plugin can
-//! just guarantee directly.
+//! Wired from [`elements::plugin`] rather than given its own [`Grow`] slot:
+//! it needs the terrain's extent to know what rectangle it's filling and the
+//! [`Ground`] height field rows get draped onto, so it is chained after
+//! `terrain::build` there rather than ordered across elements.
 //!
 //! Rows are solved in plan view (the XY ground plane) and lifted onto
 //! [`Ground`] only when a consumer asks for actual 3D positions —
@@ -22,8 +20,7 @@
 //! from that simplification stays under 1% below roughly a 15% grade, well
 //! past what this terrain generates.
 //!
-//! [`terrain`]: crate::elements::terrain
-//! [`terrain::plugin`]: crate::elements::terrain::plugin
+//! [`elements::plugin`]: crate::elements::plugin
 //! [`Grow`]: crate::elements::Grow
 
 use bevy::color::palettes::basic::{GRAY, YELLOW};
@@ -216,9 +213,9 @@ impl VineyardLayout {
     }
 }
 
-/// Re-solves [`VineyardLayout`] from `parcel` and `terrain`. Called from
-/// [`terrain::plugin`], chained after `terrain::author`; see the module docs
-/// for why it lives there instead of its own [`Grow`] slot.
+/// Re-solves [`VineyardLayout`] from `parcel` and `terrain`. Chained after
+/// `terrain::build` in [`elements::plugin`](crate::elements::plugin); see the
+/// module docs for why it lives there instead of its own [`Grow`] slot.
 pub fn author(
     parcel: Res<ParcelParams>,
     terrain: Res<TerrainParams>,

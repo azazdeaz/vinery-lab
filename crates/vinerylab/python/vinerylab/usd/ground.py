@@ -2,7 +2,7 @@
 
 The one thing a robot in the scene has to agree with is where the surface is:
 spawn a machine below it and the solver throws it back out. The generator
-knows -- `Ground` in `src/elements/terrain.rs` is what every element is placed
+knows -- `Ground` in `crates/misina-lab/src/terrain.rs` is what every element is placed
 against -- but that lives and dies inside one build, while what a consumer
 gets is a `.usd` file. This is the same lookup over the same grid, read back
 from the stage: `build.py` authors it, this reads it.

@@ -154,7 +154,7 @@ mod bench {
     /// rebuild reaches every layer within the frame that triggered it, so one
     /// quiet frame is the whole settle — a second frame of authoring means a
     /// run condition is firing a frame late (see the `or_eager` note in
-    /// `terrain::plugin`).
+    /// `elements::plugin`).
     fn settle(app: &mut App) {
         app.update();
         let authored = app.world().resource::<Perf>().total("author:");

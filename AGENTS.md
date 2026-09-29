@@ -48,14 +48,16 @@ per generator, which every framework surface is keyed on.
 | [misina-lab/src/snippet.rs](crates/misina-lab/src/snippet.rs) | the viewer's **Copy Isaac Lab cfg** output |
 | [misina-lab/src/python.rs](crates/misina-lab/src/python.rs) | the PyO3 glue under the macro, behind the `python` feature |
 | [misina-lab/src/stats.rs](crates/misina-lab/src/stats.rs), [misina-lab/src/perf.rs](crates/misina-lab/src/perf.rs), [misina-lab/src/record.rs](crates/misina-lab/src/record.rs) | scene footer, rebuild timing, window capture |
+| [misina-lab/src/terrain.rs](crates/misina-lab/src/terrain.rs) | the ground: `TerrainParams`, the `Ground` height field, and the one build system every generator stages first |
+| [misina-lab/src/palette.rs](crates/misina-lab/src/palette.rs) | linear colour, the per-mesh jitter, and `Response`, how a surface answers light |
 | [misina-lab/src/geometry/](crates/misina-lab/src/geometry/) | the geometry kernels: `mesh`, `strand`, `outline`, `shapes`, `scatter`, and `par_map` |
 | [misina-lab/src/quantize.rs](crates/misina-lab/src/quantize.rs) | k-center clustering: a population of configs down to `variations` meshes |
 | [misina-lab/src/rng.rs](crates/misina-lab/src/rng.rs) | the seeded stream every element draws from |
 | [misina-lab/src/testing.rs](crates/misina-lab/src/testing.rs) | reading a built scene back in tests, in either crate; its `fixture` is the smallest generator there is |
 | [vinerylab/src/lib.rs](crates/vinerylab/src/lib.rs) | crate root: the `Vineyard` generator and the `_core` Python module |
 | [vinerylab/src/main.rs](crates/vinerylab/src/main.rs) | the `vinerylab` binary: the viewer plus the layout gizmos and the per-layer timing |
-| [vinerylab/src/elements/](crates/vinerylab/src/elements/) | one module per vineyard thing; `mod.rs` holds the pipeline contract and the `generator!` call |
-| [vinerylab/src/elements/util/](crates/vinerylab/src/elements/util/) | palette, layout solver, planting walk — everything under `elements/` that is not an element |
+| [vinerylab/src/elements/](crates/vinerylab/src/elements/) | one module per vineyard thing; `mod.rs` holds the pipeline contract, the ground and layout wiring, and the `generator!` call |
+| [vinerylab/src/elements/util/](crates/vinerylab/src/elements/util/) | the named colours and responses, layout solver, planting walk — everything under `elements/` that is not an element |
 | [vinerylab/src/perf.rs](crates/vinerylab/src/perf.rs) | the per-layer marks and the bench |
 
 ### Python, under `crates/vinerylab/python/vinerylab/`

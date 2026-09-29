@@ -19,6 +19,7 @@
 pub mod codegen;
 pub mod generate;
 pub mod geometry;
+pub mod palette;
 pub mod params;
 pub mod perf;
 #[cfg(feature = "python")]
@@ -31,6 +32,7 @@ pub mod rng;
 pub mod scene;
 pub mod snippet;
 pub mod stats;
+pub mod terrain;
 pub mod testing;
 pub mod ui;
 pub mod viewer;

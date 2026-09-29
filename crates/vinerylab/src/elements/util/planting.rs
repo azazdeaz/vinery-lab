@@ -5,11 +5,11 @@
 //! and spawns one entity per vine, per post, and per span of wire strung
 //! between two posts, each carrying that organ's config.
 //!
-//! Terrain's placement helper, exactly as [`parcel`] is its layout helper: it
-//! owns no element identity of its own and is wired from [`terrain::plugin`]
-//! rather than [`elements::plugin`]. What it does own is the `Planting`
-//! subtree — so `terrain` is an element with two subtrees, its surface and
-//! everything planted on it.
+//! The ground's placement helper, exactly as [`parcel`] is its layout helper:
+//! it owns no element identity of its own and is wired straight from
+//! [`elements::plugin`], gated on every params its configs are built from.
+//! What it does own is the `Planting` subtree — everything planted on the
+//! ground.
 //!
 //! # Context becomes config here
 //!
@@ -35,7 +35,6 @@
 //! repoint a config keyed on a path at a different plant.
 //!
 //! [`parcel`]: super::parcel
-//! [`terrain::plugin`]: crate::elements::terrain::plugin
 //! [`elements::plugin`]: crate::elements::plugin
 
 use bevy::prelude::*;

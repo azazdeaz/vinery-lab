@@ -64,7 +64,7 @@ pub enum Widget {
 ///     /// A plain snapshot of every element's params.
 ///     pub struct VineyardParams as PyVineyardParams("VineyardParams") for crate::Vineyard {
 ///         pub scene: SceneParams,
-///         pub terrain: terrain::TerrainParams,
+///         pub terrain: misina_lab::terrain::TerrainParams as core,
 ///         #[reflect(@Label("Weeds"))]
 ///         pub weed: weed::WeedParams,
 ///     }
@@ -76,10 +76,16 @@ pub enum Widget {
 /// feature — the `#[pyclass]` aggregate Python sees under the quoted name,
 /// holding one `Py<T>` per fragment with a keyword-only constructor,
 /// `__repr__`, `generate_scene_json` and `write_usd`; a keyword constructor
-/// and `__repr__` for every fragment; and `fn module(m)`, which registers all
-/// of them and `__version__` on the extension module. Every fragment is a
-/// `Resource` deriving `Reflect, Clone, Debug, Default, PartialEq`, with the
-/// `pyclass` attribute `docs/editing-parameters.md` shows.
+/// and `__repr__` for every fragment ([`fragment_python!`](crate::fragment_python)); and
+/// `fn module(m)`, which registers all of them and `__version__` on the
+/// extension module. Every fragment is a `Resource` deriving
+/// `Reflect, Clone, Debug, Default, PartialEq`, with the `pyclass` attribute
+/// `docs/editing-parameters.md` shows.
+///
+/// A fragment this crate declares — [`terrain::TerrainParams`](crate::terrain::TerrainParams)
+/// — already carries its constructor, and PyO3 accepts a `#[pymethods]` block
+/// only in the crate that declared the type; `as core` after the field's
+/// type tells the macro not to emit a second one.
 ///
 /// Fragments are held as `Py<T>` rather than by value so attribute access
 /// hands back the *same* Python object every time. With plain fields PyO3's
@@ -92,7 +98,7 @@ macro_rules! generator {
         $vis:vis struct $name:ident as $py:ident($py_name:literal) for $generator:ty {
             $(
                 $(#[$field_meta:meta])*
-                $field_vis:vis $field:ident : $ty:ty
+                $field_vis:vis $field:ident : $ty:ty $(as $origin:ident)?
             ),* $(,)?
         }
     ) => {
@@ -166,23 +172,7 @@ macro_rules! generator {
             }
         }
 
-        $(
-            #[cfg(feature = "python")]
-            #[::pyo3::pymethods]
-            impl $ty {
-                #[new]
-                #[pyo3(signature = (**kwargs))]
-                fn py_new(
-                    kwargs: Option<&::pyo3::Bound<'_, ::pyo3::types::PyDict>>,
-                ) -> ::pyo3::PyResult<Self> {
-                    $crate::python::from_kwargs(kwargs)
-                }
-
-                fn __repr__(&self) -> String {
-                    format!("{self:?}")
-                }
-            }
-        )*
+        $( $crate::fragment_python!($ty $(, $origin)?); )*
 
         /// Registers the aggregate, every fragment and `__version__` on the
         /// extension module.
@@ -201,6 +191,34 @@ macro_rules! generator {
             Ok(())
         }
     };
+}
+
+/// What Python sees of one fragment, under the calling crate's `python`
+/// feature: a keyword constructor (`PoleParams(height=2.0)`) and `__repr__`.
+///
+/// [`generator!`](crate::generator) emits it for every field of the aggregate;
+/// a fragment declared in this crate emits its own, and its field carries
+/// `as core`, which matches the second arm here and emits nothing.
+#[macro_export]
+macro_rules! fragment_python {
+    ($ty:ty) => {
+        #[cfg(feature = "python")]
+        #[::pyo3::pymethods]
+        impl $ty {
+            #[new]
+            #[pyo3(signature = (**kwargs))]
+            fn py_new(
+                kwargs: Option<&::pyo3::Bound<'_, ::pyo3::types::PyDict>>,
+            ) -> ::pyo3::PyResult<Self> {
+                $crate::python::from_kwargs(kwargs)
+            }
+
+            fn __repr__(&self) -> String {
+                format!("{self:?}")
+            }
+        }
+    };
+    ($ty:ty, core) => {};
 }
 
 /// One fragment of [`Params::apply`]: inserts the resource if the world has

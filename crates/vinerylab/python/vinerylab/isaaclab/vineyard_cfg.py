@@ -42,7 +42,7 @@ class SceneCfg:
 
 @configclass
 class TerrainCfg:
-    """The ground surface the vineyard stands on: hills the field is laid over, with
+    """The ground surface the scene stands on: hills the field is laid over, with
     tillage bumps riding on them.
 
     `length` runs along X, the direction rows take at orientation 0, and `width`
@@ -54,7 +54,7 @@ class TerrainCfg:
     """
 
     length: float = 80.0
-    """Extent along X, in meters. Rows run along it at orientation 0."""
+    """Extent along X, in meters."""
     width: float = 50.0
     """Extent along Y, in meters."""
     max_inclination: float = 20.0
