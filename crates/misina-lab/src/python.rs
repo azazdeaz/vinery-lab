@@ -116,7 +116,7 @@ pub fn scene_json<G: Generator>(py: Python<'_>, params: &G::Params) -> PyResult<
 pub fn write_usd<G: Generator>(py: Python<'_>, params: &G::Params, path: &str) -> PyResult<()> {
     let document = scene_json::<G>(py, params)?;
     let doc = py.import("json")?.call_method1("loads", (document,))?;
-    py.import(format!("{}.usd", G::PACKAGE))?
+    py.import("misina_lab.usd")?
         .call_method1("build_usd", (doc, path))?;
     Ok(())
 }

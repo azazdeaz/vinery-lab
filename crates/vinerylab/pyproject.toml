@@ -10,8 +10,11 @@ license = "MIT OR Apache-2.0"
 authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
 dynamic = ["version"]
 # The generator builds the scene in Bevy and hands it over as JSON; the USD
-# stage itself is authored here, in `vinerylab.usd`.
-dependencies = ["usd-core>=24.11"]
+# stage is authored by `misina_lab.usd`, which brings `usd-core` with it.
+dependencies = ["misina-lab"]
+
+[tool.uv.sources]
+misina-lab = { workspace = true }
 
 [tool.maturin]
 features = ["extension-module"]

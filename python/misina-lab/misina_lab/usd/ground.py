@@ -7,9 +7,9 @@ against -- but that lives and dies inside one build, while what a consumer
 gets is a `.usd` file. This is the same lookup over the same grid, read back
 from the stage: `build.py` authors it, this reads it.
 
-It is deliberately a plain Python class over plain lists. `vinerylab` depends
-on `usd-core` and nothing else, and a height query is not worth an array
-library.
+It is deliberately a plain Python class over plain lists. `misina_lab`
+depends on `usd-core` and nothing else, and a height query is not worth an
+array library.
 """
 
 from __future__ import annotations

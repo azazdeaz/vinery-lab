@@ -76,7 +76,7 @@ pub fn app<G: Generator>() -> App {
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(
         Update,
-        save_scene_on_key::<G>.run_if(input_just_pressed(KeyCode::KeyS)),
+        save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
     );
 
     // Off by default: it logs a line per re-authored frame, which during a
@@ -165,12 +165,9 @@ fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) 
 /// Exports the entities on screen: the viewer and the export draw from one
 /// scene graph, so there is no preview shape and export shape to keep in step.
 #[cfg(not(target_arch = "wasm32"))]
-fn save_scene_on_key<G: Generator>(world: &mut World) -> Result<()> {
+fn save_scene_on_key(world: &mut World) -> Result<()> {
     std::fs::write(SCENE_PATH, crate::scene::export::scene_json(world)?)?;
-    info!(
-        "saved {SCENE_PATH} — build it with `python -m {}.usd {SCENE_PATH} scene.usd`",
-        G::PACKAGE
-    );
+    info!("saved {SCENE_PATH} — build it with `python -m misina_lab.usd {SCENE_PATH} scene.usd`");
     Ok(())
 }
 

@@ -1,9 +1,10 @@
-"""Building a USD stage from a vinerylab scene document.
+"""Building a USD stage from a scene document.
 
 This module is where *all* of the project's USD knowledge lives. The Rust
 generator owns the scene -- what geometry exists, where it goes, what
 references what -- and hands it over as the plain JSON document described in
-`src/scene/doc.rs`. Everything below is USD's side of that line: prim types,
+`crates/misina-lab/src/scene/doc.rs`. Everything below is USD's side of that
+line: prim types,
 schemas, composition arcs and stage metadata.
 
 Every rule below fails *silently* if dropped.
@@ -18,7 +19,8 @@ Stage metadata
     and this module authors what it is told.
 
 The parts library lives *inside* the default prim
-    ``/Vineyard/parts``, not ``/parts``. Everything the scene is made of hangs
+    ``/<Root>/parts``, not ``/parts``, for the root the document names.
+    Everything the scene is made of hangs
     off one prim, so a consumer referencing the layer gets a complete asset.
     It also keeps the door open for relationships: relationship targets --
     material bindings, physics joint bodies, a ``PointInstancer``'s
@@ -96,7 +98,7 @@ A referencing prim is defined *typeless*
     side.
 
 Colliders are authored where physics can reach them
-    Nothing here is a rigid body -- a vineyard stands still -- so a collider is
+    Nothing here is a rigid body -- a generated scene stands still -- so a collider is
     a static one, which is what lets the ground collide as an exact triangle
     mesh (``physics:approximation = "none"``, illegal on a dynamic collider).
 
@@ -160,13 +162,12 @@ from typing import Any
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade, Vt
 
 FORMAT = 6
-"""Document version this builder understands. See `src/scene/doc.rs`."""
+"""Document version this builder understands. See `crates/misina-lab/src/scene/doc.rs`."""
 
-ROOT = "/Vineyard"
-"""The scene root, and the stage's default prim."""
-
-PARTS = f"{ROOT}/parts"
-"""Root of the mesh library. Referenced by every geometry prim."""
+PARTS = "parts"
+"""Name of the mesh library, a child of the scene root. Referenced by every
+geometry prim. The root itself is named by the document: `/Vineyard` for a
+vineyard, and the stage's default prim."""
 
 GEOM = "Geom"
 """Name of the `Mesh` inside a part. See the module docstring for why a part
@@ -274,13 +275,16 @@ def build_stage(doc: Mapping[str, Any], path: str) -> Usd.Stage:
     if format_version != FORMAT:
         raise ValueError(f"scene document is format {format_version}, this builder speaks {FORMAT}")
 
+    root = f"/{doc['root']['name']}"
+    library = f"{root}/{PARTS}"
+
     stage = Usd.Stage.CreateNew(path)
     _author_stage_metadata(stage, doc)
-    _author_parts(stage, doc.get("parts", ()))
+    _author_parts(stage, library, doc.get("parts", ()))
 
     with Sdf.ChangeBlock():
-        _author_node(stage.GetRootLayer(), ROOT, doc["root"])
-    stage.SetDefaultPrim(stage.GetPrimAtPath(ROOT))
+        _author_node(stage.GetRootLayer(), library, root, doc["root"])
+    stage.SetDefaultPrim(stage.GetPrimAtPath(root))
     return stage
 
 
@@ -298,21 +302,21 @@ def _author_stage_metadata(stage: Usd.Stage, doc: Mapping[str, Any]) -> None:
 # --- the parts library ----------------------------------------------
 
 
-def _author_parts(stage: Usd.Stage, parts: Iterable[Mapping[str, Any]]) -> None:
-    library = stage.CreateClassPrim(PARTS)
-    library.SetTypeName("Scope")
+def _author_parts(stage: Usd.Stage, library: str, parts: Iterable[Mapping[str, Any]]) -> None:
+    scope = stage.CreateClassPrim(library)
+    scope.SetTypeName("Scope")
     for part in parts:
-        _author_part(stage, part)
+        _author_part(stage, library, part)
 
 
-def _author_part(stage: Usd.Stage, part: Mapping[str, Any]) -> UsdGeom.Mesh:
+def _author_part(stage: Usd.Stage, library: str, part: Mapping[str, Any]) -> UsdGeom.Mesh:
     points = [tuple(p) for p in part["points"]]
     indices = list(part["indices"])
 
     # An Xform wrapping the mesh, so that referencing it and marking the
     # reference instanceable puts the geometry in the prototype rather than
     # leaving a copy on every instance. See the module docstring.
-    root = f"{PARTS}/{part['name']}"
+    root = f"{library}/{part['name']}"
     UsdGeom.Xform.Define(stage, root)
     mesh = UsdGeom.Mesh.Define(stage, f"{root}/{GEOM}")
     mesh.CreatePointsAttr(Vt.Vec3fArray(points))
@@ -434,7 +438,7 @@ def _mdl_shader(
                 ("diffuse_color_constant", Sdf.ValueTypeNames.Color3f, color),
                 ("reflection_roughness_constant", Sdf.ValueTypeNames.Float, roughness),
                 ("specular_level", Sdf.ValueTypeNames.Float, reflectance),
-                # Nothing in a vineyard is a conductor, and OmniPBR's default
+                # Nothing in a generated scene is a conductor, and OmniPBR's default
                 # is already 0 -- authored so the value is on the prim rather
                 # than in the reader's memory of the MDL.
                 ("metallic_constant", Sdf.ValueTypeNames.Float, 0.0),
@@ -466,7 +470,7 @@ def _mdl_shader(
 # --- the prim tree --------------------------------------------------
 
 
-def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
+def _author_node(layer: Sdf.Layer, library: str, path: str, node: Mapping[str, Any]) -> None:
     spec = Sdf.CreatePrimInLayer(layer, path)
     # `CreatePrimInLayer` leaves an `over`, and authors ancestors as overs too
     # -- harmless here, since a node is always authored before its children.
@@ -476,7 +480,7 @@ def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
     if reference is not None:
         # Typeless: the referenced Mesh supplies the type, and a local opinion
         # would win over it. See the module docstring.
-        spec.referenceList.prependedItems = [Sdf.Reference(primPath=_part_path(reference))]
+        spec.referenceList.prependedItems = [Sdf.Reference(primPath=_part_path(library, reference))]
         if node.get("instanceable"):
             spec.instanceable = True
     else:
@@ -494,18 +498,18 @@ def _author_node(layer: Sdf.Layer, path: str, node: Mapping[str, Any]) -> None:
         _author_cable(spec, cable)
 
     for child in node.get("children", ()):
-        _author_node(layer, f"{path}/{child['name']}", child)
+        _author_node(layer, library, f"{path}/{child['name']}", child)
 
 
 @functools.cache
-def _part_path(name: str) -> Sdf.Path:
+def _part_path(library: str, name: str) -> Sdf.Path:
     """The library path a part of this name lives at.
 
     Cached because every one of the scene's prims references one of a handful
     of parts, and parsing the same path back out of a string each time is a
     measurable slice of authoring a large scene.
     """
-    return Sdf.Path(f"{PARTS}/{name}")
+    return Sdf.Path(f"{library}/{name}")
 
 
 def _author_xform(spec: Sdf.PrimSpec, xform: Mapping[str, Any]) -> None:
@@ -572,7 +576,7 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     the same way it keeps a collision capsule out of one. A ``BasisCurves``
     whose points move every frame renders with a visible glitch under Kit's RTX
     delegate, so a flexible organ is drawn by a mesh on each of the rod segments
-    the importer drives instead -- see `src/elements/shoot.rs`.
+    the importer drives instead -- see vinerylab's `shoot.rs`.
 
     ``widths`` and ``displayColor`` are authored anyway, so the curve reads as
     the organ it stands for when guides are turned on. Nothing in the import

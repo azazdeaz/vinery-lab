@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 try:
-    from vinerylab.isaaclab import cutting
+    from misina_lab.isaaclab import cutting
 except ImportError:
     pytest.skip("Isaac Lab is not installed", allow_module_level=True)
 

@@ -1,7 +1,8 @@
 """Cutting a rod anywhere along it while the simulation runs.
 
-A flexible shoot is a rod: a chain of capsule bodies, one per segment, joined
-by rod joints (see `physics`). A cut at a joint is one switch -- turn the joint
+A flexible organ -- a vineyard's shoot -- is a rod: a chain of capsule bodies,
+one per segment, joined by rod joints (see `rods`). A cut at a joint is one
+switch -- turn the joint
 off -- and everything past it falls away as a chain of its own. A cut anywhere
 else moves the joint to the cut first: the capsule the cut lands on is
 shortened to end there, the next one down the chain is stretched back to start
@@ -19,13 +20,13 @@ The body and joint copies are refreshed from the model by a model-change
 notification. The shape copies are written directly: the shape refresh clones
 the contact-pair list anew, and the graph would go on reading the old one.
 
-The rendered shoot follows. The tube drawn along a segment is rescaled to its
+The rendered organ follows. The tube drawn along a segment is rescaled to its
 capsule's new length, and whatever hangs off the shortened segment past the
 cut -- a leaf -- is hidden, since a prim cannot move to the piece that carries
 on without it.
 
-A piece that falls meets its own vine's stub, canes and wood, the trellis and
-the ground, and passes through every other vine (see `physics.VINE_GROUPS`).
+A piece that falls meets its own plant's stub, rods and wood, the trellis and
+the ground, and passes through every other plant (see `rods.PLANT_GROUPS`).
 VBD has no rolling friction, so a straight one on a slope can roll on
 downhill, off the edge of the terrain if nothing stops it.
 """
@@ -46,7 +47,8 @@ shortened to nothing has no mass left, and the solver divides by it.
 STEM = "Stem"
 """The prim each rod segment's tube is drawn as, below the segment's own.
 
-The generator picks it -- `STEM` in `src/elements/shoot.rs`."""
+The generator picks it -- vinerylab's `STEM` in `shoot.rs` -- and `Shears`
+takes another name for a generator that drew its tubes differently."""
 
 
 class Shears:
@@ -60,10 +62,11 @@ class Shears:
     one here is measured the same way: 0 at the end nearer the wood.
     """
 
-    def __init__(self, stage=None):
+    def __init__(self, stage=None, stem: str = STEM):
+        self._stem = stem
         # Imported here and not at module scope: `newton` brings `pxr` with it,
         # and Kit's own `pxr` wins the import only if nothing loaded the pip one
-        # first. See `physics.tune_shoots`.
+        # first. See `rods.tune_rods`.
         import isaaclab.sim as sim_utils
         from isaaclab_newton.physics import NewtonManager
         from newton import JointType
@@ -212,7 +215,7 @@ class Shears:
 
         body = self._stage.GetPrimAtPath(self.labels[self.bodies[i]])
         for child in body.GetChildren() if body.IsValid() else ():
-            if child.GetName() != STEM:
+            if child.GetName() != self._stem:
                 origin = UsdGeom.Xformable(child).GetLocalTransformation().ExtractTranslation()
                 if origin[2] > end:
                     UsdGeom.Imageable(child).MakeInvisible()
@@ -252,7 +255,7 @@ class Shears:
 
         from pxr import Gf, UsdGeom
 
-        stem = self._stage.GetPrimAtPath(f"{self.labels[body]}/{STEM}")
+        stem = self._stage.GetPrimAtPath(f"{self.labels[body]}/{self._stem}")
         if stem.IsValid():
             # The tube was built centered on the body at the capsule's first
             # length, so a scale along z and a shift redraws it at any span.

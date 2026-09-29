@@ -2,7 +2,7 @@
 //!
 //! The scene is built in Bevy as ordinary meshes and transforms, and comes out
 //! as a [`SceneDoc`](misina_lab::scene::doc::SceneDoc): a plain JSON
-//! description that `python/vinerylab/usd/build.py` turns into a USD stage.
+//! description that `python/misina-lab/misina_lab/usd/build.py` turns into a USD stage.
 //! Usable either as an interactive viewer (`cargo run`) or headlessly from
 //! Python (the `_core` module, behind the `python` feature).
 //!

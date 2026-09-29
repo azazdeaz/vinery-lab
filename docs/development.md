@@ -5,12 +5,13 @@
 No need to install `maturin` yourself — uv fetches it automatically as a
 PEP 517 build backend.
 
-The repo is a uv workspace and `crates/vinerylab` is a maturin project in
-its *mixed* layout: hand-written Python lives in
-`crates/vinerylab/python/vinerylab/`, and the compiled Rust extension is built into it as the
-`_core` submodule, which `__init__.py` re-exports. `vinerylab.isaaclab` is the
-only part that imports Isaac Lab, so plain `import vinerylab` stays usable
-without it.
+The repo is a uv workspace of two packages. `python/misina-lab` is plain
+Python: the USD builder and the Isaac Lab spawner every generator shares.
+`crates/vinerylab` is a maturin project in its *mixed* layout: hand-written
+Python lives in `crates/vinerylab/python/vinerylab/`, and the compiled Rust
+extension is built into it as the `_core` submodule, which `__init__.py`
+re-exports. Only the `isaaclab` subpackages import Isaac Lab, so plain
+`import vinerylab` stays usable without it.
 
 How the binding surface is shaped — why fragments are `Py<T>`, what
 `write_usd` releases the GIL around — is in
@@ -89,7 +90,7 @@ sliders do: the number starts selected, `Enter` or clicking away applies it,
 `Escape` drops it. A typed value is clamped to the slider's range.
 Press `S` to write the scene out as `scene.json`, and build it with:
 
-    python -m vinerylab.usd scene.json scene.usd
+    python -m misina_lab.usd scene.json scene.usd
 
 `VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
 rebuilt something — the marks are `crates/vinerylab/src/perf.rs`, the report

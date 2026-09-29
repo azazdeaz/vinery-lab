@@ -60,21 +60,28 @@ per generator, which every framework surface is keyed on.
 | [vinerylab/src/elements/util/](crates/vinerylab/src/elements/util/) | the named colours and responses, layout solver, planting walk — everything under `elements/` that is not an element |
 | [vinerylab/src/perf.rs](crates/vinerylab/src/perf.rs) | the per-layer marks and the bench |
 
-### Python, under `crates/vinerylab/python/vinerylab/`
+### Python
+
+Two packages in one uv workspace, mirroring the crates: `python/misina-lab`
+is the framework's Python side, pure Python over `usd-core`, and
+`crates/vinerylab/python/vinerylab` is the vineyard's, a maturin package
+holding the compiled `_core` and the generated cfg classes.
 
 | Path | What it is |
 | --- | --- |
-| [usd/build.py](crates/vinerylab/python/vinerylab/usd/build.py) | scene document to stage; where every USD rule is written down |
-| [usd/ground.py](crates/vinerylab/python/vinerylab/usd/ground.py) | `Ground`: the terrain height under any (x, y), read back off a stage |
-| [isaaclab/vineyard_cfg.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params |
-| [isaaclab/vineyard.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard.py) | generates, caches and spawns the `.usd` |
-| [isaaclab/physics.py](crates/vinerylab/python/vinerylab/isaaclab/physics.py) | the coupled Newton config that lets shoots bend |
-| [isaaclab/cutting.py](crates/vinerylab/python/vinerylab/isaaclab/cutting.py) | `Shears`: cuts a shoot anywhere along it while the simulation runs |
-| [isaaclab/newton_patches.py](crates/vinerylab/python/vinerylab/isaaclab/newton_patches.py) | workarounds for the pinned Newton, applied by the demos; not imported by the package |
-| [_core.pyi](crates/vinerylab/python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
+| [misina_lab/usd/build.py](python/misina-lab/misina_lab/usd/build.py) | scene document to stage; where every USD rule is written down |
+| [misina_lab/usd/ground.py](python/misina-lab/misina_lab/usd/ground.py) | `Ground`: the terrain height under any (x, y), read back off a stage |
+| [misina_lab/isaaclab/spawn.py](python/misina-lab/misina_lab/isaaclab/spawn.py) | `GeneratedSceneCfg`, the base of every generator's cfg; generates, caches and spawns the `.usd` |
+| [misina_lab/isaaclab/rods.py](python/misina-lab/misina_lab/isaaclab/rods.py) | the coupled Newton config that lets a rod bend, and the tuning and collision groups it needs |
+| [misina_lab/isaaclab/cutting.py](python/misina-lab/misina_lab/isaaclab/cutting.py) | `Shears`: cuts a rod anywhere along it while the simulation runs |
+| [vinerylab/isaaclab/vineyard_cfg.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) | `@configclass` fragments mirroring the Rust params (generated), and `VineyardCfg` over them |
+| [vinerylab/isaaclab/physics.py](crates/vinerylab/python/vinerylab/isaaclab/physics.py) | the vineyard's names and numbers over `rods`: which prim a vine is, the demos' substeps |
+| [vinerylab/isaaclab/vineyard.py](crates/vinerylab/python/vinerylab/isaaclab/vineyard.py) | the spawner under the vineyard's names, for the demos |
+| [vinerylab/isaaclab/newton_patches.py](crates/vinerylab/python/vinerylab/isaaclab/newton_patches.py) | workarounds for the pinned Newton, applied by the demos; not imported by the package |
+| [vinerylab/_core.pyi](crates/vinerylab/python/vinerylab/_core.pyi) | typed signatures for the compiled extension (generated) |
 
-Only `vinerylab.isaaclab` imports Isaac Lab, so plain `import vinerylab` works
-without it.
+Only the `isaaclab` subpackages import Isaac Lab, so plain `import vinerylab`
+and `import misina_lab` work without it.
 
 ### Everything else
 

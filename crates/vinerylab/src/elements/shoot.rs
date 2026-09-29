@@ -895,7 +895,7 @@ impl Centerline {
 ///
 /// **The whole bend is the first segment**, rather than something the sampling
 /// happens to cut across. That segment is the one bolted down — see
-/// `_cable_point_masses` in `python/vinerylab/usd/build.py` — so its shape is
+/// `_cable_point_masses` in `misina_lab/usd/build.py` — so its shape is
 /// static and only its endpoints matter, while every segment that does move is
 /// a piece of the rise of the same length. A solver derives one stiffness from
 /// the mean segment length and mistunes whatever differs from it, so evenness

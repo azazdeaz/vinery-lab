@@ -78,7 +78,7 @@ pub enum Widget {
 /// `__repr__`, `generate_scene_json` and `write_usd`; a keyword constructor
 /// and `__repr__` for every fragment ([`fragment_python!`](crate::fragment_python)); and
 /// `fn module(m)`, which registers all of them and `__version__` on the
-/// extension module. Every fragment is a `Resource` deriving
+/// extension module and names it as their `__module__`. Every fragment is a `Resource` deriving
 /// `Reflect, Clone, Debug, Default, PartialEq`, with the `pyclass` attribute
 /// `docs/editing-parameters.md` shows.
 ///
@@ -184,10 +184,18 @@ macro_rules! generator {
         $vis fn module(
             m: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,
         ) -> ::pyo3::PyResult<()> {
-            use ::pyo3::types::PyModuleMethods as _;
+            use ::pyo3::types::{PyAnyMethods as _, PyModuleMethods as _};
             m.add("__version__", env!("CARGO_PKG_VERSION"))?;
             m.add_class::<$py>()?;
             $( m.add_class::<$ty>()?; )*
+            // A `#[pyclass]` reports `builtins` as its `__module__` unless
+            // the attribute names one, with a literal. The spawner reads it
+            // to find the extension a params class came from, so it is set
+            // here to the module they were just registered on.
+            let name = m.name()?;
+            for class in [m.py().get_type::<$py>() $(, m.py().get_type::<$ty>())*] {
+                class.setattr("__module__", &name)?;
+            }
             Ok(())
         }
     };

@@ -58,7 +58,7 @@ def solver(request, monkeypatch):
     stepping = solver
     if request.param == "coupled":
         # The VBD half owns no MuJoCo model, so it also covers the guard.
-        entries = {"rigid": solver, "shoots": types.SimpleNamespace()}
+        entries = {"rigid": solver, "rods": types.SimpleNamespace()}
         stepping = types.SimpleNamespace(
             entry_names=lambda: tuple(entries), solver=entries.__getitem__
         )

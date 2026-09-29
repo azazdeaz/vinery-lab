@@ -1,24 +1,20 @@
 """Spawner configuration for a procedurally generated vineyard.
 
 One `@configclass` fragment per element, mirroring the `*Params` pyclasses in
-`vinerylab._core` field for field. The fragments and the `FRAGMENTS` table are
+`vinerylab._core` field for field. The fragments and `VineyardCfg`'s fields are
 generated from the Rust params structs -- see `docs/editing-parameters.md`;
-`VineyardCfg` below is hand-written.
-
-The fragments are plain Python dataclasses rather than the pyclasses
-themselves on purpose: a pyclass has no `__dict__`, which is what
-`isaaclab.utils.dict.class_to_dict` dispatches on, and it cannot be
-deep-copied — so holding one on a cfg would break `cfg.to_dict()`,
-`cfg.replace()` and every YAML/hydra round-trip Isaac Lab does with a scene
-config. `vineyard.py` converts these into pyclasses at spawn time instead.
+`VineyardCfg` below is hand-written, over the core's `GeneratedSceneCfg`,
+which says why the fragments are dataclasses rather than the pyclasses.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import ClassVar, Self
 
-from isaaclab.sim.spawners.from_files.from_files_cfg import FileCfg
 from isaaclab.utils.configclass import configclass
+
+import vinerylab
+from misina_lab.isaaclab.spawn import GeneratedSceneCfg
 
 
 # >>> generated: fragments
@@ -429,37 +425,16 @@ class WeedCfg:
     """Triangles a leaf is cut into."""
 
 
-FRAGMENTS: tuple[tuple[str, type], ...] = (
-    ("scene", SceneCfg),
-    ("terrain", TerrainCfg),
-    ("parcel", ParcelCfg),
-    ("planting", PlantingCfg),
-    ("pole", PoleCfg),
-    ("wire", WireCfg),
-    ("vine", VineCfg),
-    ("shoot", ShootCfg),
-    ("leaf", LeafCfg),
-    ("cover", CoverCfg),
-    ("weed", WeedCfg),
-)
-"""The geometry fragments, in the order `VineyardParams` takes them.
-
-The single list both the pyclass conversion and the cache key walk. Everything on
-`VineyardCfg` that is *not* in this list is applied to the spawned prim rather than
-baked into the USD, and so must not take part in the cache key.
-"""
 # <<< generated: fragments
 
 
 @configclass
-class VineyardCfg(FileCfg):
+class VineyardCfg(GeneratedSceneCfg):
     """Spawn a procedurally generated vineyard.
 
     The scene is generated on first use and cached as a USD file keyed on the
     geometry parameters below, then spawned through Isaac Lab's ordinary
-    USD-file path -- so everything `FileCfg` offers (`scale`, `semantic_tags`,
-    `rigid_props`, `collision_props`, visual materials, contact sensors)
-    applies here too, and the prim path may be an env regex.
+    USD-file path; see `GeneratedSceneCfg` for what that leaves open.
 
     It comes with its own static colliders: the ground as its own mesh, each
     post and trunk as a capsule. `collision_props` tunes those it can reach --
@@ -480,9 +455,6 @@ class VineyardCfg(FileCfg):
         # manager-based scene cfg
         vineyard = AssetBaseCfg(prim_path="/World/Vineyard", spawn=VINEYARD_CFG)
 
-    There is no `usd_path`: the fragments below are what identifies the asset,
-    and the file backing it is an implementation detail of the cache.
-
     A stray shoot (`ShootCfg.stray`) is authored as a deformable curve, and
     bends under the coupled solver `make_physics_cfg_newton` builds for a
     vineyard that has any. Under a backend that cannot step one it is spawned
@@ -491,7 +463,10 @@ class VineyardCfg(FileCfg):
     meshes under every backend.
     """
 
-    func: Callable | str = "{DIR}.vineyard:spawn_vineyard"
+    PARAMS: ClassVar[type] = vinerylab.VineyardParams
+    PLANT: ClassVar[str] = "Vine"
+    """`PART` in `crates/vinerylab/src/elements/vine.rs`: a vine's canes and
+    its wood collide as one group."""
 
     # >>> generated: aggregate
     scene: SceneCfg = SceneCfg()
@@ -505,11 +480,38 @@ class VineyardCfg(FileCfg):
     leaf: LeafCfg = LeafCfg()
     cover: CoverCfg = CoverCfg()
     weed: WeedCfg = WeedCfg()
+
+    FRAGMENTS: ClassVar[tuple[str, ...]] = (
+        "scene",
+        "terrain",
+        "parcel",
+        "planting",
+        "pole",
+        "wire",
+        "vine",
+        "shoot",
+        "leaf",
+        "cover",
+        "weed",
+    )
+    """The fragment fields, in the order `VineyardParams` takes them: what `to_params`
+    converts and the cache key is built from. Everything else on the cfg is applied
+    to the spawned prim rather than baked into the USD, and takes no part in the key.
+    """
     # <<< generated: aggregate
 
-    cache_dir: str | None = None
-    """Where generated scenes are cached. Defaults to ``$VINERYLAB_CACHE_DIR``,
-    else ``$XDG_CACHE_HOME/vinerylab/scenes``, else ``~/.cache/vinerylab/scenes``."""
+    def without_rods(self) -> Self | None:
+        """The vineyard with its shoots held rigid, or `None` when none is
+        flexible as it stands: a stray one, or every cane of a dormant
+        vineyard, with `ShootCfg.flexible` on.
 
-    force_regenerate: bool = False
-    """Regenerate even on a cache hit. For iterating on the generator itself."""
+        `stray` is a share drawn shoot by shoot, so a parcel small enough can
+        draw none; the coupled solver then refuses an entry that owns no body,
+        at reset, with its own error. Set `stray` to zero for such a scene.
+        """
+        # ponytail: read off the cfg, as the scene itself is only generated
+        # inside the app, after the physics config was built.
+        shoot = self.shoot
+        if not (shoot.flexible and (shoot.stray > 0.0 or shoot.dormant)):
+            return None
+        return self.replace(shoot=shoot.replace(flexible=False))

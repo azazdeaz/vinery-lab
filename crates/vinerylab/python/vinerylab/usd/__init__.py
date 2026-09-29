@@ -1,16 +1,15 @@
-"""Turning a vinerylab scene document into a USD stage.
+"""The vineyard's USD side: `misina_lab.usd`, plus the name of its root prim.
 
-The Rust generator builds the scene in Bevy and hands it over as JSON; this
-subpackage is the only place in the project that knows what USD is. See
-`build.py`'s module docstring for the conventions it authors and why each one
-matters.
-
-Kept out of `vinerylab/__init__.py` so that plain `import vinerylab` keeps
-working without `usd-core` installed.
+The builder and the `Ground` reader are the core's; `python -m misina_lab.usd
+scene.json scene.usd` builds a document the viewer saved. Kept out of
+`vinerylab/__init__.py` so that plain `import vinerylab` keeps working without
+`usd-core` installed.
 """
 
-from .build import FORMAT, GEOM, HEIGHT_FIELD, PARTS, ROOT, build_stage, build_usd
-from .ground import Ground
+from misina_lab.usd import FORMAT, GEOM, HEIGHT_FIELD, PARTS, Ground, build_stage, build_usd
+
+ROOT = "/Vineyard"
+"""The scene root, and the stage's default prim: the generator's name."""
 
 __all__ = [
     "FORMAT",

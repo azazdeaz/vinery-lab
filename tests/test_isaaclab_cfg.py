@@ -1,8 +1,9 @@
-"""Tests for the Isaac Lab spawner config.
+"""Tests for the Isaac Lab spawner config: the core's `GeneratedSceneCfg`
+machinery, exercised through the vineyard's `VineyardCfg`.
 
 Requires Isaac Lab; skipped entirely where it isn't installed, so the rest of
 the suite still runs. Everything here is parameterized over the one
-`FRAGMENTS` list the implementation itself walks, so an element added there is
+`FRAGMENTS` tuple the spawner itself walks, so an element added there is
 covered without new test code.
 """
 
@@ -19,14 +20,18 @@ import pytest
 # under its own message, and pytest skips only when the error names the module
 # it was asked to import.
 try:
-    from vinerylab.isaaclab import vineyard
+    from misina_lab.isaaclab import spawn
     from vinerylab.isaaclab import vineyard_cfg as isaaclab_cfg
 except ImportError:
     pytest.skip("Isaac Lab is not installed", allow_module_level=True)
 
 
-FRAGMENTS = isaaclab_cfg.FRAGMENTS
 VineyardCfg = isaaclab_cfg.VineyardCfg
+FRAGMENTS = VineyardCfg.FRAGMENTS
+CFG = {name: type(getattr(VineyardCfg(), name)) for name in FRAGMENTS}
+"""Each fragment's cfg class, off a default cfg."""
+PARAMS = spawn.fragment_params(VineyardCfg)
+"""Each fragment's pyclass, as the spawner finds it."""
 
 
 def params_attrs(params_cls: type) -> set[str]:
@@ -56,8 +61,8 @@ def cfg() -> VineyardCfg:
 # ─── The cfg mirrors the generator ──────────────────────────────────
 
 
-@pytest.mark.parametrize("name,cfg_cls", FRAGMENTS, ids=[n for n, _ in FRAGMENTS])
-def test_fragment_fields_match_the_generator(name, cfg_cls):
+@pytest.mark.parametrize("name", FRAGMENTS)
+def test_fragment_fields_match_the_generator(name):
     """Every fragment names exactly the fields its pyclass takes.
 
     The cfg classes are hand-written mirrors of Rust structs, so they go stale
@@ -65,20 +70,18 @@ def test_fragment_fields_match_the_generator(name, cfg_cls):
     Lab, and one removed there is accepted here and then rejected at spawn
     time with a `TypeError` deep inside the conversion.
     """
-    assert {f.name for f in dataclasses.fields(cfg_cls)} == params_attrs(
-        vineyard._params_class(cfg_cls)
-    )
+    assert {f.name for f in dataclasses.fields(CFG[name])} == params_attrs(PARAMS[name])
 
 
-@pytest.mark.parametrize("name,cfg_cls", FRAGMENTS, ids=[n for n, _ in FRAGMENTS])
-def test_fragment_defaults_match_the_generator(name, cfg_cls):
+@pytest.mark.parametrize("name", FRAGMENTS)
+def test_fragment_defaults_match_the_generator(name):
     """An untouched cfg generates the same scene as untouched params.
 
     Compared with an f32 tolerance: the params are `f32` in Rust, so a default
     written here as `2.4` reads back as `2.4000000953674316`.
     """
-    from_cfg, from_params = cfg_cls(), vineyard._params_class(cfg_cls)()
-    for field in dataclasses.fields(cfg_cls):
+    from_cfg, from_params = CFG[name](), PARAMS[name]()
+    for field in dataclasses.fields(CFG[name]):
         ours, theirs = getattr(from_cfg, field.name), getattr(from_params, field.name)
         if isinstance(theirs, float):
             assert math.isclose(ours, theirs, rel_tol=1e-6), field.name
@@ -87,7 +90,7 @@ def test_fragment_defaults_match_the_generator(name, cfg_cls):
 
 
 def test_to_params_round_trips_every_fragment(cfg):
-    params = vineyard.to_params(cfg)
+    params = spawn.to_params(cfg)
     assert math.isclose(params.parcel.row_spacing, 2.8, rel_tol=1e-6)
     assert params.vine.arms == 1
     assert params.scene.seed == 42
@@ -101,7 +104,7 @@ def test_a_misspelt_regime_name_is_rejected_before_generating(tmp_path):
     default regime."""
     cfg = VineyardCfg(cover=isaaclab_cfg.CoverCfg(kind="sowed"))
     with pytest.raises(ValueError, match="cover.kind"):
-        vineyard.to_params(cfg).write_usd(str(tmp_path / "typo.usd"))
+        spawn.to_params(cfg).write_usd(str(tmp_path / "typo.usd"))
 
 
 # ─── The cfg survives what Isaac Lab does to configs ────────────────
@@ -123,9 +126,9 @@ def test_cfg_survives_config_machinery(cfg):
 
 
 def test_func_resolves_to_the_spawner(cfg):
-    """The lazy `{DIR}` form points at `spawn_vineyard` and stays a string in
+    """`func` names the core's spawner by its full path and stays a string in
     `to_dict()`, so a dumped config is still YAML."""
-    assert str(cfg.func) == "vinerylab.isaaclab.vineyard:spawn_vineyard"
+    assert str(cfg.func) == "misina_lab.isaaclab.spawn:spawn_generated"
     assert isinstance(cfg.to_dict()["func"], str)
 
 
@@ -142,21 +145,21 @@ def test_cache_is_keyed_on_geometry_only(cfg, tmp_path):
     """
     cfg.cache_dir = str(tmp_path)
 
-    first = vineyard.resolve_usd_path(cfg)
+    first = spawn.resolve_usd_path(cfg)
     stamp = os.stat(first).st_mtime_ns
 
-    assert vineyard.resolve_usd_path(cfg) == first
+    assert spawn.resolve_usd_path(cfg) == first
     assert os.stat(first).st_mtime_ns == stamp, "a cache hit must not rewrite the file"
 
     moved = cfg.replace(parcel=isaaclab_cfg.ParcelCfg(row_spacing=3.5))
     moved.cache_dir = str(tmp_path)
-    assert vineyard.resolve_usd_path(moved) != first
+    assert spawn.resolve_usd_path(moved) != first
 
     from isaaclab.sim.schemas import RigidBodyBaseCfg
 
     decorated = cfg.replace(rigid_props=RigidBodyBaseCfg(kinematic_enabled=True))
     decorated.cache_dir = str(tmp_path)
-    assert vineyard.resolve_usd_path(decorated) == first
+    assert spawn.resolve_usd_path(decorated) == first
 
 
 def test_generated_scene_is_a_usable_asset(cfg, tmp_path):
@@ -164,7 +167,7 @@ def test_generated_scene_is_a_usable_asset(cfg, tmp_path):
     from pxr import Usd
 
     cfg.cache_dir = str(tmp_path)
-    stage = Usd.Stage.Open(vineyard.resolve_usd_path(cfg))
+    stage = Usd.Stage.Open(spawn.resolve_usd_path(cfg))
     assert stage.GetDefaultPrim().GetName() == "Vineyard"
     assert stage.GetPrimAtPath("/Vineyard/Planting/Row_000/Vine_000")
 
@@ -176,7 +179,7 @@ def test_the_cached_scene_arrives_solid(cfg, tmp_path):
     from pxr import Usd, UsdGeom, UsdPhysics
 
     cfg.cache_dir = str(tmp_path)
-    stage = Usd.Stage.Open(vineyard.resolve_usd_path(cfg))
+    stage = Usd.Stage.Open(spawn.resolve_usd_path(cfg))
 
     ground = stage.GetPrimAtPath("/Vineyard/Terrain/Geom")
     assert ground.HasAPI(UsdPhysics.CollisionAPI), "the robot would drop through"
@@ -203,7 +206,7 @@ def test_cached_scene_composes_when_referenced(cfg, tmp_path):
     from pxr import Usd
 
     cfg.cache_dir = str(tmp_path)
-    usd_path = vineyard.resolve_usd_path(cfg)
+    usd_path = spawn.resolve_usd_path(cfg)
 
     stage = Usd.Stage.CreateInMemory()
     prim = stage.DefinePrim("/World/Vineyard", "Xform")

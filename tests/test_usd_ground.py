@@ -1,4 +1,4 @@
-"""Reading a scene's ground back: `vinerylab.usd.Ground`.
+"""Reading a scene's ground back: `misina_lab.usd.Ground`.
 
 Built on the same `tiny_scene.json` as the builder's own tests. Its terrain is
 a single triangle, which is exactly what a mesh that is *not* a height field
@@ -13,7 +13,7 @@ import pathlib
 import pytest
 from pxr import Usd
 
-from vinerylab.usd import Ground, build_stage
+from misina_lab.usd import Ground, build_stage
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 

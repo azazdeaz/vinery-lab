@@ -1,5 +1,5 @@
 //! The export document — the whole contract between this crate and the USD
-//! builder in `python/vinerylab/usd/build.py`.
+//! builder in `python/misina-lab/misina_lab/usd/build.py`.
 //!
 //! Rust owns the *scene*: what geometry exists, where it goes, and what
 //! references what. Python owns *USD*: prim types, schemas, composition arcs,

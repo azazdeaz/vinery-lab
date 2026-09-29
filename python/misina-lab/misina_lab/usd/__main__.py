@@ -1,9 +1,9 @@
 """Turn a generated scene document into a USD stage.
 
-    python -m vinerylab.usd scene.json scene.usd
+    python -m misina_lab.usd scene.json scene.usd
 
 The viewer's save key writes `scene.json`; this is the other half. The normal
-path from Python does not go through here -- `vinerylab.isaaclab` calls the
+path from Python does not go through here -- `misina_lab.isaaclab` calls the
 generator and the builder in one process -- but having a command means a
 document can be inspected, edited and rebuilt without running Rust at all.
 """
@@ -20,8 +20,8 @@ from .build import build_usd
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="python -m vinerylab.usd",
-        description="Build a USD stage from a vinerylab scene document.",
+        prog="python -m misina_lab.usd",
+        description="Build a USD stage from a generated scene document.",
     )
     parser.add_argument(
         "document", type=pathlib.Path, help="scene document, as written by the generator"

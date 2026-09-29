@@ -19,7 +19,8 @@ except ImportError as err:  # pragma: no cover - depends on the environment
         " without it."
     ) from err
 
-from .cutting import Shears
+from misina_lab.isaaclab import Shears
+
 from .physics import CABLE, make_physics_cfg_newton, tune_shoots
 from .vineyard import spawn_vineyard
 

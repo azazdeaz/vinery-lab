@@ -8,7 +8,7 @@ params → Bevy entities (Transform, Mesh3d, Name, UsdReference)
               ↓                              ↓
      the viewer renders them      crates/misina-lab/src/scene/export.rs → SceneDoc (JSON)
                                              ↓
-                            crates/vinerylab/python/vinerylab/usd/build.py → .usd
+                            python/misina-lab/misina_lab/usd/build.py → .usd
 ```
 
 Rust owns the *scene* — what geometry exists, where it goes, what references
@@ -334,7 +334,7 @@ referenced non-instanceable: a collider inside a prototype is reachable only
 through an instance proxy, and the ground has one instance, so it gives up
 nothing. Everything else stays instanced.
 
-Reading the ground back out is `vinerylab.usd.Ground`: a consumer that places
+Reading the ground back out is `misina_lab.usd.Ground`: a consumer that places
 anything on the terrain after the fact — a robot, above all — needs the height
 the generator placed the vines and posts against, and gets it by interpolating
 the same grid. It finds the surface by its height-field attribute rather than
@@ -354,7 +354,7 @@ sees is the generated `_core.pyi` — see
 [editing-parameters.md](editing-parameters.md).
 
 `VineyardParams.write_usd(path)` generates the scene in Rust, serializes the
-document, and hands it to `vinerylab.usd.build_usd` — so `usd-core` is a
+document, and hands it to `misina_lab.usd.build_usd` — so `usd-core` is a
 dependency of the package rather than of the crate.
 `generate_scene_json()` returns the document instead, for a caller that wants
 to cache the bytes or build the stage elsewhere. Both release the GIL for the

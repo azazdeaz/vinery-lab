@@ -2673,6 +2673,17 @@ wheels = [
 ]
 
 [[package]]
+name = "misina-lab"
+version = "0.1.0"
+source = { editable = "../../python/misina-lab" }
+dependencies = [
+    { name = "usd-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "usd-core", specifier = ">=24.11" }]
+
+[[package]]
 name = "ml-dtypes"
 version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5394,18 +5405,11 @@ wheels = [
 name = "vinerylab"
 source = { editable = "../../crates/vinerylab" }
 dependencies = [
-    { name = "usd-core" },
+    { name = "misina-lab" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "usd-core", specifier = ">=24.11" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = "~=1.18" },
-    { name = "pytest" },
-    { name = "ruff", specifier = "~=0.14.0" },
-]
+requires-dist = [{ name = "misina-lab", editable = "../../python/misina-lab" }]
 
 [[package]]
 name = "viser"

@@ -82,19 +82,28 @@ pub fn targets<G: Generator>(docs: &str) -> Vec<Target> {
     ]
 }
 
-/// Every target whose file under `root` does not read as the structs say now,
-/// with the text it should hold. A generator asserts this empty from one test
-/// and writes it out from an ignored one.
+/// Every file under `root` that does not read as the structs say now, with
+/// the text it should hold. A generator asserts this empty from one test and
+/// writes it out from an ignored one.
+///
+/// A file with two regions is rendered in place: the second target reads the
+/// first's output, so both land in the one text written back.
 pub fn stale<G: Generator>(root: &Path, docs: &str) -> Vec<(PathBuf, String)> {
-    targets::<G>(docs)
-        .iter()
-        .filter_map(|target| {
-            let path = root.join(&target.path);
-            let current = std::fs::read_to_string(&path).unwrap_or_default();
-            let fresh = render(&current, target).unwrap_or_else(|err| panic!("{err}"));
-            (fresh != current).then_some((path, fresh))
-        })
-        .collect()
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+    for target in targets::<G>(docs) {
+        let path = root.join(&target.path);
+        let current = match files.iter().find(|(p, _)| *p == path) {
+            Some((_, rendered)) => rendered.clone(),
+            None => std::fs::read_to_string(&path).unwrap_or_default(),
+        };
+        let fresh = render(&current, &target).unwrap_or_else(|err| panic!("{err}"));
+        match files.iter_mut().find(|(p, _)| *p == path) {
+            Some(entry) => entry.1 = fresh,
+            None => files.push((path, fresh)),
+        }
+    }
+    files.retain(|(path, fresh)| std::fs::read_to_string(path).unwrap_or_default() != *fresh);
+    files
 }
 
 /// `current` with the target's text in place: its region replaced, or the
@@ -293,8 +302,7 @@ fn package_exports<G: Generator>() -> String {
     out
 }
 
-/// `{name}_cfg.py`: one `@configclass` per fragment, and the `FRAGMENTS`
-/// table the spawner walks.
+/// `{name}_cfg.py`: one `@configclass` per fragment.
 fn cfg_fragments<G: Generator>() -> String {
     let default = G::Params::default();
     let mut out = String::new();
@@ -318,41 +326,35 @@ fn cfg_fragments<G: Generator>() -> String {
         }
         out += "\n\n";
     }
-    out += "FRAGMENTS: tuple[tuple[str, type], ...] = (\n";
-    for fragment in params::fragments::<G::Params>() {
-        out += &format!(
-            "    ({:?}, {}Cfg),\n",
-            fragment.name(),
-            params::stem(fragment)
-        );
-    }
-    out += ")\n";
-    out += &docstring(
-        &[
-            format!(
-                "The geometry fragments, in the order `{}Params` takes them.",
-                G::NAME
-            ),
-            format!(
-                "The single list both the pyclass conversion and the cache key walk. Everything on \
-                 `{}Cfg` that is *not* in this list is applied to the spawned prim rather than \
-                 baked into the USD, and so must not take part in the cache key.",
-                G::NAME
-            ),
-        ],
-        0,
-    );
     out
 }
 
-/// `{name}_cfg.py`, inside `class {NAME}Cfg`: one fragment field each.
+/// `{name}_cfg.py`, inside `class {NAME}Cfg`: one fragment field each, and
+/// the `FRAGMENTS` tuple naming them, which the spawner walks. Names rather
+/// than the classes: Isaac Lab's `configclass` walks every class attribute
+/// for strings to resolve, and takes a class it meets for an instance.
 fn cfg_aggregate<G: Generator>() -> String {
-    params::fragments::<G::Params>()
+    let mut out: String = params::fragments::<G::Params>()
         .map(|fragment| {
             let stem = params::stem(fragment);
             format!("    {}: {stem}Cfg = {stem}Cfg()\n", fragment.name())
         })
-        .collect()
+        .collect();
+    out += "\n    FRAGMENTS: ClassVar[tuple[str, ...]] = (\n";
+    for fragment in params::fragments::<G::Params>() {
+        out += &format!("        {:?},\n", fragment.name());
+    }
+    out += "    )\n";
+    out += &docstring(
+        &[format!(
+            "The fragment fields, in the order `{}Params` takes them: what `to_params` converts \
+             and the cache key is built from. Everything else on the cfg is applied to the \
+             spawned prim rather than baked into the USD, and takes no part in the key.",
+            G::NAME
+        )],
+        4,
+    );
+    out
 }
 
 /// `isaaclab/__init__.py`: the import of every cfg class. The blank line

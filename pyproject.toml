@@ -1,8 +1,8 @@
 # The uv workspace: one lockfile and one `.venv` for every Python package in
 # the repo. `uv sync` here installs all of them, `vinerylab` built through
-# maturin.
+# maturin and `misina-lab` as plain Python.
 [tool.uv.workspace]
-members = ["crates/vinerylab"]
+members = ["crates/vinerylab", "python/misina-lab"]
 
 [dependency-groups]
 dev = ["pytest", "ruff~=0.14.0", "mypy~=1.18"]
@@ -16,9 +16,9 @@ line-length = 100
 extend-select = ["I", "UP"]
 
 [tool.ruff.lint.isort]
-# `vinerylab` is installed into the environment, so ruff would otherwise file
-# the package's own imports under third-party.
-known-first-party = ["vinerylab"]
+# Both packages are installed into the environment, so ruff would otherwise
+# file their own imports under third-party.
+known-first-party = ["misina_lab", "vinerylab"]
 
 [tool.ruff.lint.per-file-ignores]
 # The demo mirrors Isaac Lab's own example layout, which groups imports by
@@ -26,9 +26,9 @@ known-first-party = ["vinerylab"]
 "examples/*_demo/*" = ["I001"]
 
 [tool.mypy]
-files = ["crates/vinerylab/python/vinerylab"]
+files = ["python/misina-lab/misina_lab", "crates/vinerylab/python/vinerylab"]
 # Isaac Lab cannot be imported without the whole simulator stack installed.
-exclude = "python/vinerylab/isaaclab"
+exclude = "/isaaclab/"
 
 [[tool.mypy.overrides]]
 module = "pxr.*"
