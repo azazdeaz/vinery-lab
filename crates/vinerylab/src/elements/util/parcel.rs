@@ -28,10 +28,15 @@
 
 use bevy::color::palettes::basic::{GRAY, YELLOW};
 use bevy::color::palettes::css::{LIMEGREEN, ORANGE};
+use bevy::feathers::controls::FeathersCheckbox;
+use bevy::feathers::theme::ThemedText;
 use bevy::prelude::*;
+use bevy::ui_widgets::{ValueChange, checkbox_self_update};
+use misina_lab::params::Slider;
+use misina_lab::stats::Footer;
+use misina_lab::ui::{Tip, TipAbove};
 
 use crate::elements::terrain::{Ground, TerrainParams};
-use crate::params::Slider;
 pub use misina_lab::geometry::scatter::Band;
 
 /// How vineyard rows are laid out across the terrain.
@@ -336,12 +341,30 @@ fn clip_line(origin: Vec2, dir: Vec2, rect: Rect) -> Option<(f32, f32)> {
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct ShowLayout(pub bool);
 
-/// Draws [`VineyardLayout`] with `Gizmos`. Kept out of [`plugin`] because
-/// `Gizmos` needs `GizmoPlugin`, which the headless generation path's
-/// `MinimalPlugins` doesn't provide — see [`crate::generate::generate_stage`].
+/// Draws [`VineyardLayout`] with `Gizmos`, toggled from the viewer's footer.
+/// Kept out of [`plugin`] because `Gizmos` needs `GizmoPlugin`, which the
+/// headless generation path's `MinimalPlugins` does not provide — see
+/// `misina_lab::generate`.
 pub fn debug_plugin(app: &mut App) {
     app.init_resource::<ShowLayout>()
+        .add_systems(PostStartup, spawn_checkbox)
         .add_systems(Update, draw_gizmos.run_if(|show: Res<ShowLayout>| show.0));
+}
+
+/// The footer's **Layout** checkbox — a view control, not a parameter, so it
+/// sits with the footer's own rather than in the panel.
+fn spawn_checkbox(mut commands: Commands, footer: Single<Entity, With<Footer>>) {
+    commands
+        .spawn_scene(bsn! {
+            @FeathersCheckbox { @caption: bsn! { (Text("Layout") ThemedText) } }
+            Tip("Draw the solved row and post layout over the scene.")
+            TipAbove
+            on(checkbox_self_update)
+            on(|change: On<ValueChange<bool>>, mut show: ResMut<ShowLayout>| {
+                show.0 = change.value;
+            })
+        })
+        .insert(ChildOf(*footer));
 }
 
 /// Caps how many vine ticks get drawn, so a dense parcel doesn't tank the
@@ -389,7 +412,7 @@ fn draw_gizmos(
 }
 
 /// Maps a point from the stage's Z-up space onto Bevy's Y-up world: `-90°`
-/// about X, the same rotation [`scene::z_up_to_y_up`](crate::scene) applies
+/// about X, the same rotation [`scene::z_up_to_y_up`](misina_lab::scene) applies
 /// so gizmos line up with the projected mesh.
 fn to_bevy(p: Vec3) -> Vec3 {
     Vec3::new(p.x, p.z, -p.y)

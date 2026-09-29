@@ -64,11 +64,11 @@ use bevy::prelude::*;
 use nalgebra::{Point3, Vector3};
 
 use super::shoot;
-use crate::params::{Label, Slider};
-use crate::scene::{
+use misina_lab::params::{Label, Slider};
+use misina_lab::quantize::{Metric, farthest_first};
+use misina_lab::scene::{
     COLLISION, Geometry, Library, Order, Surface, capsule, capsule_between, configs_changed, placed,
 };
-use misina_lab::quantize::{Metric, farthest_first};
 
 use super::util::parcel::ParcelParams;
 use super::util::{color, material, par_map};
@@ -83,7 +83,7 @@ pub const PART: &str = "Vine";
 ///
 /// A child rather than the plant prim itself, because a vine has shoots
 /// hanging off it and geometry prims carry no children — see
-/// [`scene`](crate::scene).
+/// [`scene`](misina_lab::scene).
 pub const WOOD: &str = "Wood";
 
 /// The prim a cordon's collision proxy takes, one per arm: `Cordon_0` and, on
@@ -1045,8 +1045,8 @@ mod tests {
     use super::*;
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
-    use crate::scene::{Collider, Prototypes, UsdReference};
     use misina_lab::geometry::mesh::MeshData;
+    use misina_lab::scene::{Collider, Prototypes, UsdReference};
 
     fn params() -> VineParams {
         VineParams::default()

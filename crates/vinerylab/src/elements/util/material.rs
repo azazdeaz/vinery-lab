@@ -17,7 +17,7 @@
 //! and diffuse transmission. On an opaque dielectric the specular level comes
 //! from `reflectance`, so that is what a response authors.
 
-use crate::scene::Surface;
+use misina_lab::scene::Surface;
 
 /// How a surface responds to light, with the hue left to
 /// [`color`](super::color).

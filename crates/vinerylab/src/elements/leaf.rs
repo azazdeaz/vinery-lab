@@ -54,11 +54,11 @@ use bevy::prelude::*;
 
 use super::util::{color, material, par_map};
 use super::{Grow, Rng};
-use crate::params::Slider;
-use crate::scene::{Geometry, Library, Order, Surface, configs_changed};
 use misina_lab::geometry::mesh::{MeshData, bend};
 use misina_lab::geometry::outline::{Outline, outline_mesh};
+use misina_lab::params::Slider;
 use misina_lab::quantize::{Metric, farthest_first};
+use misina_lab::scene::{Geometry, Library, Order, Surface, configs_changed};
 
 /// The mesh-library prefix this element registers its blades under.
 pub const PART: &str = "Leaf";
@@ -470,7 +470,7 @@ mod tests {
     use super::*;
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, bounds, face_normal, faces, organs};
-    use crate::scene::Prototypes;
+    use misina_lab::scene::Prototypes;
 
     fn params() -> LeafParams {
         LeafParams::default()
@@ -807,7 +807,7 @@ mod tests {
     #[test]
     fn every_hung_leaf_draws_a_blade_from_the_library() {
         let app = testing::grown(VineyardParams::default());
-        let blades: Vec<(&String, &crate::scene::Part)> = app
+        let blades: Vec<(&String, &misina_lab::scene::Part)> = app
             .world()
             .resource::<Prototypes>()
             .iter()
@@ -900,7 +900,7 @@ mod tests {
         assert!(
             app.world()
                 .entity(entity)
-                .contains::<crate::scene::UsdReference>(),
+                .contains::<misina_lab::scene::UsdReference>(),
             "and references its blade directly"
         );
     }

@@ -36,10 +36,10 @@
 //! [`ParcelParams::trellis_height`]: super::util::parcel::ParcelParams::trellis_height
 //! [`cylinder_mesh`]: misina_lab::geometry::mesh::cylinder_mesh
 
-use crate::params::Slider;
-use crate::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 use bevy::prelude::*;
+use misina_lab::params::Slider;
 use misina_lab::quantize::{Metric, farthest_first};
+use misina_lab::scene::{COLLISION, Geometry, Library, Order, Surface, capsule, configs_changed};
 
 use super::Grow;
 use super::util::parcel::ParcelParams;
@@ -53,7 +53,7 @@ pub const PART: &str = "Pole";
 ///
 /// A child rather than the post prim, because the post also carries a
 /// collision proxy and geometry prims carry no children — see
-/// [`scene`](crate::scene).
+/// [`scene`](misina_lab::scene).
 pub const POST: &str = "Post";
 
 /// How many distinct post meshes the scene may hold.
@@ -230,7 +230,7 @@ mod tests {
     use super::*;
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
-    use crate::scene::{Collider, Prototypes};
+    use misina_lab::scene::{Collider, Prototypes};
 
     fn config(params: PoleParams, trellis_height: f32) -> PoleConfig {
         PoleConfig::new(

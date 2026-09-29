@@ -47,8 +47,8 @@ use crate::elements::vine;
 use crate::elements::wire;
 
 use crate::elements::SceneParams;
-use crate::params::{Label, Slider};
-use crate::scene::{Order, PrimRoot, UsdType, placed};
+use misina_lab::params::{Label, Slider};
+use misina_lab::scene::{Order, PrimRoot, UsdType, placed};
 
 use super::parcel::{ParcelParams, Row, VineyardLayout};
 

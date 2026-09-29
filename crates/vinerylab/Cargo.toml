@@ -19,18 +19,16 @@ path = "src/main.rs"
 misina-lab = { path = "../misina-lab" }
 bevy = { workspace = true }
 anyhow = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
 curvo = { workspace = true }
 nalgebra = { workspace = true }
-bevy_panorbit_camera = "0.35.0"
-spade = { workspace = true }
 
 [features]
-# Compiles the PyO3 wrapper code (src/python.rs). Safe to enable for normal
+# Compiles the PyO3 side: the `_core` module in lib.rs and what the
+# `generator!` macro emits under it. Safe to enable for normal
 # `cargo build`/`cargo test`, since it still links against a real libpython.
-python = ["dep:pyo3"]
+python = ["dep:pyo3", "misina-lab/python"]
 # What maturin actually builds with: on top of `python`, this also tells
 # PyO3 to *not* link libpython — the interpreter that loads the .so already
 # provides those symbols. This flag breaks `cargo run`/`cargo test`, which

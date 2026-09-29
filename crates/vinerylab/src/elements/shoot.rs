@@ -89,7 +89,7 @@
 //! handful of stem meshes.
 //!
 //! A leaf has nothing hanging off it, so it is a geometry prim in its own right
-//! rather than an `Xform` over one — see [`scene`](crate::scene). At six
+//! rather than an `Xform` over one — see [`scene`](misina_lab::scene). At six
 //! figures of them, that halves the prim count of the whole scene.
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -100,11 +100,11 @@ use nalgebra::Point3;
 use super::leaf;
 use super::util::{color, material, par_map};
 use super::{Grow, Rng, SceneParams, salt};
-use crate::params::{Label, Slider};
-use crate::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
 use misina_lab::geometry::mesh::{MeshData, cylinder_mesh};
 use misina_lab::geometry::strand::{Bark, Strand, strand_mesh};
+use misina_lab::params::{Label, Slider};
 use misina_lab::quantize::{Metric, farthest_first};
+use misina_lab::scene::{CABLE, Geometry, Library, Order, Surface, cable, configs_changed, placed};
 
 /// The mesh-library prefix this element registers its stems under.
 pub const PART: &str = "Shoot";
@@ -1328,8 +1328,8 @@ mod tests {
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{self, bounds, named_children, organs};
     use crate::elements::vine;
-    use crate::scene::{Cable, Prototypes, UsdReference};
     use misina_lab::geometry::mesh::MeshData;
+    use misina_lab::scene::{Cable, Prototypes, UsdReference};
 
     fn params() -> ShootParams {
         ShootParams::default()

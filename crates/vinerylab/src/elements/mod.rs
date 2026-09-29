@@ -22,7 +22,7 @@
 //! layout solver, the planting walk — lives in [`util`], which holds everything
 //! under this directory that isn't an element.
 //!
-//! [`Order`]: crate::scene::Order
+//! [`Order`]: misina_lab::scene::Order
 
 pub mod cover;
 pub mod leaf;
@@ -34,14 +34,13 @@ pub mod vine;
 pub mod weed;
 pub mod wire;
 
-use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
-
-use crate::params::{Label, Slider};
+use misina_lab::Build;
+use misina_lab::params::{Label, Slider};
 pub use misina_lab::rng::{Rng, salt};
 
 /// Build order. Every layer's build system goes in exactly one of these, and
-/// they run chained in `PreUpdate`.
+/// they run chained in `PreUpdate`, inside [`Build`].
 ///
 /// The chain is what makes the pipeline a pipeline: a layer places the configs
 /// the next one down clusters, so each set must have finished spawning before
@@ -82,7 +81,8 @@ pub fn plugin(app: &mut App) {
             Grow::Shoots,
             Grow::Scatter,
         )
-            .chain(),
+            .chain()
+            .in_set(Build),
     )
     .add_plugins((
         terrain::plugin,
@@ -134,94 +134,255 @@ impl Default for SceneParams {
     }
 }
 
-/// A plain snapshot of every element's params.
-///
-/// The world stores each fragment as its own resource so change detection is
-/// per-element; this aggregate is the whole parameter set as one value, for
-/// everything that has to hold one — Python calls, headless generation, and
-/// the viewer panel's [`Staged`] copy.
-#[derive(Reflect, Clone, Debug, Default, PartialEq)]
-pub struct VineyardParams {
-    pub scene: SceneParams,
-    pub terrain: terrain::TerrainParams,
-    pub parcel: util::parcel::ParcelParams,
-    pub planting: util::planting::PlantingParams,
-    pub pole: pole::PoleParams,
-    pub wire: wire::WireParams,
-    pub vine: vine::VineParams,
-    pub shoot: shoot::ShootParams,
-    pub leaf: leaf::LeafParams,
-    pub cover: cover::CoverParams,
-    #[reflect(@Label("Weeds"))]
-    pub weed: weed::WeedParams,
-}
-
-impl VineyardParams {
-    /// Splits the aggregate back into the per-element resources the author
-    /// systems actually read.
+misina_lab::generator! {
+    /// A plain snapshot of every element's params.
     ///
-    /// A fragment that already holds its value is left alone rather than
-    /// rewritten, so applying a set in which one slider moved re-runs that
-    /// layer and no other.
-    pub fn apply(&self, world: &mut World) {
-        set(world, &self.scene);
-        set(world, &self.terrain);
-        set(world, &self.parcel);
-        set(world, &self.planting);
-        set(world, &self.pole);
-        set(world, &self.wire);
-        set(world, &self.vine);
-        set(world, &self.shoot);
-        set(world, &self.leaf);
-        set(world, &self.cover);
-        set(world, &self.weed);
-    }
-
-    /// Reads every element's params resource back out of `world`.
-    ///
-    /// The inverse of [`apply`](Self::apply), for the one caller that has a
-    /// live world and needs a plain snapshot: the viewer's panel, seeding the
-    /// copy its sliders write.
-    pub fn from_world(world: &World) -> Self {
-        Self {
-            scene: world.resource::<SceneParams>().clone(),
-            terrain: world.resource::<terrain::TerrainParams>().clone(),
-            parcel: world.resource::<util::parcel::ParcelParams>().clone(),
-            planting: world.resource::<util::planting::PlantingParams>().clone(),
-            pole: world.resource::<pole::PoleParams>().clone(),
-            wire: world.resource::<wire::WireParams>().clone(),
-            vine: world.resource::<vine::VineParams>().clone(),
-            shoot: world.resource::<shoot::ShootParams>().clone(),
-            leaf: world.resource::<leaf::LeafParams>().clone(),
-            cover: world.resource::<cover::CoverParams>().clone(),
-            weed: world.resource::<weed::WeedParams>().clone(),
-        }
-    }
-}
-
-/// One fragment of [`VineyardParams::apply`]: inserts the resource if the
-/// world has none, and otherwise overwrites it only if the value differs.
-fn set<T: Resource<Mutability = Mutable> + Clone + PartialEq>(world: &mut World, value: &T) {
-    match world.get_resource_mut::<T>() {
-        Some(mut live) => {
-            live.set_if_neq(value.clone());
-        }
-        None => world.insert_resource(value.clone()),
+    /// The world stores each fragment as its own resource so change detection
+    /// is per-element; this aggregate is the whole parameter set as one value,
+    /// for everything that has to hold one — Python calls, headless
+    /// generation, and the viewer panel's staged copy.
+    pub struct VineyardParams as PyVineyardParams("VineyardParams") for crate::Vineyard {
+        pub scene: SceneParams,
+        pub terrain: terrain::TerrainParams,
+        pub parcel: util::parcel::ParcelParams,
+        pub planting: util::planting::PlantingParams,
+        pub pole: pole::PoleParams,
+        pub wire: wire::WireParams,
+        pub vine: vine::VineParams,
+        pub shoot: shoot::ShootParams,
+        pub leaf: leaf::LeafParams,
+        pub cover: cover::CoverParams,
+        #[reflect(@Label("Weeds"))]
+        pub weed: weed::WeedParams,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use bevy::ecs::component::Mutable;
+    use misina_lab::Params;
+    use misina_lab::scene::doc::{Node, SceneDoc};
+    use misina_lab::scene::export::scene_doc;
+    use misina_lab::testing::{check_params, nudged};
+
     use super::*;
+    use crate::Vineyard;
+
+    /// What every field has to declare for the panel, the snippet and the
+    /// generated docs to be built from it — see `docs/editing-parameters.md`.
+    #[test]
+    fn every_field_declares_what_the_panel_and_the_docs_need() {
+        check_params::<VineyardParams>();
+    }
 
     /// `apply` reaches every fragment: a set with every field moved lands in
     /// a bare world and reads back out whole. A fragment `apply` skipped would
-    /// be missing from the world, which `from_world` panics on.
+    /// be missing from the world, which `read` panics on.
     #[test]
-    fn apply_and_from_world_round_trip_every_fragment() {
-        let params = crate::params::nudged();
+    fn apply_and_read_round_trip_every_fragment() {
+        let params = nudged::<VineyardParams>();
         let mut world = World::new();
         params.apply(&mut world);
-        assert_eq!(VineyardParams::from_world(&world), params);
+        assert_eq!(VineyardParams::read(&world), params);
+    }
+
+    fn generate(params: &VineyardParams) -> SceneDoc {
+        misina_lab::generate::scene::<Vineyard>(params).expect("the parcel generates")
+    }
+
+    fn scene() -> SceneDoc {
+        generate(&VineyardParams::default())
+    }
+
+    fn json(doc: &SceneDoc) -> String {
+        serde_json::to_string(doc).expect("the document serializes")
+    }
+
+    /// The scene a default one already standing reaches when `change` is
+    /// written to its `P` resource, beside the scene the same change generates
+    /// from scratch.
+    fn edited<P: Resource<Mutability = Mutable>>(
+        pick: impl FnOnce(&mut VineyardParams) -> &mut P,
+        change: impl Fn(&mut P),
+    ) -> (String, String) {
+        let mut want = VineyardParams::default();
+        change(pick(&mut want));
+
+        let mut app = util::testing::grown(VineyardParams::default());
+        change(&mut app.world_mut().resource_mut::<P>());
+        app.update();
+
+        let live = scene_doc(app.world_mut()).expect("the edited scene exports");
+        (json(&live), json(&generate(&want)))
+    }
+
+    /// An edit to a scene already standing has to land exactly where
+    /// generating those params from scratch would have.
+    ///
+    /// A layer re-applies its own params to the configs already placed rather
+    /// than having the layer above re-author them — see `leaf::reauthor` and
+    /// `shoot::reauthor` — so the two paths are different code, and every
+    /// other check here only ever exercises the second.
+    #[test]
+    fn an_edit_lands_where_generating_would_have() {
+        for (what, (edited, generated)) in [
+            (
+                "a leaf edit",
+                edited(|p| &mut p.leaf, |leaf| leaf.curl = 0.35),
+            ),
+            (
+                "a shoot edit",
+                edited(|p| &mut p.shoot, |shoot| shoot.length = 0.5),
+            ),
+            (
+                "a vine edit",
+                edited(|p| &mut p.vine, |vine| vine.trunk_height = 1.1),
+            ),
+            (
+                "a seed edit",
+                edited(|p| &mut p.scene, |scene| scene.seed = 7),
+            ),
+        ] {
+            assert_eq!(edited, generated, "{what} drifted");
+        }
+    }
+
+    /// Every prim in the document, depth first.
+    fn walk<'a>(node: &'a Node, into: &mut Vec<(String, &'a Node)>, at: &str) {
+        let path = format!("{at}/{}", node.name);
+        for child in &node.children {
+            walk(child, into, &path);
+        }
+        into.push((path, node));
+    }
+
+    fn prims(doc: &SceneDoc) -> Vec<(String, &Node)> {
+        let mut found = Vec::new();
+        walk(&doc.root, &mut found, "");
+        found
+    }
+
+    /// Nothing may reach a consumer untinted. `displayColor` is the one
+    /// channel both consumers read — the viewer draws it and USD carries it —
+    /// so a part without one renders grey everywhere.
+    ///
+    /// And no two parts *of one layer* may share a shade: two different
+    /// elements landing on the same colour is a palette choice, while two
+    /// meshes of one element landing on it is a jitter stream wired to a
+    /// constant seed, which every other check here would pass.
+    ///
+    /// Two layers are exceptions, both deliberate. A blade is shaded off the
+    /// drawing it was cut from rather than off which mesh it came out as, so a
+    /// budget spent on curls of one drawing shares that drawing's green — see
+    /// [`leaf::surface`]. And every tube of a cane is the shade of the shoot
+    /// mesh it stands in for, so that layer holds one shade per shoot
+    /// representative rather than one per tube.
+    #[test]
+    fn every_part_is_tinted_and_no_layer_repeats_a_shade() {
+        let doc = scene();
+        assert!(doc.parts.len() > 5, "the walk found parts to check");
+
+        let mut by_layer: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for part in &doc.parts {
+            assert!(
+                part.display_color.iter().any(|c| *c > 0.0),
+                "{} is untinted",
+                part.name
+            );
+            let layer = part.name.rsplit_once('_').expect("<Layer>_<index>").0;
+            by_layer.entry(layer).or_default().push(&part.name);
+        }
+
+        // One shoot part per representative, which is what a cane's tubes are
+        // shaded by.
+        let representatives = by_layer.get(shoot::PART).map_or(0, Vec::len);
+
+        for (layer, names) in &by_layer {
+            let shades: BTreeSet<[u32; 3]> = names
+                .iter()
+                .map(|name| {
+                    let part = doc.parts.iter().find(|p| &p.name == name).unwrap();
+                    part.display_color.map(|c| c.to_bits())
+                })
+                .collect();
+            let expected = if *layer == leaf::PART {
+                names.len().min(leaf::SHAPES)
+            } else if *layer == shoot::CANE {
+                representatives
+            } else {
+                names.len()
+            };
+            assert_eq!(
+                shades.len(),
+                expected,
+                "{layer}: two of {names:?} came out the same shade"
+            );
+        }
+    }
+
+    /// Every reference has to resolve, and a referencing prim has to be a leaf
+    /// of the tree. Both are silent failures in USD: a dangling reference
+    /// composes to an empty prim, and an `instanceable` prim's authored
+    /// children are simply unreachable.
+    ///
+    /// A prim is instanceable unless the part it draws is its own collider —
+    /// the ground, which has one instance and so shares nothing by giving
+    /// instancing up.
+    #[test]
+    fn every_reference_resolves_to_a_part_and_carries_no_children() {
+        let doc = scene();
+        let parts: BTreeSet<&str> = doc.parts.iter().map(|p| p.name.as_str()).collect();
+
+        let prims = prims(&doc);
+        let referencing = prims.iter().filter(|(_, n)| n.reference.is_some()).count();
+        assert!(
+            referencing > 1000,
+            "the scene draws geometry, got {referencing}"
+        );
+
+        for (path, node) in &prims {
+            let Some(reference) = &node.reference else {
+                continue;
+            };
+            assert!(
+                parts.contains(reference.as_str()),
+                "{path} draws a missing {reference}"
+            );
+            assert!(
+                node.children.is_empty(),
+                "{path} references and has children"
+            );
+            let solid = doc
+                .parts
+                .iter()
+                .any(|part| &part.name == reference && part.collision.is_some());
+            assert_eq!(
+                node.instanceable,
+                !solid,
+                "{path} draws {reference}, which {} a collider",
+                if solid { "carries" } else { "does not carry" }
+            );
+        }
+    }
+
+    /// A downstream Isaac Lab config is keyed on prim paths, so two prims may
+    /// never share one — a name collision would silently repoint it.
+    #[test]
+    fn every_prim_path_is_unique() {
+        let doc = scene();
+        let prims = prims(&doc);
+        let paths: BTreeSet<&str> = prims.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths.len(), prims.len(), "some prim path repeats");
+    }
+
+    /// A downstream sim keys its cache on these bytes, so the vineyard has to
+    /// come out the same every time — no element may iterate a hash map into
+    /// the document.
+    #[test]
+    fn generating_twice_gives_the_same_scene() {
+        let (once, twice) = (json(&scene()), json(&scene()));
+        assert!(once == twice, "byte for byte the same");
     }
 }

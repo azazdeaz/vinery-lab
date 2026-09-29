@@ -5,8 +5,8 @@
 
 Every parameter is reachable three ways under one name: as a control in the viewer
 (`cargo run --release`), as an attribute of a `vinerylab.VineyardParams` fragment,
-and as a field of the matching Isaac Lab `VineyardCfg` fragment.
-`params.pole.radius = 0.05` and `VineyardCfg(pole=PoleCfg(radius=0.05))` set the
+and as a field of the matching Isaac Lab `VineyardCfg` fragment: `params.<fragment>.<field>`
+in Python and `VineyardCfg(<fragment>=<Fragment>Cfg(<field>=...))` in Isaac Lab set the
 same thing. The slider range is what the viewer offers; Python takes any value the
 generator can build. Lengths are in meters.
 

@@ -46,8 +46,9 @@ If you only changed Rust source (not pyproject.toml), force a rebuild:
     mypy
     pytest tests
 
-`--features vinerylab/python` is what puts `src/python.rs` in front of clippy —
-it is out of the default feature set, so a plain `cargo clippy` never sees it.
+`--features vinerylab/python` is what puts the PyO3 side — `crates/misina-lab/src/python.rs`
+and what the `generator!` macro emits — in front of clippy. It is out of the
+default feature set, so a plain `cargo clippy` never sees it.
 
 `cargo test` also fails while the Python stub, the Isaac Lab cfg classes or
 `docs/parameters.md` are stale against the Rust params structs they are
@@ -77,7 +78,7 @@ in front of a commit.
 
 The panel is built from the params structs: one section per fragment of
 `VineyardParams`, one control per field, with the caption, range and tooltip
-read off the field's declaration — see `crates/vinerylab/src/ui.rs` and
+read off the field's declaration — see `crates/misina-lab/src/ui.rs` and
 [editing-parameters.md](editing-parameters.md). Sliders write a
 staged copy of the params; a value reaches the live resources once it has held
 still for 150 ms, and re-runs the layers below it. Dragging one is a single
@@ -91,7 +92,8 @@ Press `S` to write the scene out as `scene.json`, and build it with:
     python -m vinerylab.usd scene.json scene.usd
 
 `VINERYLAB_PERF=1 cargo run` logs a per-layer breakdown on any frame that
-rebuilt something — see `crates/vinerylab/src/perf.rs`.
+rebuilt something — the marks are `crates/vinerylab/src/perf.rs`, the report
+`crates/misina-lab/src/perf.rs`.
 
 `VINERYLAB_RECORD=demo.mp4 cargo run --release` records the window for the
 whole run. One captured frame becomes one video frame, so the stall a rebuild
@@ -99,7 +101,7 @@ causes costs a frame rather than the freeze a screen recorder would keep —
 which is the point of it, for demo videos. Frames are piped to `ffmpeg`, which
 has to be on `PATH`; the extension picks the container. `VINERYLAB_RECORD_FPS`
 sets the rate, 30 by default, and is also how fast the window is sampled. See
-`crates/vinerylab/src/record.rs`.
+`crates/misina-lab/src/record.rs`.
 
 ### Web build
 

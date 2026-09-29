@@ -8,6 +8,7 @@
 //!
 //! The footer also carries the controls that say how the scene is *drawn*,
 //! which is not what the params panel is for — it says what the scene *is*.
+//! A generator with a view control of its own hangs it under [`Footer`].
 
 use std::collections::HashMap;
 
@@ -22,7 +23,6 @@ use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
 use bevy::ui_widgets::{ValueChange, checkbox_self_update};
 
-use crate::elements::util::parcel::ShowLayout;
 use crate::scene::{Cable, Collider, Prototypes, UsdReference};
 use crate::ui::{BlocksCamera, PANEL_WIDTH, Tip, TipAbove};
 
@@ -45,6 +45,11 @@ pub fn plugin(app: &mut App) {
                 .chain(),
         );
 }
+
+/// Marks the footer node. Spawned in `Startup`, so a generator appends a
+/// control of its own from `PostStartup`, as a child of this entity.
+#[derive(Component, Clone, Copy, Default)]
+pub struct Footer;
 
 /// What the scene currently weighs. Written by [`tally`], read by [`show`].
 #[derive(Resource, Default, Debug, PartialEq, Eq)]
@@ -163,6 +168,7 @@ fn footer() -> impl Scene {
             padding: UiRect::axes(px(12), px(2)),
         }
         BlocksCamera
+        Footer
         Interaction
         ThemeBackgroundColor(tokens::WINDOW_BG)
         Children [
@@ -198,7 +204,6 @@ fn footer() -> impl Scene {
             ),
             // Holds the view controls at the far end, away from the figures.
             (Node { flex_grow: 1.0 }),
-            layout_checkbox(),
             wireframe_checkbox(),
         ]
     }
@@ -216,20 +221,6 @@ fn field(caption: &'static str, tip: &'static str, read: fn(&SceneStats) -> Stri
         Tip(tip)
         TipAbove
         Children [ (label("") Field(caption, read)) ]
-    }
-}
-
-/// Draws the solved row and post layout over the scene — a view control, not a
-/// parameter, so it sits here with the other one rather than in the panel.
-fn layout_checkbox() -> impl Scene {
-    bsn! {
-        @FeathersCheckbox { @caption: bsn! { (Text("Layout") ThemedText) } }
-        Tip("Draw the solved row and post layout over the scene.")
-        TipAbove
-        on(checkbox_self_update)
-        on(|change: On<ValueChange<bool>>, mut show: ResMut<ShowLayout>| {
-            show.0 = change.value;
-        })
     }
 }
 

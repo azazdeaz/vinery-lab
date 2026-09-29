@@ -11,10 +11,11 @@
 //! VINERYLAB_RECORD=demo.mp4 cargo run --release
 //! ```
 //!
-//! It covers the whole run: recording starts with the app and the file is
-//! finished when the window closes. [`FPS_ENV`] sets the rate (default
-//! [`FPS`]); frames between two due ones are not captured, so everything but a
-//! stall plays back at the speed it happened.
+//! The variable is `{PACKAGE}_RECORD`, so that is vinerylab's. It covers the
+//! whole run: recording starts with the app and the file is finished when the
+//! window closes. `{PACKAGE}_RECORD_FPS` sets the rate (default [`FPS`]);
+//! frames between two due ones are not captured, so everything but a stall
+//! plays back at the speed it happened.
 //!
 //! Frames are piped to `ffmpeg`, which has to be on `PATH`. That keeps a video
 //! encoder out of the dependency tree, and makes the container whatever the
@@ -31,26 +32,23 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 
-/// Set this to the video file to write, e.g. `demo.mp4`.
-pub const ENV: &str = "VINERYLAB_RECORD";
+use crate::Generator;
 
-/// Frames per second, both captured and written. Optional.
-pub const FPS_ENV: &str = "VINERYLAB_RECORD_FPS";
-
-/// The rate [`FPS_ENV`] defaults to: smooth enough for a screen demo, and half
-/// the readback traffic of 60.
+/// The rate `{PACKAGE}_RECORD_FPS` defaults to: smooth enough for a screen
+/// demo, and half the readback traffic of 60.
 pub const FPS: f64 = 30.0;
 
 /// How many out-of-order frames may wait before the one they are waiting for
 /// is given up on. See [`ready`].
 const REORDER_LIMIT: usize = 8;
 
-pub fn plugin(app: &mut App) {
-    let Some(path) = std::env::var_os(ENV) else {
+/// Records to the file `{PACKAGE}_RECORD` names, at `{PACKAGE}_RECORD_FPS`.
+pub fn plugin<G: Generator>(app: &mut App) {
+    let Some(path) = G::env("RECORD") else {
         return;
     };
-    let fps = std::env::var(FPS_ENV)
-        .ok()
+    let fps = G::env("RECORD_FPS")
+        .and_then(|fps| fps.into_string().ok())
         .and_then(|fps| fps.parse::<f64>().ok())
         .filter(|fps| *fps > 0.0)
         .unwrap_or(FPS);

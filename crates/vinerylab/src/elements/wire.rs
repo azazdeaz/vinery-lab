@@ -40,9 +40,9 @@
 //!
 //! [`cylinder_mesh`]: misina_lab::geometry::mesh::cylinder_mesh
 
-use crate::params::Slider;
-use crate::scene::{Library, Surface, configs_changed};
 use bevy::prelude::*;
+use misina_lab::params::Slider;
+use misina_lab::scene::{Library, Surface, configs_changed};
 
 use super::Grow;
 use super::pole;
@@ -56,7 +56,7 @@ pub const PART: &str = "Wire";
 ///
 /// A child rather than the span prim, so the scale that stretches the shared
 /// prototype to this span's length stays off the span's own frame — and so a
-/// collision proxy has somewhere to go beside it. See [`scene`](crate::scene).
+/// collision proxy has somewhere to go beside it. See [`scene`](misina_lab::scene).
 pub const STEEL: &str = "Steel";
 
 /// Vertices around a wire. Six: at 3 mm across, one more would be a triangle
@@ -225,7 +225,7 @@ mod tests {
     use crate::elements::util::parcel::VineyardLayout;
     use crate::elements::util::planting::POLE_SINK;
     use crate::elements::util::testing::{self, Organ, named_children, organs};
-    use crate::scene::{Prototypes, UsdReference};
+    use misina_lab::scene::{Prototypes, UsdReference};
 
     /// The stack a post carries: the fruiting wire on its axis at the head
     /// height, then pairs straddling it, the last a hand below the post top.

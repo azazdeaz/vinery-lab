@@ -1,5 +1,7 @@
 //! Interactive viewer: a windowed Bevy app that draws the generated scene and
-//! lets you edit its parameters, saving on demand.
+//! lets you edit its parameters, saving on demand. [`app`] builds it for a
+//! generator; the generator's `main` adds viewer-only plugins of its own and
+//! runs it.
 //!
 //! Element build systems spawn ordinary Bevy entities during `PreUpdate` and
 //! Bevy renders them directly. Saving exports the same entities as a scene
@@ -22,14 +24,15 @@ use bevy::pbr::wireframe::WireframePlugin;
 use bevy::prelude::*;
 use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 
-use crate::elements::util::parcel;
+use crate::Generator;
 use crate::ui::{BlocksCamera, PANEL_WIDTH};
 
 /// Where the save key writes the scene document.
 #[cfg(not(target_arch = "wasm32"))]
 const SCENE_PATH: &str = "scene.json";
 
-pub fn run() {
+/// The viewer for `G`, ready to run.
+pub fn app<G: Generator>() -> App {
     let mut app = App::new();
     // The sky is the scene's ambient light (see `setup`), so the flat
     // hemisphere-wide term `LightPlugin` inserts would only wash it out. Left
@@ -49,15 +52,10 @@ pub fn run() {
             ..default()
         }),
         PanOrbitCameraPlugin,
-        crate::scene::plugin,
-        crate::elements::plugin,
-        crate::ui::plugin,
+        crate::scene::plugin::<G>,
+        G::plugin,
+        crate::ui::plugin::<G>,
         crate::stats::plugin,
-        // Gizmos need `GizmoPlugin` (from `DefaultPlugins`), which the
-        // headless generation path's `MinimalPlugins` doesn't provide —
-        // see `parcel::debug_plugin`'s docs for why it's kept separate
-        // from `crate::elements::plugin`.
-        parcel::debug_plugin,
         // Drives the footer's wireframe checkbox. Requests no wgpu feature of
         // its own: `WgpuSettings` defaults to `Functionality`, which already
         // enables everything the adapter supports, and a plugin that asks for
@@ -78,23 +76,23 @@ pub fn run() {
     #[cfg(not(target_arch = "wasm32"))]
     app.add_systems(
         Update,
-        save_scene_on_key.run_if(input_just_pressed(KeyCode::KeyS)),
+        save_scene_on_key::<G>.run_if(input_just_pressed(KeyCode::KeyS)),
     );
 
     // Off by default: it logs a line per re-authored frame, which during a
     // slider drag is every frame. See [`crate::perf`].
-    if std::env::var_os(crate::perf::ENV).is_some() {
+    if G::env("PERF").is_some() {
         app.add_plugins(crate::perf::plugin);
     }
 
     // Off by default: records the window to the video file it names. See
     // [`crate::record`].
     #[cfg(not(target_arch = "wasm32"))]
-    if std::env::var_os(crate::record::ENV).is_some() {
-        app.add_plugins(crate::record::plugin);
+    if G::env("RECORD").is_some() {
+        app.add_plugins(crate::record::plugin::<G>);
     }
 
-    app.run();
+    app
 }
 
 /// How far from the camera shadows are still drawn, in meters. Past the engine
@@ -114,8 +112,9 @@ fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) 
         mediums.add(ScatteringMedium::earth(256, 256)),
     ));
 
-    // Framed for `TerrainParams::default()`'s 80x50m extent, not the 4x4m
-    // placeholder scale the defaults used before rows landed.
+    // Framed for a scene about 80 m across, vinerylab's default parcel.
+    // ponytail: one framing for every generator; a resource the generator
+    // inserts once a second scene size exists.
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(70.0, 55.0, 70.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -166,9 +165,12 @@ fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) 
 /// Exports the entities on screen: the viewer and the export draw from one
 /// scene graph, so there is no preview shape and export shape to keep in step.
 #[cfg(not(target_arch = "wasm32"))]
-fn save_scene_on_key(world: &mut World) -> Result<()> {
+fn save_scene_on_key<G: Generator>(world: &mut World) -> Result<()> {
     std::fs::write(SCENE_PATH, crate::scene::export::scene_json(world)?)?;
-    info!("saved {SCENE_PATH} — build it with `python -m vinerylab.usd {SCENE_PATH} scene.usd`");
+    info!(
+        "saved {SCENE_PATH} — build it with `python -m {}.usd {SCENE_PATH} scene.usd`",
+        G::PACKAGE
+    );
     Ok(())
 }
 

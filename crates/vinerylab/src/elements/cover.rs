@@ -39,12 +39,12 @@ use super::terrain::Ground;
 use super::util::parcel::{Band, VineyardLayout};
 use super::util::{color, material, par_map, shapes};
 use super::{Grow, Rng, SceneParams, salt};
-use crate::params::{Choices, Label, Slider};
-use crate::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed};
 use misina_lab::geometry::mesh::{MeshData, merge_meshes};
 use misina_lab::geometry::scatter::jittered_grid;
 use misina_lab::geometry::strand::{Bark, Strand, strand_mesh};
+use misina_lab::params::{Choices, Label, Slider};
 use misina_lab::quantize::{Metric, farthest_first};
+use misina_lab::scene::{Geometry, Library, Order, PrimRoot, Surface, UsdType, configs_changed};
 
 /// The mesh-library prefix the tiles are registered under.
 pub const PART: &str = "Sward";
@@ -602,7 +602,7 @@ mod tests {
     use super::*;
     use crate::elements::VineyardParams;
     use crate::elements::util::testing::{grown, named_children, organs, prim};
-    use crate::scene::Prototypes;
+    use misina_lab::scene::Prototypes;
 
     /// A parcel small enough to grow in a test and wide enough for three rows.
     fn small() -> VineyardParams {

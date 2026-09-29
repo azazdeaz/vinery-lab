@@ -2,71 +2,100 @@
 //! where Python tooling and readers look for it.
 //!
 //! Regions marked `# >>> generated: <name>` … `# <<< generated: <name>` in
-//! four Python files are rendered here from the params walk in
-//! [`crate::params`], and `docs/parameters.md` is rendered whole:
+//! four files of the generator's Python package are rendered here from the
+//! params walk in [`params`](crate::params), and the parameters page is
+//! rendered whole:
 //!
-//! - `python/vinerylab/_core.pyi` — the stub the type checker and the IDE read.
-//! - `python/vinerylab/__init__.py` — the package's re-exports.
-//! - `python/vinerylab/isaaclab/vineyard_cfg.py` — the `@configclass` mirrors.
-//! - `python/vinerylab/isaaclab/__init__.py` — their re-exports.
+//! - `python/{PACKAGE}/_core.pyi` — the stub the type checker and the IDE read.
+//! - `python/{PACKAGE}/__init__.py` — the package's re-exports.
+//! - `python/{PACKAGE}/isaaclab/{name}_cfg.py` — the `@configclass` mirrors.
+//! - `python/{PACKAGE}/isaaclab/__init__.py` — their re-exports.
+//! - the docs page the generator names, `docs/parameters.md` in this repo.
 //!
-//! `cargo test` fails while any of them is stale, and
-//! `cargo test regen_params -- --ignored` rewrites them. Everything outside
-//! the markers is hand-written and left alone.
+//! Paths are relative to the generator crate, which holds them to the stale
+//! check from a test: it fails while any of them is stale, and its ignored
+//! twin rewrites them. Everything outside the markers is hand-written and
+//! left alone.
 
-use crate::elements::VineyardParams;
+use std::path::{Path, PathBuf};
+
+use crate::Generator;
 use crate::params::{self, Widget};
 
 /// One generated piece: a file and, within it, the marked region it fills —
 /// or the whole file, when it has no region.
 pub struct Target {
-    pub path: &'static str,
+    pub path: String,
     pub region: Option<&'static str>,
     pub render: fn() -> String,
 }
 
-pub const TARGETS: &[Target] = &[
-    Target {
-        path: "python/vinerylab/_core.pyi",
-        region: Some("fragments"),
-        render: stub_fragments,
-    },
-    Target {
-        path: "python/vinerylab/_core.pyi",
-        region: Some("aggregate"),
-        render: stub_aggregate,
-    },
-    Target {
-        path: "python/vinerylab/__init__.py",
-        region: Some("exports"),
-        render: package_exports,
-    },
-    Target {
-        path: "python/vinerylab/isaaclab/vineyard_cfg.py",
-        region: Some("fragments"),
-        render: cfg_fragments,
-    },
-    Target {
-        path: "python/vinerylab/isaaclab/vineyard_cfg.py",
-        region: Some("aggregate"),
-        render: cfg_aggregate,
-    },
-    Target {
-        path: "python/vinerylab/isaaclab/__init__.py",
-        region: Some("imports"),
-        render: isaaclab_imports,
-    },
-    Target {
-        path: "python/vinerylab/isaaclab/__init__.py",
-        region: Some("all"),
-        render: isaaclab_all,
-    },
-    Target {
-        path: "../../docs/parameters.md",
-        region: None,
-        render: docs,
-    },
-];
+/// Every generated piece of `G`'s package, plus its parameters page at
+/// `docs`. Paths are relative to the generator crate.
+pub fn targets<G: Generator>(docs: &str) -> Vec<Target> {
+    let package = G::PACKAGE;
+    let cfg = format!(
+        "python/{package}/isaaclab/{}_cfg.py",
+        G::NAME.to_lowercase()
+    );
+    vec![
+        Target {
+            path: format!("python/{package}/_core.pyi"),
+            region: Some("fragments"),
+            render: stub_fragments::<G>,
+        },
+        Target {
+            path: format!("python/{package}/_core.pyi"),
+            region: Some("aggregate"),
+            render: stub_aggregate::<G>,
+        },
+        Target {
+            path: format!("python/{package}/__init__.py"),
+            region: Some("exports"),
+            render: package_exports::<G>,
+        },
+        Target {
+            path: cfg.clone(),
+            region: Some("fragments"),
+            render: cfg_fragments::<G>,
+        },
+        Target {
+            path: cfg,
+            region: Some("aggregate"),
+            render: cfg_aggregate::<G>,
+        },
+        Target {
+            path: format!("python/{package}/isaaclab/__init__.py"),
+            region: Some("imports"),
+            render: isaaclab_imports::<G>,
+        },
+        Target {
+            path: format!("python/{package}/isaaclab/__init__.py"),
+            region: Some("all"),
+            render: isaaclab_all::<G>,
+        },
+        Target {
+            path: docs.to_string(),
+            region: None,
+            render: docs_page::<G>,
+        },
+    ]
+}
+
+/// Every target whose file under `root` does not read as the structs say now,
+/// with the text it should hold. A generator asserts this empty from one test
+/// and writes it out from an ignored one.
+pub fn stale<G: Generator>(root: &Path, docs: &str) -> Vec<(PathBuf, String)> {
+    targets::<G>(docs)
+        .iter()
+        .filter_map(|target| {
+            let path = root.join(&target.path);
+            let current = std::fs::read_to_string(&path).unwrap_or_default();
+            let fresh = render(&current, target).unwrap_or_else(|err| panic!("{err}"));
+            (fresh != current).then_some((path, fresh))
+        })
+        .collect()
+}
 
 /// `current` with the target's text in place: its region replaced, or the
 /// whole file when it has none.
@@ -163,11 +192,11 @@ fn stub_type(fragment: &bevy::reflect::NamedField, field: &bevy::reflect::NamedF
 }
 
 /// The class names, sorted the way the import sorter wants them.
-fn sorted_classes(suffix: &str) -> Vec<String> {
-    let mut names: Vec<String> = params::fragments()
+fn sorted_classes<G: Generator>(suffix: &str) -> Vec<String> {
+    let mut names: Vec<String> = params::fragments::<G::Params>()
         .map(|fragment| format!("{}{suffix}", params::stem(fragment)))
         .collect();
-    names.push(format!("Vineyard{suffix}"));
+    names.push(format!("{}{suffix}", G::NAME));
     names.sort();
     names
 }
@@ -175,10 +204,10 @@ fn sorted_classes(suffix: &str) -> Vec<String> {
 /// `_core.pyi`: a `Literal` per choice field, then one class per fragment
 /// with every field documented and a keyword-only constructor carrying the
 /// defaults.
-fn stub_fragments() -> String {
-    let default = VineyardParams::default();
+fn stub_fragments<G: Generator>() -> String {
+    let default = G::Params::default();
     let mut out = String::new();
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         for field in params::fields(fragment) {
             if let Widget::Dropdown(names) = params::widget(field) {
                 let quoted: Vec<String> = names.iter().map(|name| format!("{name:?}")).collect();
@@ -199,7 +228,7 @@ fn stub_fragments() -> String {
             }
         }
     }
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         let stem = params::stem(fragment);
         out += &format!("class {stem}Params:\n");
         out += &docstring(
@@ -226,11 +255,11 @@ fn stub_fragments() -> String {
     out
 }
 
-/// `_core.pyi`, inside `class VineyardParams`: one attribute per fragment and
+/// `_core.pyi`, inside `class {NAME}Params`: one attribute per fragment and
 /// the constructor that takes them.
-fn stub_aggregate() -> String {
+fn stub_aggregate<G: Generator>() -> String {
     let mut out = String::new();
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         out += &format!(
             "    {}: {}Params\n",
             fragment.name(),
@@ -238,7 +267,7 @@ fn stub_aggregate() -> String {
         );
     }
     out += "\n    def __init__(\n        self,\n";
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         out += &format!(
             "        {}: {}Params | None = None,\n",
             fragment.name(),
@@ -249,9 +278,9 @@ fn stub_aggregate() -> String {
     out
 }
 
-/// `vinerylab/__init__.py`: the re-export of every class in `_core`.
-fn package_exports() -> String {
-    let names = sorted_classes("Params");
+/// `{PACKAGE}/__init__.py`: the re-export of every class in `_core`.
+fn package_exports<G: Generator>() -> String {
+    let names = sorted_classes::<G>("Params");
     let mut out = String::from("from ._core import (\n");
     for name in &names {
         out += &format!("    {name},\n");
@@ -264,12 +293,12 @@ fn package_exports() -> String {
     out
 }
 
-/// `vineyard_cfg.py`: one `@configclass` per fragment, and the `FRAGMENTS`
+/// `{name}_cfg.py`: one `@configclass` per fragment, and the `FRAGMENTS`
 /// table the spawner walks.
-fn cfg_fragments() -> String {
-    let default = VineyardParams::default();
+fn cfg_fragments<G: Generator>() -> String {
+    let default = G::Params::default();
     let mut out = String::new();
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         let stem = params::stem(fragment);
         out += &format!("@configclass\nclass {stem}Cfg:\n");
         out += &docstring(
@@ -290,7 +319,7 @@ fn cfg_fragments() -> String {
         out += "\n\n";
     }
     out += "FRAGMENTS: tuple[tuple[str, type], ...] = (\n";
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         out += &format!(
             "    ({:?}, {}Cfg),\n",
             fragment.name(),
@@ -300,20 +329,25 @@ fn cfg_fragments() -> String {
     out += ")\n";
     out += &docstring(
         &[
-            "The geometry fragments, in the order `VineyardParams` takes them.".to_string(),
-            "The single list both the pyclass conversion and the cache key walk. Everything on \
-             `VineyardCfg` that is *not* in this list is applied to the spawned prim rather than \
-             baked into the USD, and so must not take part in the cache key."
-                .to_string(),
+            format!(
+                "The geometry fragments, in the order `{}Params` takes them.",
+                G::NAME
+            ),
+            format!(
+                "The single list both the pyclass conversion and the cache key walk. Everything on \
+                 `{}Cfg` that is *not* in this list is applied to the spawned prim rather than \
+                 baked into the USD, and so must not take part in the cache key.",
+                G::NAME
+            ),
         ],
         0,
     );
     out
 }
 
-/// `vineyard_cfg.py`, inside `class VineyardCfg`: one fragment field each.
-fn cfg_aggregate() -> String {
-    params::fragments()
+/// `{name}_cfg.py`, inside `class {NAME}Cfg`: one fragment field each.
+fn cfg_aggregate<G: Generator>() -> String {
+    params::fragments::<G::Params>()
         .map(|fragment| {
             let stem = params::stem(fragment);
             format!("    {}: {stem}Cfg = {stem}Cfg()\n", fragment.name())
@@ -323,9 +357,9 @@ fn cfg_aggregate() -> String {
 
 /// `isaaclab/__init__.py`: the import of every cfg class. The blank line
 /// after it is where the import sorter wants the block to end.
-fn isaaclab_imports() -> String {
-    let mut out = String::from("from .vineyard_cfg import (\n");
-    for name in sorted_classes("Cfg") {
+fn isaaclab_imports<G: Generator>() -> String {
+    let mut out = format!("from .{}_cfg import (\n", G::NAME.to_lowercase());
+    for name in sorted_classes::<G>("Cfg") {
         out += &format!("    {name},\n");
     }
     out += ")\n\n";
@@ -333,8 +367,8 @@ fn isaaclab_imports() -> String {
 }
 
 /// `isaaclab/__init__.py`, inside `__all__`: the cfg classes' entries.
-fn isaaclab_all() -> String {
-    sorted_classes("Cfg")
+fn isaaclab_all<G: Generator>() -> String {
+    sorted_classes::<G>("Cfg")
         .iter()
         .map(|name| format!("    {name:?},\n"))
         .collect()
@@ -342,21 +376,22 @@ fn isaaclab_all() -> String {
 
 // ─── Docs ───────────────────────────────────────────────────────────
 
-/// `docs/parameters.md`: every fragment's docs and a table of its fields.
-fn docs() -> String {
-    let default = VineyardParams::default();
-    let mut out = String::from(
+/// The parameters page: every fragment's docs and a table of its fields.
+fn docs_page<G: Generator>() -> String {
+    let default = G::Params::default();
+    let (name, package) = (G::NAME, G::PACKAGE);
+    let mut out = format!(
         "<!-- Generated from the Rust params structs by `cargo test regen_params -- --ignored`.\n\
          \x20    Edit the structs, not this file: docs/editing-parameters.md says how. -->\n\n\
          # Parameters\n\n\
          Every parameter is reachable three ways under one name: as a control in the viewer\n\
-         (`cargo run --release`), as an attribute of a `vinerylab.VineyardParams` fragment,\n\
-         and as a field of the matching Isaac Lab `VineyardCfg` fragment.\n\
-         `params.pole.radius = 0.05` and `VineyardCfg(pole=PoleCfg(radius=0.05))` set the\n\
+         (`cargo run --release`), as an attribute of a `{package}.{name}Params` fragment,\n\
+         and as a field of the matching Isaac Lab `{name}Cfg` fragment: `params.<fragment>.<field>`\n\
+         in Python and `{name}Cfg(<fragment>=<Fragment>Cfg(<field>=...))` in Isaac Lab set the\n\
          same thing. The slider range is what the viewer offers; Python takes any value the\n\
          generator can build. Lengths are in meters.\n\n",
     );
-    for fragment in params::fragments() {
+    for fragment in params::fragments::<G::Params>() {
         let stem = params::stem(fragment);
         out += &format!(
             "## {}\n\n`{stem}Params` in Python, `{stem}Cfg` in Isaac Lab.\n\n",
@@ -398,46 +433,7 @@ fn docs() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
-    use std::path::PathBuf;
-
-    fn root() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    }
-
-    /// Every generated region reads as the structs say now.
-    #[test]
-    fn generated_python_and_docs_are_fresh() {
-        let mut stale = BTreeSet::new();
-        for target in TARGETS {
-            let current = std::fs::read_to_string(root().join(target.path)).unwrap_or_default();
-            let fresh = render(&current, target).unwrap_or_else(|err| panic!("{err}"));
-            if fresh != current {
-                stale.insert(target.path);
-            }
-        }
-        assert!(
-            stale.is_empty(),
-            "stale: {stale:?} — run `cargo test regen_params -- --ignored`"
-        );
-    }
-
-    /// Rewrites the generated files from the structs.
-    ///
-    /// A dev tool rather than a test, and `#[ignore]`d for the same reason
-    /// `generate::dump_scene` is: it writes files and asserts nothing.
-    #[test]
-    #[ignore]
-    fn regen_params() {
-        for target in TARGETS {
-            let path = root().join(target.path);
-            let current = std::fs::read_to_string(&path).unwrap_or_default();
-            let fresh = render(&current, target).unwrap_or_else(|err| panic!("{err}"));
-            if fresh != current {
-                std::fs::write(&path, fresh).unwrap();
-            }
-        }
-    }
+    use crate::testing::fixture::Boxes;
 
     #[test]
     fn splice_replaces_the_region_and_nothing_else() {
@@ -460,5 +456,24 @@ mod tests {
         assert!(long.starts_with("    \"\"\"a a a"));
         assert!(long.contains("\n\n    b\n    \"\"\"\n"), "{long}");
         assert!(long.lines().all(|line| line.len() <= WIDTH), "{long}");
+    }
+
+    /// The generator's names reach every file: its package in the paths, its
+    /// stem in the class names and the cfg module.
+    #[test]
+    fn the_targets_are_named_after_the_generator() {
+        let targets = targets::<Boxes>("docs/parameters.md");
+        let paths: Vec<&str> = targets.iter().map(|t| t.path.as_str()).collect();
+        assert!(
+            paths.contains(&"python/boxlab/isaaclab/boxes_cfg.py"),
+            "{paths:?}"
+        );
+        assert!(paths.contains(&"docs/parameters.md"), "{paths:?}");
+
+        assert!(package_exports::<Boxes>().contains("    BoxesParams,\n"));
+        assert!(isaaclab_imports::<Boxes>().starts_with("from .boxes_cfg import (\n"));
+        assert!(cfg_aggregate::<Boxes>().contains("    boxes: BoxCfg = BoxCfg()\n"));
+        assert!(stub_fragments::<Boxes>().contains("BoxMaterial = Literal[\"wood\", \"stone\"]"));
+        assert!(docs_page::<Boxes>().contains("## The boxes\n"));
     }
 }

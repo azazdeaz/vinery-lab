@@ -5,15 +5,15 @@ Everything else reads that declaration:
 
 | Surface | How it gets there |
 |---|---|
-| Viewer panel: caption, slider range, tooltip | `crates/vinerylab/src/ui.rs` walks the structs through Bevy reflection |
-| **Copy Isaac Lab cfg** snippet | `crates/vinerylab/src/snippet.rs`, the same walk |
-| Python constructor `PoleParams(radius=0.05)` | `crates/vinerylab/src/python.rs`, keyword arguments set fields by name |
+| Viewer panel: caption, slider range, tooltip | `crates/misina-lab/src/ui.rs` walks the structs through Bevy reflection |
+| **Copy Isaac Lab cfg** snippet | `crates/misina-lab/src/snippet.rs`, the same walk |
+| Python constructor `PoleParams(radius=0.05)` | `crates/misina-lab/src/python.rs`, keyword arguments set fields by name |
 | Type stub `crates/vinerylab/python/vinerylab/_core.pyi` | generated |
 | Isaac Lab `PoleCfg` in `crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py` | generated |
 | Re-exports in both `__init__.py` files | generated |
 | Reference page [`docs/parameters.md`](parameters.md) | generated |
 
-`crates/vinerylab/src/params.rs` is the walk; `crates/vinerylab/src/codegen.rs` is the generator.
+`crates/misina-lab/src/params.rs` is the walk; `crates/misina-lab/src/codegen.rs` is the generator.
 
 ## Change or add a parameter
 
@@ -78,13 +78,14 @@ and the budget knobs, `variations` and `detail`, last.
 
 A new element's params struct is a fragment. Beyond the element file itself:
 
-1. Derive `Reflect` on the struct and declare its fields as above.
-2. Add it to `VineyardParams` in `crates/vinerylab/src/elements/mod.rs`, and to `apply` and
-   `from_world` below it. A test moves every field through both and fails on
-   a missed line.
-3. Add the type to the `py_params!` list in `crates/vinerylab/src/python.rs` and a `Py<T>`
-   field to `PyVineyardParams` beside it.
-4. Regenerate, as above. The stub, the cfg class, the `FRAGMENTS` table and
+1. Derive `Resource, Reflect, Clone, Debug, PartialEq` on the struct, give
+   it the `#[cfg_attr(feature = "python", pyo3::pyclass(...))]` line the
+   other fragments carry, and declare its fields as above.
+2. Add one line to the `misina_lab::generator!` call in
+   `crates/vinerylab/src/elements/mod.rs`, `pub weed: weed::WeedParams,`.
+   The macro writes the apply, the read-back and the Python classes from
+   that list; a test moves every field through the first two.
+3. Regenerate, as above. The stub, the cfg class, the `FRAGMENTS` table and
    every re-export come out of the walk.
 
 ## Where the text goes

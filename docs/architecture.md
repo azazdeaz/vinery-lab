@@ -6,7 +6,7 @@ plain JSON **scene document**, and turned into USD by Python:
 ```
 params → Bevy entities (Transform, Mesh3d, Name, UsdReference)
               ↓                              ↓
-     the viewer renders them      crates/vinerylab/src/scene/export.rs → SceneDoc (JSON)
+     the viewer renders them      crates/misina-lab/src/scene/export.rs → SceneDoc (JSON)
                                              ↓
                             crates/vinerylab/python/vinerylab/usd/build.py → .usd
 ```
@@ -278,7 +278,7 @@ clears the library.
 **A categorical param is a string naming one of the element's fixed list**
 (`CoverParams::kind`, `WeedParams::strip`), parsed once into a Rust enum with
 `ALL`/`NAMES`/`parse`, and declared on the field as `@Choices(&Kind::NAMES)`.
-The name is validated where it enters from Python (`python.rs::snapshot`
+The name is validated where it enters from Python (`misina_lab::python::checked`
 raises `ValueError` for any `@Choices` field); the element itself falls back
 to the default with a warning, because a build system is no place to fail.
 The viewer offers the list as a dropdown and only ever writes a valid name.
@@ -304,7 +304,7 @@ to know.
 
 ## Export
 
-`crates/vinerylab/src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
+`crates/misina-lab/src/scene/export.rs` walks named entities from the `UsdRoot` down and emits a
 `SceneDoc`. Unnamed entities and their subtrees are skipped, which is how the
 Y-up correction stays out of the file. Siblings are emitted in name order
 rather than spawn order, so a layer that rebuilt itself last does not move in

@@ -26,10 +26,10 @@
 //! the [`Ground`] field, and chaining them here guarantees the ordering that
 //! system-ordering-across-elements would only imply.
 
-use crate::params::{Label, Slider};
-use crate::scene::doc::TRIANGLE_MESH;
-use crate::scene::{Library, PrimRoot};
 use bevy::prelude::*;
+use misina_lab::params::{Label, Slider};
+use misina_lab::scene::doc::TRIANGLE_MESH;
+use misina_lab::scene::{Library, PrimRoot};
 
 use super::util::{color, material, parcel, planting};
 use super::{Grow, Rng};
@@ -381,7 +381,7 @@ impl Ground {
     ///
     /// Each axis rounds its own spacing to whole spans, so this is not simply
     /// `feature_size / detail`. Resampling the field -- which is what
-    /// [`Library::heightfield`](crate::scene::Library::heightfield) has a
+    /// [`Library::heightfield`](misina_lab::scene::Library::heightfield) has a
     /// consumer do -- has to match the narrower of the two to resolve every
     /// span the mesh carries.
     pub fn finest_spacing(&self) -> f32 {
@@ -496,8 +496,8 @@ fn perlin(x: f64, y: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::elements::util::testing::{bounds, face_normal, faces, scene_app};
-    use crate::scene::doc::SceneDoc;
-    use crate::scene::export::scene_doc;
+    use misina_lab::scene::doc::SceneDoc;
+    use misina_lab::scene::export::scene_doc;
 
     /// Builds the terrain once, and hands back the app together with what the
     /// export would make of it.

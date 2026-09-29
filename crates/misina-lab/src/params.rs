@@ -5,22 +5,27 @@
 //! viewer panel, the config snippet, the Python constructors and the generated
 //! Python files are written against that walk rather than against the fields
 //! themselves, which is what lets a parameter be declared once, in its struct.
-//! `docs/editing-parameters.md` is the authoring guide; the test at the bottom
-//! is what holds a struct to it.
+//! `docs/editing-parameters.md` is the authoring guide;
+//! [`testing::check_params`](crate::testing::check_params) is what holds a
+//! struct to it.
 //!
 //! A field's doc comment is read in two parts. The **first paragraph** is the
 //! user-facing description — the tooltip, the Python docstring and the row in
 //! `docs/parameters.md` — so it has to stand on its own and may not use
 //! rustdoc link syntax. Anything after it is for a reader of the Rust. A
 //! struct's doc comment is user-facing in full: it becomes the class docstring.
+//!
+//! The aggregate the walk starts from is declared with
+//! [`generator!`](crate::generator).
 
 use std::any::TypeId;
 
+use bevy::ecs::component::Mutable;
 use bevy::prelude::*;
 use bevy::reflect::structs::{Struct, StructInfo};
-use bevy::reflect::{NamedField, PartialReflect, ReflectMut, ReflectRef, TypeInfo, Typed};
+use bevy::reflect::{NamedField, PartialReflect, ReflectMut, ReflectRef, TypeInfo};
 
-use crate::elements::VineyardParams;
+use crate::Params;
 
 /// A numeric field's slider: the range the panel offers and the step it moves
 /// in. The display precision follows from the step.
@@ -50,12 +55,171 @@ pub enum Widget {
     Checkbox,
 }
 
+// ─── The aggregate ──────────────────────────────────────────────────
+
+/// Declares a generator's params aggregate from its field list, once.
+///
+/// ```ignore
+/// misina_lab::generator! {
+///     /// A plain snapshot of every element's params.
+///     pub struct VineyardParams as PyVineyardParams("VineyardParams") for crate::Vineyard {
+///         pub scene: SceneParams,
+///         pub terrain: terrain::TerrainParams,
+///         #[reflect(@Label("Weeds"))]
+///         pub weed: weed::WeedParams,
+///     }
+/// }
+/// ```
+///
+/// Emits the struct with `Reflect, Clone, Debug, Default, PartialEq` derived,
+/// its [`Params`] implementation, and — under the calling crate's `python`
+/// feature — the `#[pyclass]` aggregate Python sees under the quoted name,
+/// holding one `Py<T>` per fragment with a keyword-only constructor,
+/// `__repr__`, `generate_scene_json` and `write_usd`; a keyword constructor
+/// and `__repr__` for every fragment; and `fn module(m)`, which registers all
+/// of them and `__version__` on the extension module. Every fragment is a
+/// `Resource` deriving `Reflect, Clone, Debug, Default, PartialEq`, with the
+/// `pyclass` attribute `docs/editing-parameters.md` shows.
+///
+/// Fragments are held as `Py<T>` rather than by value so attribute access
+/// hands back the *same* Python object every time. With plain fields PyO3's
+/// generated getter clones, and `params.terrain.detail = 8` would mutate a
+/// throwaway copy while the scene silently kept the old value.
+#[macro_export]
+macro_rules! generator {
+    (
+        $(#[$meta:meta])*
+        $vis:vis struct $name:ident as $py:ident($py_name:literal) for $generator:ty {
+            $(
+                $(#[$field_meta:meta])*
+                $field_vis:vis $field:ident : $ty:ty
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        #[derive(::bevy::prelude::Reflect, Clone, Debug, Default, PartialEq)]
+        $vis struct $name {
+            $( $(#[$field_meta])* $field_vis $field: $ty, )*
+        }
+
+        impl $crate::Params for $name {
+            fn apply(&self, world: &mut ::bevy::prelude::World) {
+                $( $crate::params::set(world, &self.$field); )*
+            }
+
+            fn read(world: &::bevy::prelude::World) -> Self {
+                Self { $( $field: world.resource::<$ty>().clone(), )* }
+            }
+        }
+
+        #[cfg(feature = "python")]
+        #[::pyo3::pyclass(name = $py_name, get_all, set_all)]
+        $vis struct $py {
+            $( $field_vis $field: ::pyo3::Py<$ty>, )*
+        }
+
+        #[cfg(feature = "python")]
+        #[::pyo3::pymethods]
+        impl $py {
+            #[new]
+            #[pyo3(signature = ( $( $field = None ),* ))]
+            #[allow(clippy::too_many_arguments)]
+            fn py_new(
+                py: ::pyo3::Python<'_>,
+                $( $field: Option<::pyo3::Py<$ty>>, )*
+            ) -> ::pyo3::PyResult<Self> {
+                Ok(Self {
+                    $( $field: match $field {
+                        Some(fragment) => fragment,
+                        None => ::pyo3::Py::new(py, <$ty>::default())?,
+                    }, )*
+                })
+            }
+
+            fn __repr__(&self, py: ::pyo3::Python<'_>) -> String {
+                format!("{:?}", self.fragments(py))
+            }
+
+            /// Generates the scene and returns it as a JSON document.
+            fn generate_scene_json(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<String> {
+                $crate::python::scene_json::<$generator>(py, &self.snapshot(py)?)
+            }
+
+            /// Generates the scene and writes it to `path` as USD.
+            fn write_usd(&self, py: ::pyo3::Python<'_>, path: &str) -> ::pyo3::PyResult<()> {
+                $crate::python::write_usd::<$generator>(py, &self.snapshot(py)?, path)
+            }
+        }
+
+        #[cfg(feature = "python")]
+        impl $py {
+            /// The fragments copied out of their Python objects into the plain
+            /// aggregate, so the generation call needs no GIL.
+            fn fragments(&self, py: ::pyo3::Python<'_>) -> $name {
+                $name { $( $field: (*self.$field.borrow(py)).clone(), )* }
+            }
+
+            /// The fragments, checked: every `@Choices` field holds one of
+            /// its names.
+            fn snapshot(&self, py: ::pyo3::Python<'_>) -> ::pyo3::PyResult<$name> {
+                $crate::python::checked(self.fragments(py))
+            }
+        }
+
+        $(
+            #[cfg(feature = "python")]
+            #[::pyo3::pymethods]
+            impl $ty {
+                #[new]
+                #[pyo3(signature = (**kwargs))]
+                fn py_new(
+                    kwargs: Option<&::pyo3::Bound<'_, ::pyo3::types::PyDict>>,
+                ) -> ::pyo3::PyResult<Self> {
+                    $crate::python::from_kwargs(kwargs)
+                }
+
+                fn __repr__(&self) -> String {
+                    format!("{self:?}")
+                }
+            }
+        )*
+
+        /// Registers the aggregate, every fragment and `__version__` on the
+        /// extension module.
+        ///
+        /// The version is part of the cache key the Isaac Lab spawner builds:
+        /// the same params authored by a different generator are a different
+        /// scene.
+        #[cfg(feature = "python")]
+        $vis fn module(
+            m: &::pyo3::Bound<'_, ::pyo3::types::PyModule>,
+        ) -> ::pyo3::PyResult<()> {
+            use ::pyo3::types::PyModuleMethods as _;
+            m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+            m.add_class::<$py>()?;
+            $( m.add_class::<$ty>()?; )*
+            Ok(())
+        }
+    };
+}
+
+/// One fragment of [`Params::apply`]: inserts the resource if the world has
+/// none, and otherwise overwrites it only if the value differs.
+pub fn set<T: Resource<Mutability = Mutable> + Clone + PartialEq>(world: &mut World, value: &T) {
+    match world.get_resource_mut::<T>() {
+        Some(mut live) => {
+            live.set_if_neq(value.clone());
+        }
+        None => world.insert_resource(value.clone()),
+    }
+}
+
 // ─── The walk ───────────────────────────────────────────────────────
 
-/// The fragments of [`VineyardParams`], in declaration order.
-pub fn fragments() -> impl Iterator<Item = &'static NamedField> {
-    let TypeInfo::Struct(info) = VineyardParams::type_info() else {
-        unreachable!("VineyardParams is a struct");
+/// The fragments of a params aggregate, in declaration order.
+pub fn fragments<P: Params>() -> impl Iterator<Item = &'static NamedField> {
+    let TypeInfo::Struct(info) = P::type_info() else {
+        unreachable!("a `Params` aggregate is a struct");
     };
     info.iter()
 }
@@ -147,7 +311,7 @@ pub fn summary(field: &NamedField) -> String {
 
 /// A field's value on a params set, by fragment and field name.
 pub fn get<'a>(
-    params: &'a VineyardParams,
+    params: &'a dyn Struct,
     fragment: &str,
     field: &str,
 ) -> Option<&'a dyn PartialReflect> {
@@ -158,7 +322,7 @@ pub fn get<'a>(
 }
 
 pub fn get_mut<'a>(
-    params: &'a mut VineyardParams,
+    params: &'a mut dyn Struct,
     fragment: &str,
     field: &str,
 ) -> Option<&'a mut dyn PartialReflect> {
@@ -241,93 +405,11 @@ fn python_float(value: f32) -> String {
     }
 }
 
-/// A params set with every field moved off its default, for tests that have
-/// to see each one go somewhere: numbers up by one step, flags flipped, names
-/// on the next choice.
-#[cfg(test)]
-pub fn nudged() -> VineyardParams {
-    let mut params = VineyardParams::default();
-    for fragment in fragments() {
-        for field in fields(fragment) {
-            let widget = widget(field);
-            let value = get_mut(&mut params, fragment.name(), field.name()).unwrap();
-            match widget {
-                Widget::Slider(slider) => {
-                    let now = number(value).unwrap();
-                    set_number(value, now + slider.step);
-                }
-                Widget::Dropdown(names) => {
-                    let name = value.try_downcast_mut::<String>().unwrap();
-                    let at = names.iter().position(|n| n == name).unwrap();
-                    *name = names[(at + 1) % names.len()].to_string();
-                }
-                Widget::Checkbox => {
-                    let flag = value.try_downcast_mut::<bool>().unwrap();
-                    *flag = !*flag;
-                }
-            }
-        }
-    }
-    params
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// What every field has to declare for the panel, the snippet and the
-    /// generated docs to be built from it — see `docs/editing-parameters.md`.
-    #[test]
-    fn every_field_declares_what_the_panel_and_the_docs_need() {
-        let default = VineyardParams::default();
-        for fragment in fragments() {
-            let info = fragment_info(fragment);
-            let at = format!("{}::{}", stem(fragment), "");
-            assert!(
-                !paragraphs(info.docs()).is_empty(),
-                "{at}: the struct has no doc comment, and it is the class docstring"
-            );
-            assert!(
-                !info.docs().unwrap_or_default().contains('['),
-                "{at}: the struct docs use rustdoc link syntax, which Python would show verbatim"
-            );
-            for field in fields(fragment) {
-                let at = format!("{}.{}", fragment.name(), field.name());
-                let summary = summary(field);
-                assert!(!summary.is_empty(), "{at}: no doc comment");
-                assert!(
-                    !summary.contains('['),
-                    "{at}: the first paragraph uses rustdoc link syntax; move it to a later one"
-                );
-                let value = get(&default, fragment.name(), field.name()).unwrap();
-                match widget(field) {
-                    Widget::Slider(Slider { min, max, step }) => {
-                        assert!(
-                            python_type(field) != "bool" && python_type(field) != "str",
-                            "{at}: a @Slider on a non-numeric field"
-                        );
-                        let now = number(value).unwrap();
-                        assert!(
-                            min < max && step > 0.0,
-                            "{at}: slider {min}..={max} by {step}"
-                        );
-                        assert!(
-                            (min..=max).contains(&now),
-                            "{at}: default {now} outside {min}..={max}"
-                        );
-                    }
-                    Widget::Dropdown(names) => {
-                        let name = value.try_downcast_ref::<String>().expect("a String field");
-                        assert!(
-                            names.contains(&name.as_str()),
-                            "{at}: default {name:?} not in {names:?}"
-                        );
-                    }
-                    Widget::Checkbox => {}
-                }
-            }
-        }
-    }
+    use crate::testing::fixture::BoxesParams;
+    use crate::testing::nudged;
 
     #[test]
     fn paragraphs_join_wrapped_lines_and_split_on_blank_ones() {
@@ -350,8 +432,8 @@ mod tests {
     /// Every field moves, and moves back through the same names.
     #[test]
     fn nudged_moves_every_field_off_its_default() {
-        let (moved, default) = (nudged(), VineyardParams::default());
-        for fragment in fragments() {
+        let (moved, default) = (nudged::<BoxesParams>(), BoxesParams::default());
+        for fragment in fragments::<BoxesParams>() {
             for field in fields(fragment) {
                 let (a, b) = (
                     get(&moved, fragment.name(), field.name()).unwrap(),

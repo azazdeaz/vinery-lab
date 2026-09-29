@@ -50,19 +50,21 @@ use bevy::ui_widgets::{
     SliderRange, SliderStep, SliderValue, ValueChange, checkbox_self_update, slider_self_update,
 };
 
-use crate::elements::{Grow, VineyardParams};
-use crate::params::{self, Slider, Widget};
+use bevy::reflect::structs::Struct;
 
-pub fn plugin(app: &mut App) {
-    // Every element plugin is added before this one, so the live params are
-    // already there to seed the panel from.
-    let live = VineyardParams::from_world(app.world());
+use crate::params::{self, Slider, Widget};
+use crate::{Build, Generator, Params};
+
+/// The panel for `G`. Added after `G::plugin`, so the live params are already
+/// there to seed it from.
+pub fn plugin<G: Generator>(app: &mut App) {
+    let live = G::Params::read(app.world());
     app.add_plugins(FeathersPlugins)
         .insert_resource(UiTheme(create_dark_theme()))
         .insert_resource(Staged(live))
-        .add_systems(Startup, spawn_panel)
-        .add_systems(PreUpdate, commit.before(Grow::Terrain))
-        .add_systems(Update, (sync_controls, tips, close_fields));
+        .add_systems(Startup, spawn_panel::<G>)
+        .add_systems(PreUpdate, commit::<G::Params>.before(Build))
+        .add_systems(Update, (sync_controls::<G::Params>, tips, close_fields));
 }
 
 /// Which field a control edits, by fragment and field name.
@@ -77,18 +79,18 @@ pub struct Bound {
 }
 
 impl Bound {
-    fn get<'a, T: Reflect>(&self, params: &'a VineyardParams) -> Option<&'a T> {
+    fn get<'a, T: Reflect>(&self, params: &'a dyn Struct) -> Option<&'a T> {
         params::get(params, self.fragment, self.field)?.try_downcast_ref()
     }
 
-    fn set<T: PartialReflect>(&self, params: &mut VineyardParams, value: T) {
+    fn set<T: PartialReflect>(&self, params: &mut dyn Struct, value: T) {
         if let Some(field) = params::get_mut(params, self.fragment, self.field) {
             field.apply(&value);
         }
     }
 
     /// A slider's value, rounded if the field is an integer.
-    fn set_number(&self, params: &mut VineyardParams, value: f32) {
+    fn set_number(&self, params: &mut dyn Struct, value: f32) {
         if let Some(field) = params::get_mut(params, self.fragment, self.field) {
             params::set_number(field, value);
         }
@@ -96,10 +98,10 @@ impl Bound {
 }
 
 /// One field's control, chosen by what the field declares.
-fn control(
+fn control<P: Params>(
     fragment: &'static str,
     field: &'static NamedField,
-    params: &VineyardParams,
+    params: &P,
 ) -> Box<dyn Scene> {
     let bound = Bound {
         fragment,
@@ -114,14 +116,14 @@ fn control(
             let value = params::get(params, fragment, field.name())
                 .and_then(params::number)
                 .unwrap_or(slider.min);
-            Box::new(slider_control(label, tip, slider, value, bound))
+            Box::new(slider_control::<P>(label, tip, slider, value, bound))
         }
-        Widget::Dropdown(names) => Box::new(dropdown(label, tip, names, bound)),
-        Widget::Checkbox => Box::new(checkbox(label, tip, bound)),
+        Widget::Dropdown(names) => Box::new(dropdown::<P>(label, tip, names, bound)),
+        Widget::Checkbox => Box::new(checkbox::<P>(label, tip, bound)),
     }
 }
 
-fn slider_control(
+fn slider_control<P: Params>(
     label: String,
     tip: Cow<'static, str>,
     slider: Slider,
@@ -140,7 +142,7 @@ fn slider_control(
                 SliderStep({slider.step})
                 SliderPrecision(precision)
                 on(slider_self_update)
-                on(move |change: On<ValueChange<f32>>, mut staged: ResMut<Staged>| {
+                on(move |change: On<ValueChange<f32>>, mut staged: ResMut<Staged<P>>| {
                     bound.set_number(&mut staged.0, change.value);
                 })
                 on(open_field_on_click)
@@ -346,7 +348,7 @@ fn close_field(
 /// The caption is not set by the pick but read back from the params every
 /// frame by [`sync_controls`], so it needs no walk from a menu item back to
 /// the button it belongs to.
-pub fn dropdown(
+pub fn dropdown<P: Params>(
     label: String,
     tip: Cow<'static, str>,
     names: &'static [&'static str],
@@ -359,7 +361,7 @@ pub fn dropdown(
             bsn! {
                 (
                     @FeathersMenuItem { @caption: bsn! { Text(name) ThemedText } }
-                    on(move |_activate: On<Activate>, mut staged: ResMut<Staged>| {
+                    on(move |_activate: On<Activate>, mut staged: ResMut<Staged<P>>| {
                         bound.set(&mut staged.0, name.to_string());
                     })
                 )
@@ -389,14 +391,14 @@ pub fn dropdown(
 
 /// A flag. Whether it starts checked is [`sync_controls`]'s to set, from the
 /// params, the way a dropdown's caption is.
-fn checkbox(label: String, tip: Cow<'static, str>, bound: Bound) -> impl Scene {
+fn checkbox<P: Params>(label: String, tip: Cow<'static, str>, bound: Bound) -> impl Scene {
     bsn! {
         (
             @FeathersCheckbox { @caption: bsn! { (Text(label) ThemedText) } }
             Tip(tip)
             Bound { fragment: {bound.fragment}, field: {bound.field} }
             on(checkbox_self_update)
-            on(move |change: On<ValueChange<bool>>, mut staged: ResMut<Staged>| {
+            on(move |change: On<ValueChange<bool>>, mut staged: ResMut<Staged<P>>| {
                 bound.set(&mut staged.0, change.value);
             })
         )
@@ -404,8 +406,8 @@ fn checkbox(label: String, tip: Cow<'static, str>, bound: Bound) -> impl Scene {
 }
 
 /// Shows every dropdown the name its field holds, and every checkbox its flag.
-fn sync_controls(
-    staged: Res<Staged>,
+fn sync_controls<P: Params>(
+    staged: Res<Staged<P>>,
     mut commands: Commands,
     mut captions: Query<(&Bound, &mut Text)>,
     checkboxes: Query<(Entity, &Bound, Has<Checked>), With<Checkbox>>,
@@ -536,25 +538,25 @@ const QUIET: f32 = 0.15;
 /// [`generate`](crate::generate) path and the Python bindings see the live
 /// resources they always did.
 #[derive(Resource, Deref, DerefMut)]
-pub struct Staged(pub VineyardParams);
+pub struct Staged<P: Params>(pub P);
 
 /// Hands the staged params to the live resources once they have stopped moving.
 ///
-/// Exclusive because it writes all of them; [`VineyardParams::apply`] marks
+/// Exclusive because it writes all of them; [`Params::apply`] marks
 /// only the fragments that actually differ, so a commit rebuilds the layers
 /// the drag touched and no others.
 ///
 /// Runs on `Time<Real>` rather than the default time: this measures how long
 /// a pointer has been still, which is wall-clock whatever the scene's clock is
 /// doing.
-fn commit(world: &mut World, mut still: Local<Option<f32>>) {
-    if world.resource_ref::<Staged>().is_changed() {
+fn commit<P: Params>(world: &mut World, mut still: Local<Option<f32>>) {
+    if world.resource_ref::<Staged<P>>().is_changed() {
         *still = Some(0.0);
     } else if let Some(elapsed) = still.as_mut() {
         *elapsed += world.resource::<Time<Real>>().delta_secs();
         if *elapsed >= QUIET {
             *still = None;
-            let staged = world.resource::<Staged>().0.clone();
+            let staged = world.resource::<Staged<P>>().0.clone();
             staged.apply(world);
         }
     }
@@ -575,20 +577,21 @@ pub const PANEL_WIDTH: f32 = 260.0;
 
 /// Spawns the panel, seeded from the staged params so every control starts
 /// at the value it edits.
-fn spawn_panel(world: &mut World) -> Result {
-    let params = world.resource::<Staged>().0.clone();
-    world.spawn_scene(params_panel(&params))?;
+fn spawn_panel<G: Generator>(world: &mut World) -> Result {
+    let params = world.resource::<Staged<G::Params>>().0.clone();
+    world.spawn_scene(params_panel::<G>(&params))?;
     Ok(())
 }
 
-fn params_panel(params: &VineyardParams) -> impl Scene {
+fn params_panel<G: Generator>(params: &G::Params) -> impl Scene {
+    let title = G::NAME;
     // Only the first fragment — Scene — starts unfolded; the rest would be
     // forty-odd sliders deep.
-    let sections: Vec<Box<dyn Scene>> = params::fragments()
+    let sections: Vec<Box<dyn Scene>> = params::fragments::<G::Params>()
         .enumerate()
         .map(|(i, fragment)| {
             let controls: Vec<Box<dyn Scene>> = params::fields(fragment)
-                .map(|field| control(fragment.name(), field, params))
+                .map(|field| control::<G::Params>(fragment.name(), field, params))
                 .collect();
             Box::new(section(params::label(fragment), i == 0, controls)) as Box<dyn Scene>
         })
@@ -611,7 +614,7 @@ fn params_panel(params: &VineyardParams) -> impl Scene {
         // content by default, which would push the scroll area past the
         // bottom of the window instead of letting it scroll.
         Children [ pane() Node { flex_grow: 1.0, min_height: px(0) } Children [
-            pane_header() Children [ (Text("Vineyard") ThemedText) ],
+            pane_header() Children [ (Text(title) ThemedText) ],
             pane_body() Node { flex_grow: 1.0, min_height: px(0) } Children [
                 (
                     Node {
@@ -627,7 +630,7 @@ fn params_panel(params: &VineyardParams) -> impl Scene {
                 ),
                 // Outside the scroll area, so it stays reachable however far
                 // down the panel is scrolled.
-                copy_cfg_button(),
+                copy_cfg_button::<G>(),
             ],
         ]]
     }
@@ -699,7 +702,7 @@ fn fold_section(
 ///
 /// The other half of the workflow the viewer exists for: tune the scene here,
 /// paste the result into an environment config there.
-fn copy_cfg_button() -> impl Scene {
+fn copy_cfg_button<G: Generator>() -> impl Scene {
     bsn! {
         Node { margin: UiRect::top(px(8)) }
         Children [ (
@@ -716,9 +719,9 @@ fn copy_cfg_button() -> impl Scene {
             // — and on X11 what is copied lives only as long as the viewer
             // does, so the log keeps the snippet reachable either way.
             on(|_activate: On<Activate>,
-                staged: Res<Staged>,
+                staged: Res<Staged<G::Params>>,
                 mut clipboard: ResMut<Clipboard>| {
-                let snippet = crate::snippet::vineyard_cfg(&staged.0);
+                let snippet = crate::snippet::cfg::<G>(&staged.0);
                 info!("Isaac Lab config for the current scene:\n\n{snippet}");
                 match clipboard.set_text(snippet) {
                     Ok(()) => info!("copied to clipboard"),
@@ -732,7 +735,7 @@ fn copy_cfg_button() -> impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elements::SceneParams;
+    use crate::testing::fixture::{Boxes, BoxesParams, MATERIALS, SceneParams};
     use bevy::camera::NormalizedRenderTarget;
     use bevy::picking::backend::HitData;
     use bevy::picking::pointer::{Location, PointerButton, PointerId};
@@ -755,12 +758,15 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<Time<Real>>()
             .init_resource::<SceneParams>()
-            .insert_resource(Staged(VineyardParams::default()))
-            .add_systems(PreUpdate, commit);
+            .insert_resource(Staged(BoxesParams::default()))
+            .add_systems(PreUpdate, commit::<BoxesParams>);
 
         // Twenty frames of drag, well past `QUIET` end to end.
         for _ in 0..20 {
-            app.world_mut().resource_mut::<Staged>().scene.seed += 1;
+            app.world_mut()
+                .resource_mut::<Staged<BoxesParams>>()
+                .scene
+                .seed += 1;
             advance(&mut app, Duration::from_secs_f32(0.016));
         }
         assert_eq!(app.world().resource::<SceneParams>().seed, 0, "mid-drag");
@@ -844,13 +850,13 @@ mod tests {
     }
 
     fn one_dropdown() -> impl SceneList {
-        bsn_list![dropdown(
-            "Kind".into(),
-            "Which sward is sown in the alleys.".into(),
-            &crate::elements::cover::Kind::NAMES,
+        bsn_list![dropdown::<BoxesParams>(
+            "Material".into(),
+            "What the boxes are made of.".into(),
+            &MATERIALS,
             Bound {
-                fragment: "cover",
-                field: "kind",
+                fragment: "boxes",
+                field: "material",
             },
         )]
     }
@@ -880,9 +886,9 @@ mod tests {
         // put the keyboard, and a mouse for `close_fields` to read.
         .init_resource::<InputFocus>()
         .init_resource::<ButtonInput<MouseButton>>()
-        .insert_resource(Staged(VineyardParams::default()))
+        .insert_resource(Staged(BoxesParams::default()))
         .add_systems(Startup, scene.spawn())
-        .add_systems(Update, (sync_controls, close_fields));
+        .add_systems(Update, (sync_controls::<BoxesParams>, close_fields));
         app.update();
         app.update();
         app
@@ -895,19 +901,19 @@ mod tests {
         let mut app = control_app(one_dropdown);
         assert_eq!(
             caption(app.world_mut()),
-            "spontaneous",
+            "wood",
             "the default reads through"
         );
 
-        // The item reading "sown": its label hangs somewhere under the item
+        // The item reading "stone": its label hangs somewhere under the item
         // that carries the observer.
         let world = app.world_mut();
         let label = world
             .query::<(Entity, &Text)>()
             .iter(world)
-            .find(|(_, text)| text.0 == "sown")
+            .find(|(_, text)| text.0 == "stone")
             .map(|(entity, _)| entity)
-            .expect("an item reads sown");
+            .expect("an item reads stone");
         let mut item = label;
         while !world.entity(item).contains::<bevy::ui_widgets::MenuItem>() {
             item = world
@@ -918,19 +924,22 @@ mod tests {
         }
         world.trigger(Activate { entity: item });
         world.flush();
-        assert_eq!(world.resource::<Staged>().cover.kind, "sown");
+        assert_eq!(
+            world.resource::<Staged<BoxesParams>>().boxes.material,
+            "stone"
+        );
 
         app.update();
-        assert_eq!(caption(app.world_mut()), "sown", "and the caption follows");
+        assert_eq!(caption(app.world_mut()), "stone", "and the caption follows");
     }
 
     fn one_checkbox() -> impl SceneList {
-        bsn_list![checkbox(
-            "Bendable strays".into(),
-            "Whether a stray shoot bends.".into(),
+        bsn_list![checkbox::<BoxesParams>(
+            "Open".into(),
+            "Whether a box is open at the top.".into(),
             Bound {
-                fragment: "shoot",
-                field: "flexible",
+                fragment: "boxes",
+                field: "open",
             },
         )]
     }
@@ -948,15 +957,18 @@ mod tests {
         };
         assert!(checked(&mut app), "the default is on");
 
-        app.world_mut().resource_mut::<Staged>().shoot.flexible = false;
+        app.world_mut()
+            .resource_mut::<Staged<BoxesParams>>()
+            .boxes
+            .open = false;
         app.update();
         assert!(!checked(&mut app), "and it follows the params");
     }
 
     fn one_slider() -> impl SceneList {
-        bsn_list![slider_control(
-            "Season".into(),
-            "Where in the growing season the scene is.".into(),
+        bsn_list![slider_control::<BoxesParams>(
+            "Gap".into(),
+            "The gap between neighbours.".into(),
             Slider {
                 min: 0.0,
                 max: 1.0,
@@ -964,8 +976,8 @@ mod tests {
             },
             0.5,
             Bound {
-                fragment: "scene",
-                field: "season",
+                fragment: "boxes",
+                field: "gap",
             },
         )]
     }
@@ -1077,7 +1089,10 @@ mod tests {
             world.resource_mut::<InputFocus>().clear();
             app.update();
 
-            assert_eq!(app.world().resource::<Staged>().scene.season, landed);
+            assert_eq!(
+                app.world().resource::<Staged<BoxesParams>>().boxes.gap,
+                landed
+            );
             assert_eq!(
                 app.world()
                     .entity(slider)
@@ -1152,8 +1167,8 @@ mod tests {
         ))
         .init_asset::<bevy::text::Font>()
         .init_asset::<Image>()
-        .insert_resource(Staged(VineyardParams::default()))
-        .add_systems(Startup, spawn_panel);
+        .insert_resource(Staged(BoxesParams::default()))
+        .add_systems(Startup, spawn_panel::<Boxes>);
         app.update();
 
         let world = app.world_mut();
@@ -1171,7 +1186,7 @@ mod tests {
             .iter(world)
             .count();
         let tipped = world.query_filtered::<(), With<Tip>>().iter(world).count();
-        let fields: usize = params::fragments()
+        let fields: usize = params::fragments::<BoxesParams>()
             .map(|fragment| params::fields(fragment).count())
             .sum();
         assert_eq!(controls, fields, "one control per field");
