@@ -1,0 +1,22 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "vinerylab"
+description = "Procedural vineyard scene generation, authored to USD."
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
+dynamic = ["version"]
+# The generator builds the scene in Bevy and hands it over as JSON; the USD
+# stage is authored by `misina_lab.usd`, which brings `usd-core` with it.
+dependencies = ["misina-lab"]
+
+[tool.uv.sources]
+misina-lab = { workspace = true }
+
+[tool.maturin]
+features = ["extension-module"]
+module-name = "vinerylab._core"
+python-source = "python"

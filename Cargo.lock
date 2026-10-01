@@ -3857,6 +3857,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "misina-lab"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bevy",
+ "bevy_panorbit_camera",
+ "curvo",
+ "nalgebra 0.35.0",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "spade",
+ "usvg",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6014,16 +6030,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bevy",
- "bevy_panorbit_camera",
  "curvo",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "misina-lab",
  "nalgebra 0.35.0",
  "pyo3",
- "serde",
  "serde_json",
- "spade",
- "usvg",
 ]
 
 [[package]]

@@ -1,0 +1,51 @@
+[package]
+name = "vinerylab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lib]
+name = "vinerylab"
+# `cdylib` is what Python imports (the compiled extension module);
+# `rlib` is what our own `[[bin]]` and `cargo test` link against.
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "vinerylab"
+path = "src/main.rs"
+
+[dependencies]
+misina-lab = { path = "../misina-lab" }
+bevy = { workspace = true }
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+pyo3 = { version = "0.29", features = ["abi3-py312"], optional = true }
+curvo = { workspace = true }
+nalgebra = { workspace = true }
+
+[features]
+# Compiles the PyO3 side: the `_core` module in lib.rs and what the
+# `generator!` macro emits under it. Safe to enable for normal
+# `cargo build`/`cargo test`, since it still links against a real libpython.
+python = ["dep:pyo3", "misina-lab/python"]
+# What maturin actually builds with: on top of `python`, this also tells
+# PyO3 to *not* link libpython — the interpreter that loads the .so already
+# provides those symbols. This flag breaks `cargo run`/`cargo test`, which
+# is why it's kept out of the default feature set.
+extension-module = ["python", "pyo3/extension-module"]
+
+# Web build only. Cargo unions features across target-specific and plain
+# dependency entries, so `webgpu` below lands on wasm and nowhere else.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WebGL2 has no compute shaders, so it gets none of the GPU preprocessing this
+# scene's mesh count wants; `webgpu` takes precedence over the default `webgl2`
+# on wasm. The backend is chosen at compile time, so one build serves one set of
+# browsers — Chrome, Edge, a recent Firefox, Safari 26+.
+bevy = { workspace = true, features = ["webgpu"] }
+# `getrandom` reaches wasm32-unknown-unknown twice — 0.4 under bevy_math's rand,
+# 0.3 under curvo's argmin — and neither picks a backend on its own. Renamed
+# because two majors of one crate cannot share a key. See `.cargo/config.toml`
+# for the other half.
+getrandom_04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }

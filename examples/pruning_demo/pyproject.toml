@@ -39,7 +39,10 @@ name = "nvidia"
 url = "https://pypi.nvidia.com"
 
 [tool.uv.sources]
-vinerylab = { path = "../../", editable = true }
+vinerylab = { path = "../../crates/vinerylab", editable = true }
+# What vinerylab is built on; a workspace source inside the path above does
+# not reach a project outside that workspace, so it is named here too.
+misina-lab = { path = "../../python/misina-lab", editable = true }
 # Isaac Lab release wheels lag the features we need. `tools/wheel_builder` is a PEP 517
 # backend that builds the same aggregate package from any revision. Pin a commit: a branch
 # name lets a re-lock pick up a new revision and dependency set.

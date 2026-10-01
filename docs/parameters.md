@@ -1,12 +1,12 @@
 <!-- Generated from the Rust params structs by `cargo test regen_params -- --ignored`.
-     Edit the structs, not this file: docs/editing-parameters.md says how. -->
+     Edit the structs, not this file: misina-lab's docs/editing-parameters.md says how. -->
 
 # Parameters
 
 Every parameter is reachable three ways under one name: as a control in the viewer
 (`cargo run --release`), as an attribute of a `vinerylab.VineyardParams` fragment,
-and as a field of the matching Isaac Lab `VineyardCfg` fragment.
-`params.pole.radius = 0.05` and `VineyardCfg(pole=PoleCfg(radius=0.05))` set the
+and as a field of the matching Isaac Lab `VineyardCfg` fragment: `params.<fragment>.<field>`
+in Python and `VineyardCfg(<fragment>=<Fragment>Cfg(<field>=...))` in Isaac Lab set the
 same thing. The slider range is what the viewer offers; Python takes any value the
 generator can build. Lengths are in meters.
 
@@ -25,13 +25,13 @@ Scene-wide parameters, owned by no element: one seed and one date for everything
 
 `TerrainParams` in Python, `TerrainCfg` in Isaac Lab.
 
-The ground surface the vineyard stands on: hills the field is laid over, with tillage bumps riding on them.
+The ground surface the scene stands on: hills the field is laid over, with tillage bumps riding on them.
 
 `length` runs along X, the direction rows take at orientation 0, and `width` along Y. The hills are noise anchored in world space at `feature_size`, so a larger field shows more hills rather than larger ones, and their grade is capped by `max_inclination`. The bumps are a separate band, `roughness` tall and `roughness_size` long at the coarsest, that does not count towards the grade: adding them never flattens a hill.
 
 | Parameter | Type | Default | Slider range | Description |
 |---|---|---|---|---|
-| `length` | float | `80.0` | 5 to 200 | Extent along X, in meters. Rows run along it at orientation 0. |
+| `length` | float | `80.0` | 5 to 200 | Extent along X, in meters. |
 | `width` | float | `50.0` | 5 to 200 | Extent along Y, in meters. |
 | `max_inclination` | float | `20.0` | 0 to 45 | Upper bound on the hills' slope, in degrees. The elevation amplitude is solved from this and `feature_size`, so the same value gives the same steepness whatever the field's extent or resolution. This is the grade a route has to climb; `roughness` rides on top of it and is not counted here, the way a clod does not make a field steep. |
 | `feature_size` | float | `16.0` | 2 to 60 | Distance from one hill to the next, in meters. The noise field is anchored in world space at this size, so changing the extent uncovers more or less of the same landscape rather than rescaling it. |

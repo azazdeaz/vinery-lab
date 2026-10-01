@@ -1,22 +1,8 @@
-[build-system]
-requires = ["maturin>=1.9,<2"]
-build-backend = "maturin"
-
-[project]
-name = "vinerylab"
-description = "Procedural vineyard scene generation, authored to USD."
-requires-python = ">=3.12"
-license = "MIT OR Apache-2.0"
-authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
-dynamic = ["version"]
-# The generator builds the scene in Bevy and hands it over as JSON; the USD
-# stage itself is authored here, in `vinerylab.usd`.
-dependencies = ["usd-core>=24.11"]
-
-[tool.maturin]
-features = ["extension-module"]
-module-name = "vinerylab._core"
-python-source = "python"
+# The uv workspace: one lockfile and one `.venv` for every Python package in
+# the repo. `uv sync` here installs all of them, `vinerylab` built through
+# maturin and `misina-lab` as plain Python.
+[tool.uv.workspace]
+members = ["crates/vinerylab", "python/misina-lab"]
 
 [dependency-groups]
 dev = ["pytest", "ruff~=0.14.0", "mypy~=1.18"]
@@ -30,9 +16,9 @@ line-length = 100
 extend-select = ["I", "UP"]
 
 [tool.ruff.lint.isort]
-# `vinerylab` is installed into the environment, so ruff would otherwise file
-# the package's own imports under third-party.
-known-first-party = ["vinerylab"]
+# Both packages are installed into the environment, so ruff would otherwise
+# file their own imports under third-party.
+known-first-party = ["misina_lab", "vinerylab"]
 
 [tool.ruff.lint.per-file-ignores]
 # The demo mirrors Isaac Lab's own example layout, which groups imports by
@@ -40,9 +26,9 @@ known-first-party = ["vinerylab"]
 "examples/*_demo/*" = ["I001"]
 
 [tool.mypy]
-files = ["python/vinerylab"]
+files = ["python/misina-lab/misina_lab", "crates/vinerylab/python/vinerylab"]
 # Isaac Lab cannot be imported without the whole simulator stack installed.
-exclude = "python/vinerylab/isaaclab"
+exclude = "/isaaclab/"
 
 [[tool.mypy.overrides]]
 module = "pxr.*"
