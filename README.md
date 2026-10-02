@@ -101,7 +101,9 @@ uv run main.py
 
 ## How it works (main points)
 
- - The vineyard can be composed with a [`VineyardCfg`](python/vinerylab/isaaclab/vineyard_cfg.py) object,
+ - The generator is built on [misina-lab](crates/misina-lab/README.md), the framework
+ under it, which holds everything that is not about vines.
+ - The vineyard can be composed with a [`VineyardCfg`](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) object,
  which is a standard Isaac Lab `FileCfg` config class. See the [example](examples/isaaclab_demo/main.py#L43).
  - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
@@ -139,5 +141,7 @@ Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) for the repo map, and
-[docs/development.md](docs/development.md) for building and running the checks.
+See [AGENTS.md](AGENTS.md) for the repo map,
+[docs/development.md](docs/development.md) for building and running the checks,
+and the framework's own [README](crates/misina-lab/README.md) and
+[docs](crates/misina-lab/docs/) for how a generator is built.

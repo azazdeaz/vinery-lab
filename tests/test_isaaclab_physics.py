@@ -2,7 +2,7 @@
 
 Requires Isaac Lab; skipped entirely where it isn't installed. What is pinned
 here is the agreement with two things this module cannot see: the prim name
-the Rust generator gives a flexible organ (`CABLE` in `src/scene/mod.rs`), and
+the Rust generator gives a flexible organ (`CABLE` in `crates/misina-lab/src/scene/mod.rs`), and
 the body labels Newton's rod importer derives from it -- and, for the spawner,
 that the scene it spawns is one the backend in force can step.
 """
@@ -18,6 +18,7 @@ import pytest
 # under its own message, and pytest skips only when the error names the module
 # it was asked to import.
 try:
+    from misina_lab.isaaclab import spawn
     from vinerylab.isaaclab import ShootCfg, VineyardCfg, physics, vineyard
 except ImportError:
     pytest.skip("Isaac Lab is not installed", allow_module_level=True)
@@ -54,7 +55,7 @@ def test_the_cable_selector_matches_the_bodies_newton_builds(entries):
     after the curve's path, and this regex is the only handle on them. Selecting
     nothing is an error at build time, so this fails loudly -- but only once a
     simulator is running, which is late."""
-    (selector,) = entries["shoots"].bodies
+    (selector,) = entries["rods"].bodies
     label = f"{VINEYARD}/Planting/Row_00/Vine_007/Shoot_03_1/{physics.CABLE}_edge_body_5"
 
     # The coupler wraps a selector this way before matching it in full.
@@ -71,16 +72,16 @@ def test_the_robot_owns_the_static_scene_and_the_shoots_see_it(entries):
     static ones it does not own, so the shoots list none, not even their own
     -- or a cut piece falls through the ground."""
     assert entries["rigid"].include_static_shapes
-    assert not entries["shoots"].include_static_shapes
-    assert not entries["shoots"].include_body_shapes
-    assert not entries["shoots"].shape_label_patterns
+    assert not entries["rods"].include_static_shapes
+    assert not entries["rods"].include_body_shapes
+    assert not entries["rods"].shape_label_patterns
 
 
 def test_only_the_named_robot_bodies_can_bend_a_shoot(cfg):
     """The proxy mapping is the whole of the coupling: a body outside it passes
     through a cane without touching it."""
     (proxy,) = cfg.solver_cfg.proxies
-    assert (proxy.source, proxy.destination) == ("rigid", "shoots")
+    assert (proxy.source, proxy.destination) == ("rigid", "rods")
     assert proxy.bodies == [f"{ROBOT}/.*FOOT"]
 
 
@@ -120,7 +121,7 @@ def running(monkeypatch) -> types.SimpleNamespace:
         "instance",
         lambda: types.SimpleNamespace(cfg=state) if state.physics is not None else None,
     )
-    monkeypatch.setattr(vineyard, "tune_shoots", lambda: setattr(state, "tuned", True))
+    monkeypatch.setattr(spawn, "tune_rods", lambda plant: setattr(state, "tuned", True))
     return state
 
 

@@ -2444,7 +2444,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "isaaclab", extras = ["isaacsim", "all"], git = "https://github.com/isaac-sim/IsaacLab.git?subdirectory=tools%2Fwheel_builder&rev=ab34e8c5e3ee7a2c5f260d1511714e5be3bed3eb" },
-    { name = "vinerylab", editable = "../../" },
+    { name = "vinerylab", editable = "../../crates/vinerylab" },
 ]
 
 [package.metadata.requires-dev]
@@ -2671,6 +2671,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/20/1e/caa4f15c020de3e34
 wheels = [
     { url = "https://files.pythonhosted.org/packages/89/5f/39cbadc320cd78f4834b0a9f7a2fa3c980dca942bf193f315837eacb8870/meshio-5.3.5-py3-none-any.whl", hash = "sha256:0736c6e34ecc768f62f2cde5d8233a3529512a9399b25c68ea2ca0d5900cdc10", size = 166162, upload-time = "2024-01-31T15:09:36.691Z" },
 ]
+
+[[package]]
+name = "misina-lab"
+version = "0.1.0"
+source = { editable = "../../python/misina-lab" }
+dependencies = [
+    { name = "usd-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "usd-core", specifier = ">=24.11" }]
 
 [[package]]
 name = "ml-dtypes"
@@ -5392,20 +5403,13 @@ wheels = [
 
 [[package]]
 name = "vinerylab"
-source = { editable = "../../" }
+source = { editable = "../../crates/vinerylab" }
 dependencies = [
-    { name = "usd-core" },
+    { name = "misina-lab" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "usd-core", specifier = ">=24.11" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = "~=1.18" },
-    { name = "pytest" },
-    { name = "ruff", specifier = "~=0.14.0" },
-]
+requires-dist = [{ name = "misina-lab", editable = "../../python/misina-lab" }]
 
 [[package]]
 name = "viser"

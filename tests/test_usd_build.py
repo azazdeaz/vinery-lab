@@ -7,7 +7,7 @@ the Rust side: it pins the document format independently, so a change to either
 end that breaks the agreement fails here rather than downstream in Isaac.
 
 Everything asserted below is something that fails silently in a renderer if the
-builder stops doing it -- see `vinerylab/usd/build.py`'s module docstring.
+builder stops doing it -- see `misina_lab/usd/build.py`'s module docstring.
 """
 
 from __future__ import annotations
@@ -18,8 +18,13 @@ import pathlib
 import pytest
 from pxr import Gf, Usd, UsdGeom, UsdPhysics, UsdShade
 
-from vinerylab.usd import GEOM, PARTS, ROOT, build_stage
-from vinerylab.usd.build import CABLE_MATERIAL, MATERIAL, MDL_OPAQUE, MDL_TRANSLUCENT, SHADER
+import misina_lab.usd
+from misina_lab.usd import GEOM, build_stage
+from misina_lab.usd.build import CABLE_MATERIAL, MATERIAL, MDL_OPAQUE, MDL_TRANSLUCENT, SHADER
+
+ROOT = "/Vineyard"
+"""The fixture document's root: the stage's default prim is named after it."""
+PARTS = f"{ROOT}/{misina_lab.usd.PARTS}"
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "tiny_scene.json"
 
@@ -480,7 +485,7 @@ def test_an_unknown_format_version_is_refused(doc: dict, tmp_path: pathlib.Path)
 
 def test_the_stage_survives_a_round_trip_through_disk(doc: dict, tmp_path: pathlib.Path):
     """What Isaac Lab actually opens is the file, not the in-memory stage."""
-    from vinerylab.usd import build_usd
+    from misina_lab.usd import build_usd
 
     path = tmp_path / "scene.usda"
     build_usd(doc, str(path))

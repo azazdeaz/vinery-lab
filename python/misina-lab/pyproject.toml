@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "misina-lab"
+version = "0.1.0"
+description = "The Python side of a generated scene: the USD builder and the Isaac Lab spawner every generator shares."
+requires-python = ">=3.12"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Andras Polgar", email = "azazdeaz@gmail.com" }]
+# `misina_lab.usd` authors the stage; `misina_lab.isaaclab` needs Isaac Lab
+# installed beside it and is not imported by default.
+dependencies = ["usd-core>=24.11"]
