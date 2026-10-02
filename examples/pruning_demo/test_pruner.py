@@ -13,21 +13,34 @@ import pytest
 
 import kinematics
 import pruner
-from pruner import KEEP_BUDS, Bud, Cane, Cut, Tally, Vine
+from pruner import BLADE_STEP, KEEP_BUDS, Bud, Cane, Cut, Tally, Vine
 
 IDENTITY = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+
+NO_CROSSING = (np.zeros(0, dtype=int), np.zeros(0), np.zeros((0, 2)))
+
+
+def on_rectangle(point, corner, u, v) -> tuple[float, float] | None:
+    """Where `point` is on the rectangle, as (a, b), if it is on it."""
+    offset = point - corner
+    normal = np.cross(u, v)
+    a, b = offset @ u / (u @ u), offset @ v / (v @ v)
+    if abs(offset @ normal) < 0.01 * np.linalg.norm(normal) and 0 <= a <= 1 and 0 <= b <= 1:
+        return a, b
+    return None
 
 
 class FakeShears:
     """Rods standing still where `poses` puts their bodies. `cut_through`
     counts a cane as cut when the rectangle passes through its planned cut
-    point, and takes the buds above it."""
+    point, and takes the buds above it; no cane is ever held, so the blade's
+    collider follows the blade."""
 
     def __init__(self, poses: dict[int, np.ndarray], canes: list[Cane]):
         self.poses = poses
         self.bodies = np.array(sorted(poses), dtype=int)
         self.loose = np.zeros(len(self.bodies), dtype=bool)
-        self.labels = [f"/rod/{body}" for body in range(max(poses) + 1)]
+        self.labels = [f"/rod/{body}" for body in range(max(poses) + 1)] + ["/robot/blade_link"]
         self.canes = canes
         self.removed: set[str] = set()
 
@@ -35,8 +48,6 @@ class FakeShears:
         return self.poses[body]
 
     def cut_through(self, corner, u, v) -> int:
-        normal = np.cross(u, v)
-        normal /= np.linalg.norm(normal)
         cuts = 0
         for cane in self.canes:
             if cane.buds[KEEP_BUDS].prim in self.removed:
@@ -45,12 +56,48 @@ class FakeShears:
                 pruner.bud_position(cane.buds[KEEP_BUDS - 1], self)
                 + pruner.bud_position(cane.buds[KEEP_BUDS], self)
             ) / 2
-            offset = point - corner
-            a, b = offset @ u / (u @ u), offset @ v / (v @ v)
-            if abs(offset @ normal) < 0.01 and 0 <= a <= 1 and 0 <= b <= 1:
+            if on_rectangle(point, corner, u, v) is not None:
                 self.removed |= {bud.prim for bud in cane.buds[KEEP_BUDS:]}
                 cuts += 1
         return cuts
+
+    def crossing(self, corner, u, v):
+        return NO_CROSSING
+
+    def collider(self, body: int):
+        return 0, IDENTITY.copy()
+
+    def place(self, shape: int, pose: np.ndarray) -> None:
+        pass
+
+
+class HeldCane:
+    """One cane lying across the mouth, which nothing moves, and the moving
+    blade's collider wherever `Stroke` last put it."""
+
+    labels = ["/robot/blade_link"]
+    radius = np.array([0.005])
+    REST = np.array([0.006, -0.01, 0.04, 0.0, 0.0, 0.0, 1.0])
+
+    def __init__(self, point: np.ndarray):
+        self.point, self.cut, self.placed = point, False, []
+
+    def crossing(self, corner, u, v):
+        on = None if self.cut else on_rectangle(self.point, corner, u, v)
+        return NO_CROSSING if on is None else (np.array([0]), np.array([0.5]), np.array([on]))
+
+    def cut_through(self, corner, u, v) -> int:
+        if self.cut or on_rectangle(self.point, corner, u, v) is None:
+            return 0
+        self.cut = True
+        return 1
+
+    def collider(self, body: int):
+        return 7, self.REST.copy()
+
+    def place(self, shape: int, pose: np.ndarray) -> None:
+        assert shape == 7
+        self.placed.append(pose)
 
 
 def cane(prim: str, body: int, stations: list[float]) -> Cane:
@@ -137,6 +184,49 @@ def test_the_ground_truth_is_read_off_the_stage():
     assert not pruner.attached(rod.buds[0], shears, stage)
     shears.loose[np.searchsorted(shears.bodies, 1)] = True
     assert not pruner.attached(rod.buds[2], shears, stage)
+
+
+@pytest.mark.parametrize("z", [0.06, 0.01])
+def test_the_collider_stands_at_a_held_cane_while_the_blade_closes_through_it(z):
+    """A cane against the fixed blade, `z` out along it: the collider follows
+    the blade until the moving edge reaches the cane -- or stays put, if it
+    is there already when the stroke starts -- stands there while the blade
+    closes on, and the cut is made when the edge reaches the cane's axis.
+    Opening, it never turns back shut, and rides the blade again once that
+    is past it."""
+    bumblebee = pytest.importorskip("bumblebee", reason="Isaac Lab is not installed")
+    machine = bumblebee.Bumblebee()
+    shear = machine.shear
+    y = -float(HeldCane.radius[0])
+    hand = kinematics.frames(machine.chain, np.array([0.0, *bumblebee.ARM_HOME]))[-1]
+    cane = HeldCane((hand @ bumblebee.TOOL @ [shear.bypass, y, z, 1.0])[:3])
+    stroke = pruner.Stroke(machine, cane)
+    pinch = min(shear.pinch(y, z, HeldCane.radius[0] + pruner.GRIP), shear.opening)
+
+    def stood(closing: bool) -> list[float]:
+        """The collider's angle once the blade has followed its target, tick
+        by tick until the stroke reports the blade there."""
+        nonlocal angle
+        angles = []
+        while not stroke.tick(hand, angle, closing):
+            angle = stroke.jaw
+            angles.append(angle + stroke.turned)
+        return angles
+
+    angle = shear.opening
+    shut = stood(closing=True)
+    assert stroke.swept == 1 and stroke.held == pytest.approx(pinch)
+    assert shut[0] == pytest.approx(shear.opening - BLADE_STEP), "follows the blade at first"
+    assert min(shut[1:]) == pytest.approx(pinch) and shut[-1] == pytest.approx(pinch)
+    assert (np.diff(shut[1:]) <= 1e-9).all(), "shutting, it never turns back open"
+    opened = stood(closing=False)
+    assert opened[0] == pytest.approx(pinch) and (np.diff(opened) >= -1e-9).all()
+    assert stroke.held is None and stroke.turned == 0.0
+    assert cane.placed[-1] == pytest.approx(HeldCane.REST), "back on the blade"
+    turned = max(cane.placed, key=lambda pose: pose[3])
+    assert turned[3] > 0 and np.linalg.norm(turned[:3]) == pytest.approx(
+        np.linalg.norm(HeldCane.REST[:3])
+    ), "swung about the pivot"
 
 
 def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch):

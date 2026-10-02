@@ -41,7 +41,7 @@ focused: the left hand drives, the right hand cuts.
 | `↑` / `↓` | jog the mouth forward / back along the robot |
 | `←` / `→` | jog it toward the row / away from it |
 | `Page Up` / `Page Down` | jog it up / down |
-| `Enter` | close the shear, cutting what the blade sweeps through, and open it again |
+| `Enter` | close the shear, cutting what the blade sweeps through, and open it again; the robot holds still while it shuts |
 
 The mouth is a gantry head rather than a wrist: it stays squared up to the
 row -- blades out over the rail, pivot upright, so an upright cane lies across
@@ -60,19 +60,21 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
    solver bends, with a `Bud_NN` prim at every node; the planner reads the buds
    off the stage and their live positions off the rod bodies carrying them.
 2. **The approach.** Each cut is a pose for the shear's mouth, squared up to
-   the cane: the pivot along it, the blades along the approach. The arm plans
-   to a point 15 cm out, then closes in on a straight line. The shear's head
-   and blades collide with the canes, so a cane the mouth comes in on is
+   the cane: the pivot along it, the blades along the approach, aimed afresh
+   at the buds when the cut's turn comes. The arm plans to a point 15 cm out,
+   then closes in on a straight line and settles there. The shear's head and
+   blades collide with the canes, so a cane the mouth comes in on is
    funnelled between the edges or pushed aside, bending as it goes.
 3. **The order.** The cuts on a vine are taken nearest neighbour first.
-4. **The cut.** The shear closes over half a second, and the moving blade
-   cuts what it sweeps through: every control tick its plate, at the angle the
-   blade has reached, goes to `Shears.cut_through`, and a cane is cut where the
-   edge reaches it. Each plate's last centimetre before the edge -- the part
-   that is in the wood -- collides with nothing, so the closing blades push the
-   two pieces apart like a wedge rather than crushing them. A cane the blade
-   never reaches, pushed out of the mouth on the way in or never in it, is a
-   miss.
+4. **The cut.** Once the arm has settled, the shear closes, and the moving
+   blade carries the cane across the mouth onto the fixed one. Held there, the
+   blade's collider stands still while the blade itself closes on through:
+   every control tick its plate, at the angle the blade has reached, goes to
+   `Shears.cut_through`, and the cane is cut where the edge reaches its axis.
+   Nothing is crushed between the blades, nothing the cane leans on is pulled
+   from under it, and the collider rides the blade again once it has opened
+   back past where it stood. A cane the blade never reaches, pushed out of
+   the mouth on the way in or never in it, is a miss.
 5. **The fall.** The piece meets its own vine -- the stub, the other canes,
    the cordon -- and the ground, and passes through everything else: it
    catches on the stub for a moment, tips, and slides down beside it.
@@ -82,10 +84,9 @@ cuts reachable, cuts made, cuts made at the right place -- the kept bud still
 on the vine and the next one gone -- and seconds per vine. Bumblebee reports
 87% of cuts made at the right place, 213 s per vine and 68% of canes reachable
 from one side. On the default scene the demo reaches all 72 cuts of its row
-and makes 94% of them at the right place, at 12 s of simulated time per vine;
-a miss is a cane the shear pushed out of the mouth on the way in. Because the
-simulation knows the true plant, the score keeps "chose the right cut" apart
-from "made the cut", which a field trial cannot.
+and makes every one at the right place, at 15 s of simulated time per vine.
+Because the simulation knows the true plant, the score keeps "chose the right
+cut" apart from "made the cut", which a field trial cannot.
 
 ## The robot
 

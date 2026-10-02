@@ -8,25 +8,29 @@ running simulation is the segment's pose applied to the bud's own.
 
 The rule is the paper's: keep `KEEP_BUDS` on every cane and cut midway
 between the last kept bud and the next. Each cut is a pose for the shear's
-mouth -- the blades along the approach, the pivot along the cane -- reached
-in two stages, a planned move to `STANDOFF` out and a straight line in, and
-the cuts on a vine are taken nearest neighbour first. Then the shear closes,
-and the moving blade cuts what it sweeps through: the cut is wherever the
-blade reaches a cane, made by `Shears` at that point, and a cane the blade
-never reaches -- pushed out of the mouth on the way in, or never in it -- is
-a miss. `Stroke` is that closing and opening, a tick at a time; `Pruning`
-runs the whole sequence one vine at a time, and `Tally` keeps the paper's own
+mouth -- the blades along the approach, the pivot along the cane -- aimed
+afresh when its turn comes and reached in two stages, a planned move to
+`STANDOFF` out and a straight line in, and the cuts on a vine are taken
+nearest neighbour first. Once the arm has settled the shear closes, and the
+moving blade cuts what it sweeps through: the cut is wherever the
+blade's edge reaches a cane's axis, made by `Shears` at that point, and a
+cane the blade never reaches -- pushed out of the mouth on the way in, or
+never in it -- is a miss. `Stroke` is that closing and opening, a tick at a
+time, the moving blade's collider stood at the cane once the blades hold it
+so the blade closes through the cane rather than crushing it; `Pruning` runs
+the whole sequence one vine at a time, and `Tally` keeps the paper's own
 score: cuts made, cuts made at the right place, and how long a vine took.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from kinematics import solve
+from kinematics import frames, solve
 
 if TYPE_CHECKING:
     from pxr import Usd
@@ -55,17 +59,32 @@ ARRIVED = 0.08
 the arm to count as having arrived: the arm's weight holds the shoulder a
 few hundredths short of a stiff drive's target."""
 
+STILL = 0.002
+"""How little every joint may still be moving per control tick, in radians
+or meters, for the arm to count as settled: a tenth of a radian a second.
+The approach ends once the arm is close to its target and settled on it, so
+the shear closes on the cane where the arm holds it, not where the mouth is
+passing through on its way there."""
+
 BLADE_STEP = 0.03
 """How far the blade's target turns per control tick, closing or opening, in
-radians: shut in twenty ticks, the half second an electric pruner takes, and
-the plate advances a couple of millimetres between one look at what it has
-reached and the next, well within its own width."""
+radians: shut in thirty ticks, the better part of the second an electric
+pruner takes, and the plate advances a couple of millimetres between one look
+at what it has reached and the next, well within its own width."""
 
 PATIENCE = 400
 """Control ticks a stage may take before the cut is given up on: eight
 seconds at the controller's rate. An arm held off its pose by a post or a
 wire, or a blade a post keeps from closing, would otherwise wait there for
 the rest of the run."""
+
+SLACK = 0.05
+"""How far short of fully shut or fully open the blade may stop, in radians,
+to count as there: the drive settles a little off its target."""
+
+GRIP = 0.001
+"""How far off a cane's surface the moving blade's collider stands once the
+blades hold it, in meters: a hair clear of the wood, not in it."""
 
 REACH_TOLERANCE = (0.01, 0.1)
 """How close the solver has to get a cut pose, in meters and radians, for
@@ -168,7 +187,7 @@ class Cut:
 
     cane: Cane
     pose: np.ndarray
-    """The mouth's frame at the cut, in world coordinates."""
+    """The mouth's frame at the cut, in world coordinates, as last aimed."""
     kept: Bud
     """The last bud to keep, below the cut."""
     removed: Bud
@@ -195,6 +214,20 @@ def squared(point: np.ndarray, tangent: np.ndarray, approach: np.ndarray) -> np.
     return pose
 
 
+def aimed(kept: Bud, removed: Bud, shears: Shears, approach: np.ndarray) -> np.ndarray | None:
+    """The mouth's frame for the cut midway between `kept` and `removed`,
+    where they are now: squared up to the cane, approached as near along
+    `approach` as lying across the cane allows. None where `approach` runs
+    along the cane."""
+    below, above = bud_position(kept, shears), bud_position(removed, shears)
+    tangent = above - below
+    tangent /= np.linalg.norm(tangent)
+    approach = approach - (approach @ tangent) * tangent
+    if np.linalg.norm(approach) < 1e-3:
+        return None
+    return squared((below + above) / 2, tangent, approach / np.linalg.norm(approach))
+
+
 def plan(vine: Vine, shears: Shears, side: np.ndarray) -> list[Cut]:
     """The cuts that prune `vine` to `KEEP_BUDS` a cane, unordered.
 
@@ -207,14 +240,9 @@ def plan(vine: Vine, shears: Shears, side: np.ndarray) -> list[Cut]:
         if len(cane.buds) <= KEEP_BUDS:
             continue
         kept, removed = cane.buds[KEEP_BUDS - 1], cane.buds[KEEP_BUDS]
-        below, above = bud_position(kept, shears), bud_position(removed, shears)
-        tangent = above - below
-        tangent /= np.linalg.norm(tangent)
-        approach = side - (side @ tangent) * tangent
-        if np.linalg.norm(approach) < 1e-3:
-            continue
-        approach /= np.linalg.norm(approach)
-        cuts.append(Cut(cane, squared((below + above) / 2, tangent, approach), kept, removed))
+        pose = aimed(kept, removed, shears, side)
+        if pose is not None:
+            cuts.append(Cut(cane, pose, kept, removed))
     return cuts
 
 
@@ -250,31 +278,90 @@ def reach(chain, tool: np.ndarray, pose: np.ndarray, q) -> tuple[np.ndarray, boo
 
 class Stroke:
     """The shear's moving blade, driven a control tick at a time: shut,
-    cutting what it sweeps through, or open again."""
+    cutting what it sweeps through, or open again.
+
+    The blade's collider follows the blade until the cane it carries across
+    the mouth lies against the fixed blade. From there it stands where it is
+    while the blade closes on through the cane -- nothing is crushed between
+    the blades, and nothing the cane leans on is pulled from under it -- and
+    follows the blade again once that has opened back past it.
+    """
 
     def __init__(self, machine: Bumblebee, shears: Shears):
+        # Imported here: `bumblebee` reaches Isaac Lab, which the planning
+        # above does not need.
+        from bumblebee import BLADE
+
         self.machine, self.shears = machine, shears
         self.jaw = machine.shear.opening
         """The blade angle to hold."""
         self.swept = 0
         """Canes cut on the way shut; cleared once the blade is sent open."""
+        self.held: float | None = None
+        """The blade angle the collider stands at, while the blade is shut
+        past it."""
+        self.angle = machine.shear.opening
+        """The blade's angle at the last tick."""
+        self.turned = 0.0
+        """How far back from the blade the collider was last placed, in
+        radians."""
+        blade = next(i for i, label in enumerate(shears.labels) if label.endswith("/" + BLADE))
+        self._shape, self._rest = shears.collider(blade)
 
     def tick(self, hand: np.ndarray, shear: float, closing: bool) -> bool:
-        """Turn the target a `BLADE_STEP` shut, or open. `hand` is the pose
-        of the body the shear is on in world coordinates and `shear` the
-        blade's angle: shutting, the plate at that angle cuts whatever it has
-        reached since the last tick. Returns whether the blade has got there
-        -- the two blades met, or the mouth fully open."""
-        opening = self.machine.shear.opening
+        """Turn the target a `BLADE_STEP` shut, or open, and place the
+        collider. `hand` is the pose of the body the shear is on in world
+        coordinates and `shear` the blade's angle: shutting, the plate at
+        that angle cuts whatever it has reached since the last tick. Returns
+        whether the blade has got there -- the two blades met, or the mouth
+        fully open."""
+        s = self.machine.shear
+        # The collider is written once a tick and rides the blade until the
+        # next, so it is placed for where the blade will be by then.
+        ahead = shear + min(0.0, shear - self.angle)
+        self.angle = shear
+        if closing:
+            self.jaw = max(self.jaw - BLADE_STEP, 0.0)
+            if self.held is None:
+                self.held = self._pinch(hand, ahead, shear)
+        else:
+            self.jaw, self.swept = min(self.jaw + BLADE_STEP, s.opening), 0
+            # Released once the blade has opened back to it, or fully open:
+            # the drive need not reach an angle the collider was held at.
+            if self.held is not None and shear >= min(self.held, s.opening - SLACK):
+                self.held = None
+        turned = 0.0 if self.held is None else max(0.0, self.held - ahead)
+        if turned != self.turned:
+            self.turned = turned
+            self.shears.place(self._shape, _swung(self._rest, turned))
         if not closing:
-            self.jaw, self.swept = min(self.jaw + BLADE_STEP, opening), 0
-            return shear > opening - 0.05
-        self.jaw = max(self.jaw - BLADE_STEP, 0.0)
-        corner, across, up = self.machine.blade(shear)
+            return shear > s.opening - SLACK
+        # The blades meeting cut whatever still lies between them: the last
+        # sweep is the plate at the stop, a thin cane's axis being closer to
+        # it than the blade gets before it counts as shut.
+        shut = shear < SLACK
         self.swept += self.shears.cut_through(
-            hand[:3, 3] + hand[:3, :3] @ corner, hand[:3, :3] @ across, hand[:3, :3] @ up
+            *_placed(hand, *self.machine.blade(0.0 if shut else shear))
         )
-        return shear < 0.05
+        return shut
+
+    def _pinch(self, hand: np.ndarray, ahead: float, shear: float) -> float | None:
+        """The angle to stand the collider at: where a cane across the mouth,
+        within the blades' reach, lies against the fixed blade and the moving
+        edge reaches it by `ahead`, the angle at which it does -- or the
+        blade's own `shear`, if that is past it already. None while no cane
+        is held."""
+        s = self.machine.shear
+        hits, _, on = self.shears.crossing(*_placed(hand, *self.machine.wedge()))
+        held = []
+        for i, (a, b) in zip(hits, on, strict=True):
+            y, z, radius = s.reach * (a - 1), s.blade * b, self.shears.radius[i] + GRIP
+            within = -y <= radius and math.hypot(y, z) <= s.blade
+            if within and (pinch := s.pinch(y, z, radius)) >= ahead:
+                held.append(min(pinch, shear))
+        # ponytail: a second cane in the mouth is cut unheld, since standing
+        # at it would squeeze the first; two in one mouth is rare.
+        return max(held, default=None)
 
 
 @dataclasses.dataclass
@@ -305,9 +392,9 @@ class Pruning:
     `control` returns the slide and arm positions to hold and the blade angle
     to hold, and moves the sequence on as each stage's target is reached: a
     planned move out to the stand-off, a straight line in, the shear closing
-    -- the blade cutting what it sweeps through -- and opening, and the
-    straight line back out. Poses are solved in the robot's own frame, so
-    the caller hands in where the robot is.
+    once the arm has settled -- the blade cutting what it sweeps through --
+    and opening, and the straight line back out. Poses are solved in the
+    robot's own frame, so the caller hands in where the robot is.
     """
 
     def __init__(
@@ -324,6 +411,8 @@ class Pruning:
         self.shears, self.stage, self.tally = shears, stage, tally
         self.base = base
         self.q = np.array(q, dtype=float)
+        self.moved = 0.0
+        """How far the joint that moved most moved over the last tick."""
         self.stroke = Stroke(machine, shears)
         self.cuts = self._reachable(cuts)
         self.tally.planned += len(cuts)
@@ -358,6 +447,11 @@ class Pruning:
             self.stage_name = "done"
             return
         self.stage_name = "move"
+        # Aimed afresh at where the buds are now: a cane may have been pushed
+        # since the vine was planned, by the arm passing or a piece falling.
+        pose = aimed(self.cut.kept, self.cut.removed, self.shears, self.cut.pose[:3, 2])
+        if pose is not None:
+            self.cut.pose = pose
         self.goal, _ = self._solve(self.cut.standoff)
         self.line = self.cut.standoff[:3, 3].copy()
 
@@ -370,7 +464,12 @@ class Pruning:
         pose of the body the shear is on in world coordinates and `shear`
         the blade's angle. Returns the positions to hold and the blade angle
         to hold."""
+        self.moved = float(np.abs(np.asarray(q, dtype=float) - self.q).max())
         self.q = np.array(q, dtype=float)
+        # The robot's frame as it stands now: the chassis creeps on its
+        # wheels while the arm works, and a pose solved against where it
+        # stood when the vine was reached would be off by that much.
+        self.base = hand @ np.linalg.inv(frames(self.chain, self.q)[-1])
         if self.cut is None:
             return self.target, self.stroke.jaw
         cut = self.cut
@@ -394,7 +493,10 @@ class Pruning:
             end = cut.pose[:3, 3] if self.stage_name == "approach" else cut.standoff[:3, 3]
             gap = end - self.line
             distance = np.linalg.norm(gap)
-            if distance < 1e-6 and np.abs(self.target - self.q).max() < ARRIVED:
+            arrived = distance < 1e-6 and np.abs(self.target - self.q).max() < ARRIVED
+            # Closing waits for the arm to settle as well: a blade shut while
+            # the mouth is still moving in sweeps past the cane.
+            if arrived and (self.stage_name == "retract" or self.moved < STILL):
                 self.stage_name = "close" if self.stage_name == "approach" else "next"
                 self.ticks = 0
             else:
@@ -422,6 +524,20 @@ class Pruning:
             elif self.stage_name == "next":
                 self._next()
         return self.target, self.stroke.jaw
+
+
+def _placed(frame: np.ndarray, corner, u, v) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The rectangle `corner`, `u`, `v` given in `frame`, in world coordinates."""
+    return frame[:3, 3] + frame[:3, :3] @ corner, frame[:3, :3] @ u, frame[:3, :3] @ v
+
+
+def _swung(pose: np.ndarray, angle: float) -> np.ndarray:
+    """`pose`, a position and (x, y, z, w) rotation in one array of 7, turned
+    by `angle` about the x axis of the frame it is in."""
+    turn = np.array([math.sin(angle / 2), 0.0, 0.0, math.cos(angle / 2)])
+    v, w = pose[3:6], pose[6]
+    rotation = [*(turn[3] * v + w * turn[:3] + np.cross(turn[:3], v)), turn[3] * w - turn[:3] @ v]
+    return np.array([*_rotate(turn, pose[:3]), *rotation])
 
 
 def _rotate(quat: np.ndarray, v: np.ndarray) -> np.ndarray:

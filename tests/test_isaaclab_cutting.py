@@ -109,6 +109,22 @@ def test_a_cut_between_joints_moves_the_joint_to_the_cut(rig):
     assert spans[[0, 3]].ravel() == pytest.approx([0.0, 0.1, 0.3, 0.4], abs=1e-5)
 
 
+def test_a_crossing_is_reported_where_it_is_and_a_collider_moved_where_it_is_put(rig):
+    """What `cut_through` cuts at, without the cut; and a body's one collision
+    shape, moved in the body's frame by the same in-place write."""
+    hits, at, on = rig.shears.crossing(*plane_at(0.14))
+    assert hits.tolist() == [1] and at == pytest.approx([0.4], abs=1e-5)
+    assert on.ravel() == pytest.approx([0.5, 0.5], abs=1e-5)
+    assert rig.shears.loose.tolist() == [False] * 4, "nothing cut"
+
+    shape, rest = rig.shears.collider(rig.bodies[1])
+    assert shape == rig.shears._shape[1]
+    assert rest == pytest.approx([0.0, 0.0, rig.shears._center[1], 0.0, 0.0, 0.0, 1.0])
+    pose = np.array([0.0, 0.02, 0.0, 0.0, 0.0, 0.0, 1.0])
+    rig.shears.place(shape, pose)
+    assert rig.model.shape_transform.numpy()[shape] == pytest.approx(pose)
+
+
 def test_the_piece_falls_and_the_stub_stays(rig):
     before = rig.height()
     rig.shears.cut_through(*plane_at(0.14))

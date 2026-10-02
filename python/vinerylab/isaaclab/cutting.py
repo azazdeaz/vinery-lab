@@ -95,7 +95,8 @@ class Shears:
         if not np.allclose(placed[:, [0, 1, 3, 4, 5]], 0.0):
             raise ValueError("a rod capsule is off its body's z axis; a cut would move it wrong")
         scale = model.shape_scale.numpy()[self._shape]
-        self._radius = scale[:, 0].copy()
+        self.radius = scale[:, 0].copy()
+        """Every rod body's capsule radius, in `bodies` order."""
         self._half = scale[:, 1].copy()
         self._center = placed[:, 2].copy()
         # The tube each body is drawn with was built at this length.
@@ -150,14 +151,12 @@ class Shears:
         self._release(joint)
         return True
 
-    def cut_through(self, origin, u, v) -> int:
-        """Cut every rod still whole where it passes through the rectangle
-        `origin + a u + b v`, `a` and `b` in [0, 1] -- a knife's reach, in world
-        coordinates. Returns how many cuts were made.
-
-        A rod through it twice is cut at the crossing nearer the wood; the
-        other is on the piece that falls.
-        """
+    def crossing(self, origin, u, v) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Every rod still whole whose axis passes through the rectangle
+        `origin + a u + b v`, `a` and `b` in [0, 1], in world coordinates: as
+        indices into `bodies`, the fraction along each one's capsule where it
+        crosses, and its (a, b) on the rectangle -- shapes (N,), (N,) and
+        (N, 2), in body order."""
         origin, u, v = (np.asarray(each, dtype=float) for each in (origin, u, v))
         start, end = self._capsules()
         normal = np.cross(u, v)
@@ -167,12 +166,43 @@ class Shears:
         point = start + at[:, None] * (end - start) - origin
         a, b = point @ u / (u @ u), point @ v / (v @ v)
         hits = np.flatnonzero(crossing & (0 <= a) & (a <= 1) & (0 <= b) & (b <= 1))
+        return hits, at[hits], np.column_stack([a, b])[hits]
+
+    def cut_through(self, origin, u, v) -> int:
+        """Cut every rod still whole where it passes through the rectangle
+        `origin + a u + b v`, `a` and `b` in [0, 1] -- a knife's reach, in world
+        coordinates. Returns how many cuts were made.
+
+        A rod through it twice is cut at the crossing nearer the wood; the
+        other is on the piece that falls.
+        """
+        hits, at, _ = self.crossing(origin, u, v)
         cuts = 0
         # In body order, which is root first along each rod.
-        for i in hits:
+        for i, fraction in zip(hits, at, strict=True):
             if not self.loose[i]:
-                cuts += self.cut(int(self.bodies[i]), float(at[i]))
+                cuts += self.cut(int(self.bodies[i]), float(fraction))
         return cuts
+
+    def collider(self, body: int) -> tuple[int, np.ndarray]:
+        """Body `body`'s one collision shape: its model index, and its pose in
+        the body's frame as a position and (x, y, z, w) rotation in one array
+        of 7 -- what `place` moves it from."""
+        from newton import ShapeFlags
+
+        model = self._model
+        colliding = (model.shape_flags.numpy() & int(ShapeFlags.COLLIDE_SHAPES)) != 0
+        shapes = np.flatnonzero((model.shape_body.numpy() == body) & colliding)
+        if len(shapes) != 1:
+            raise ValueError(f"body {body} has {len(shapes)} collision shapes, not one")
+        return int(shapes[0]), model.shape_transform.numpy()[shapes[0]].copy()
+
+    def place(self, shape: int, pose: np.ndarray) -> None:
+        """Move shape `shape` to `pose` in its body's frame -- a position and
+        (x, y, z, w) rotation in one array of 7 -- in every copy the solvers
+        step from. A collider moved while the simulation runs, the way a cut
+        resizes one: a blade's, standing at a cane the blade closes through."""
+        _write([copy.shape_transform for copy in self._shape_copies], shape, lambda _: pose)
 
     def pose(self, body: int) -> np.ndarray:
         """Where body `body` is now, as its world position and (x, y, z, w)
@@ -224,7 +254,7 @@ class Shears:
     def _reshape(self, i: int, mass: float) -> None:
         """Write body `i`'s capsule span and `mass` into the model, and redraw
         its tube to match."""
-        half, center, radius = self._half[i], self._center[i], self._radius[i]
+        half, center, radius = self._half[i], self._center[i], self.radius[i]
         body, shape = int(self.bodies[i]), int(self._shape[i])
 
         def moved(transform):
