@@ -204,7 +204,7 @@ class Shears:
         """Move shape `shape` to `pose` in its body's frame -- a position and
         (x, y, z, w) rotation in one array of 7 -- in every copy the solvers
         step from. A collider moved while the simulation runs, the way a cut
-        resizes one: a blade's, standing at a cane the blade closes through."""
+        resizes one: a blade's, standing at a rod the blade closes through."""
         _write([copy.shape_transform for copy in self._shape_copies], shape, lambda _: pose)
 
     def pose(self, body: int) -> np.ndarray:
