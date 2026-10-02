@@ -47,6 +47,16 @@ the blades along `OUT`, which is toward the row."""
 CUT = "ENTER"
 """The key that closes the shear."""
 
+KEYS = (
+    ("W / S", "drive forward / back"),
+    ("A / D", "turn left / right"),
+    ("Up / Down", "jog the mouth forward / back"),
+    ("Left / Right", "jog it toward the row / away"),
+    ("Page Up / Down", "jog it up / down"),
+    ("Enter", "cut"),
+)
+"""The keys and what they do, as the viewport lists them."""
+
 
 class Teleop:
     """The keyboard's hold on the robot, driven a control tick at a time.
@@ -124,3 +134,20 @@ class Teleop:
             # Shut, it opens; open, it shuts again while the key is down.
             self.closing = not self.closing and CUT in held
         return self.target, self.stroke.jaw
+
+
+def show_keys() -> None:
+    """List `KEYS` in the bottom right corner of Kit's viewport, clear of the
+    world axes Kit draws in the left one."""
+    import omni.ui as ui
+    from omni.kit.viewport.utility import get_active_viewport_window
+
+    with get_active_viewport_window().get_frame("teleop_keys"), ui.VStack():
+        ui.Spacer()
+        with ui.HStack(height=0):
+            ui.Spacer()
+            with ui.ZStack(width=0, height=0):
+                ui.Rectangle(style={"background_color": 0x99000000, "border_radius": 4})
+                with ui.HStack(width=0, height=0, spacing=16, style={"margin": 6}):
+                    for column in zip(*KEYS, strict=True):
+                        ui.Label("\n".join(column))

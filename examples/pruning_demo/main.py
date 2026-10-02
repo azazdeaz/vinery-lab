@@ -47,7 +47,7 @@ from bumblebee import (
 )
 from driver import DECIMATION, SIM_DT, Driver
 from pruner import Pruning, Tally, Vine, nearest_first, plan, read_vines
-from teleop import Teleop
+from teleop import Teleop, show_keys
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
@@ -316,6 +316,7 @@ def main():
         if args_cli.teleop:
             teleop = Teleop(machine, driver, shears)
             teleop.listen()
+            show_keys()
         print(f"[INFO]: Setup complete, {len(vines)} vines to prune...")
         run_simulator(sim, robot, machine, driver, vines, to_row, shears, teleop)
 

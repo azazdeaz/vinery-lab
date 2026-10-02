@@ -32,7 +32,8 @@ uv run main.py --teleop
 ```
 
 The planner stands down and the keyboard has the robot, with the Kit window
-focused: the left hand drives, the right hand cuts.
+focused: the left hand drives, the right hand cuts. The viewport lists the keys
+in its bottom right corner.
 
 | key | what it does |
 | --- | --- |
