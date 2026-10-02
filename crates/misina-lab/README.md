@@ -155,4 +155,5 @@ modules fit.
 generator's own tests get from this crate is in `src/testing.rs`.
 `--features python` compiles the PyO3 side, which is off by default. The full
 check list is the repository's, in
-[docs/development.md](../../docs/development.md).
+[docs/development.md](../../docs/development.md). How a page under `docs/`
+is written and kept current is [docs/AGENTS.md](docs/AGENTS.md).

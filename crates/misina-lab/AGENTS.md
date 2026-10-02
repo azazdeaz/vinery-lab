@@ -56,19 +56,20 @@ works without it.
 
 ## Docs
 
-- [docs/generators.md](docs/generators.md) — what a generator declares, and every surface the framework builds from it
-- [docs/elements.md](docs/elements.md) — how a scene is built: layers, configs, the mesh library, and the rules a layer follows
-- [docs/quantization.md](docs/quantization.md) — a population of configs down to a budget of meshes, and how to write a metric
-- [docs/randomness.md](docs/randomness.md) — one seed, many streams
-- [docs/export.md](docs/export.md) — coordinates, the scene document, and what the USD builder makes of it
-- [docs/isaac-lab.md](docs/isaac-lab.md) — spawning a generated scene: the cfg base, the cache, rods, and cutting them
-- [docs/editing-parameters.md](docs/editing-parameters.md) — how to add or change a parameter
+The pages under [docs/](docs/) explain one idea each, and the table in
+[README.md](README.md) indexes them; a test fails while a page is missing
+from it. [docs/AGENTS.md](docs/AGENTS.md) is how a page is written and kept
+current.
 
 ## Rules that bite
 
-- **Nothing here names a generator.** The example everywhere is the row of
-  boxes in the README and `testing::fixture`. A vine, a tomato or a post
-  belongs in a generator's crate.
+- **Nothing here is about one generator.** What only one kind of scene
+  has, a plant, a trellis, the prim names it uses, belongs in that
+  generator's crate.
+- **A change to the code is a change to the docs.** The change that renames
+  a public item, or changes what one does, fixes the pages that name it; no
+  test reads prose.
+  [docs/AGENTS.md](docs/AGENTS.md#keeping-a-page-current) says how.
 - **A parameter is declared once, on its Rust params struct.** The panel,
   the snippet, the Python class, the stub and the parameters page all derive
   from it. [docs/editing-parameters.md](docs/editing-parameters.md) is the
@@ -84,6 +85,3 @@ works without it.
 - **The scene is authored Z-up, in meters** (REP-103). Bevy renders Y-up;
   the correction is a single parent entity, above where the export walk
   starts.
-- **Doc pages link files and symbol names, never line numbers.** A page
-  explains how modules fit; what a module is and its contract is its module
-  doc, and a sentence that would fit both goes in the module doc.

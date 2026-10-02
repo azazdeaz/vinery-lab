@@ -83,6 +83,7 @@ and `import misina_lab` work without it.
 - [docs/pruning-research.md](docs/pruning-research.md) — prior art for cutting shoots: pruning robots, hedgers, how simulators model a cut
 - [examples/isaaclab_demo/DEVELOPMENT.md](examples/isaaclab_demo/DEVELOPMENT.md) — the pinned Isaac Lab revision and how to bump it
 - [crates/misina-lab/docs/](crates/misina-lab/docs/) — the framework's: how a scene is built and exported, quantization, randomness, Isaac Lab, and how to add or change a parameter
+- [crates/misina-lab/docs/AGENTS.md](crates/misina-lab/docs/AGENTS.md) — how a page is written and kept current
 
 ## Rules that bite
 
@@ -100,6 +101,10 @@ and `import misina_lab` work without it.
   for maturin builds only and breaks `cargo run` and `cargo test`.
 - **Rust tests are inline `#[cfg(test)]` modules** beside the code they cover.
   The top-level `tests/` is Python only, and `test_docs.py` there fails on a
-  relative link in any Markdown file that resolves to nothing.
+  Markdown link that resolves to nothing or points at a line number.
 - **The scene is authored Z-up, in meters** (REP-103). Bevy renders Y-up; the
   correction is a single parent entity, above where the export walk starts.
+- **Comments and docs are for someone who has only the code in front of
+  them.** A note states a fact about the code or a rule to follow, not how it
+  was found, and not the answer to a question only ever asked in a chat. If a
+  detail doesn't change what the next reader does, cut it.
