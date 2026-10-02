@@ -75,12 +75,14 @@ and `import misina_lab` work without it.
 | [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs; its own uv project |
 | [assets/leaves/](crates/vinerylab/assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
+| [docs/video/](docs/video/) | the README video: `record.sh` and the storyboard it plays |
 
 ## Docs
 
 - [docs/development.md](docs/development.md) — building, the checks, running the viewer, the web build
 - [docs/parameters.md](docs/parameters.md) — every parameter, with its default and range (generated)
 - [docs/pruning-research.md](docs/pruning-research.md) — prior art for cutting shoots: pruning robots, hedgers, how simulators model a cut
+- [.claude/skills/readme-video/SKILL.md](.claude/skills/readme-video/SKILL.md) — re-recording the README video and changing what it shows; plain Markdown, for any agent
 - [examples/isaaclab_demo/DEVELOPMENT.md](examples/isaaclab_demo/DEVELOPMENT.md) — the pinned Isaac Lab revision and how to bump it
 - [crates/misina-lab/docs/](crates/misina-lab/docs/) — the framework's: how a scene is built and exported, quantization, randomness, Isaac Lab, and how to add or change a parameter
 

@@ -139,6 +139,7 @@ fn slider_control<P: Params>(
             (
                 @FeathersSlider { @min: {slider.min}, @max: {slider.max}, @value: value }
                 Tip(tip)
+                Bound { fragment: {bound.fragment}, field: {bound.field} }
                 SliderStep({slider.step})
                 SliderPrecision(precision)
                 on(slider_self_update)
@@ -324,7 +325,7 @@ fn close_fields(
 ///
 /// A typed number that skipped this would leave the bar and the label showing
 /// one value while an integer parameter held the rounded other.
-fn round(value: f32, precision: i32) -> f32 {
+pub(crate) fn round(value: f32, precision: i32) -> f32 {
     let factor = 10f32.powi(precision);
     (value * factor).round() / factor
 }
@@ -481,7 +482,7 @@ fn tips(
 /// The card itself. [`Popover`] anchors it to the control it is a child of and
 /// flips it to whichever of the two sides has room, so it clears the panel's
 /// right edge.
-fn tip_popup(text: Cow<'static, str>, above: bool) -> impl Scene {
+pub(crate) fn tip_popup(text: Cow<'static, str>, above: bool) -> impl Scene {
     let sides = if above {
         [PopoverSide::Top, PopoverSide::Bottom]
     } else {
@@ -593,7 +594,12 @@ fn params_panel<G: Generator>(params: &G::Params) -> impl Scene {
             let controls: Vec<Box<dyn Scene>> = params::fields(fragment)
                 .map(|field| control::<G::Params>(fragment.name(), field, params))
                 .collect();
-            Box::new(section(params::label(fragment), i == 0, controls)) as Box<dyn Scene>
+            Box::new(section(
+                fragment.name(),
+                params::label(fragment),
+                i == 0,
+                controls,
+            )) as Box<dyn Scene>
         })
         .collect();
     bsn! {
@@ -645,7 +651,12 @@ fn params_panel<G: Generator>(params: &G::Params) -> impl Scene {
 ///
 /// The group's children are `[header, body]` in that order, and the toggle
 /// sits in the header — [`fold_section`] walks that shape.
-fn section(title: impl Into<String>, open: bool, body: impl SceneList) -> impl Scene {
+fn section(
+    fragment: &'static str,
+    title: impl Into<String>,
+    open: bool,
+    body: impl SceneList,
+) -> impl Scene {
     // An `Option<impl Scene>` resolving to `None` adds nothing, which is how a
     // marker component is left off a template.
     let checked = open.then_some(bsn! { Checked });
@@ -657,6 +668,7 @@ fn section(title: impl Into<String>, open: bool, body: impl SceneList) -> impl S
                 (Text(title) ThemedText),
                 (
                     @FeathersDisclosureToggle
+                    Section(fragment)
                     on(checkbox_self_update)
                     on(fold_section)
                     // Last: a brace straight after `@FeathersDisclosureToggle`
@@ -668,6 +680,10 @@ fn section(title: impl Into<String>, open: bool, body: impl SceneList) -> impl S
         ]
     }
 }
+
+/// The chevron folding a fragment's section, by the fragment's field name.
+#[derive(Component, Clone, Copy, Default)]
+pub struct Section(pub &'static str);
 
 /// Shows or hides the body of the section whose chevron was just toggled.
 fn fold_section(
@@ -776,11 +792,11 @@ mod tests {
     }
 
     fn open_section() -> impl SceneList {
-        bsn_list![section("Test", true, bsn_list![Node])]
+        bsn_list![section("test", "Test", true, bsn_list![Node])]
     }
 
     fn closed_section() -> impl SceneList {
-        bsn_list![section("Test", false, bsn_list![Node])]
+        bsn_list![section("test", "Test", false, bsn_list![Node])]
     }
 
     /// Everything a section's scene touches while spawning, and nothing else:

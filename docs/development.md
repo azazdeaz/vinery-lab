@@ -104,6 +104,13 @@ has to be on `PATH`; the extension picks the container. `VINERYLAB_RECORD_FPS`
 sets the rate, 30 by default, and is also how fast the window is sampled. See
 `crates/misina-lab/src/record.rs`.
 
+`VINERYLAB_TOUR=docs/video/tour.json cargo run --release` plays a storyboard
+of camera moves and panel edits, then quits. With `VINERYLAB_RECORD` set too
+its clock advances one video frame per rendered frame, so the recording is
+smooth however long the rebuilds take; `docs/video/record.sh` records the
+README video that way. See `crates/misina-lab/src/tour.rs`, and
+[the skill](../.claude/skills/readme-video/SKILL.md) for changing the video.
+
 ### Web build
 
 The same viewer, compiled to wasm and published by the manually triggered
