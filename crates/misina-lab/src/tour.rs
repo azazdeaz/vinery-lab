@@ -30,7 +30,7 @@ use bevy::reflect::NamedField;
 use bevy::render::view::screenshot::Screenshot;
 use bevy::time::TimeUpdateStrategy;
 use bevy::ui::{Checked, ComputedNode, ScrollPosition, UiGlobalTransform};
-use bevy::ui_widgets::{ScrollArea, SliderPrecision, SliderValue, ValueChange};
+use bevy::ui_widgets::{Checkbox, ScrollArea, SliderPrecision, SliderValue, ValueChange};
 use bevy::window::{CursorOptions, PrimaryWindow, WindowResolution};
 use bevy_panorbit_camera::PanOrbitCamera;
 use serde::Deserialize;
@@ -131,6 +131,9 @@ pub struct Step {
     /// `secs`. Its tooltip floats beside it until a step neither shows nor
     /// sets it — a step that only moves the camera included.
     pub show: Option<String>,
+    /// Checkboxes outside the params, such as the footer's view options, by
+    /// caption: ticked or not when the step starts.
+    pub toggle: BTreeMap<String, bool>,
     /// Ignored: what the step is for, JSON having no comments.
     pub note: String,
 }
@@ -420,6 +423,21 @@ fn begin<P: Params>(world: &mut World, at: &mut Playhead, step: &Step, now: f64)
             secs,
             what: (control, area, from),
         });
+    }
+    for (caption, on) in &step.toggle {
+        let mut texts = world.query::<(Entity, &Text)>();
+        let checkbox = texts
+            .iter(world)
+            .filter(|(_, text)| text.0 == *caption)
+            .find_map(|(text, _)| up::<Checkbox>(world, text))
+            .unwrap_or_else(|| panic!("no checkbox is captioned `{caption}`"));
+        if world.entity(checkbox).contains::<Checked>() != *on {
+            world.trigger(ValueChange {
+                source: checkbox,
+                value: *on,
+                is_final: true,
+            });
+        }
     }
     let touched = |path: &String| step.show.as_ref() == Some(path) || step.set.contains_key(path);
     if !at.tip.as_ref().is_some_and(|(path, _)| touched(path)) {
