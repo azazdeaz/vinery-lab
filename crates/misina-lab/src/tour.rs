@@ -2,7 +2,7 @@
 //! edits — for recording a demo video with [`record`](crate::record):
 //!
 //! ```text
-//! VINERYLAB_TOUR=tour.json VINERYLAB_RECORD=demo.mp4 cargo run --release
+//! BOXLAB_TOUR=tour.json BOXLAB_RECORD=demo.mp4 cargo run --release
 //! ```
 //!
 //! The variable is `{PACKAGE}_TOUR`, naming a JSON file in [`Tour`]'s shape.
@@ -140,7 +140,7 @@ pub struct Step {
 #[serde(default, deny_unknown_fields)]
 pub struct Pose {
     /// The point orbited and looked at, in meters along the scene's X and Y
-    /// and then up from the ground there — so a close-up stays on the vines
+    /// and then up from the ground there — so a close-up stays on the objects
     /// whatever the hills do. The ground is read when the step starts.
     pub focus: Option<[f32; 3]>,
     /// Degrees around the vertical. 0 puts the camera on the focus's −Y side,

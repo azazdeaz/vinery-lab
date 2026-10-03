@@ -1,12 +1,12 @@
 """Newton physics for a generated scene's rods.
 
-Nothing in a generated scene is a rigid body except a flexible organ -- a
-vineyard's stray shoot -- imported as a **rod**: one capsule rigid body per
-segment, joined by spring joints and clamped to the wood it grew from. Only
-Newton's VBD solver steps one, and a robot needs MuJoCo, so a scene with any
-runs the two side by side as named entries of a coupled solver with the
-robot's own bodies handed across as proxies. A scene without runs plain
-MJWarp, which cannot build a model that holds a rod at all.
+Nothing in a generated scene is a rigid body except a flexible organ, imported
+as a **rod**: one capsule rigid body per segment, joined by spring joints and
+clamped to the wood it grew from. Only Newton's VBD solver steps one, and a
+robot needs MuJoCo, so a scene with any runs the two side by side as named
+entries of a coupled solver with the robot's own bodies handed across as
+proxies. A scene without runs plain MJWarp, which cannot build a model that
+holds a rod at all.
 
 `make_physics_cfg_newton` picks between the two from the scene's cfg. The
 choice is provisional -- Isaac Lab's `--physics` override, a Hydra preset or a
@@ -17,10 +17,9 @@ something does.
 
 Everything a caller cannot know -- what the cable prims are called, what the
 rod bodies end up labelled, which entry has to own the ground -- is decided
-here. What a caller *does* know, the robot and the parts of it a rod may
-touch, are the arguments. The numbers below were measured on a vineyard's
-canes and hold for a rod of that build: a metre or so long, a centimetre
-across.
+here. What a caller *does* know, the robot and the parts of it a rod may touch,
+are the arguments. The numbers below were measured on rods a metre or so long
+and a centimetre across, and hold for a rod of that build.
 """
 
 from __future__ import annotations
@@ -57,9 +56,9 @@ them."""
 ROD_SUBSTEPS = 1
 """Substeps the rods take inside each physics substep.
 
-One. More settles a cane worse, not better: VBD adds a joint's damping to its
+One. More settles a rod worse, not better: VBD adds a joint's damping to its
 stiffness as `kd / dt` every sweep, so the shorter the step the more that term
-swamps the rest and the less ten sweeps converge. At two, a cane shoved at the
+swamps the rest and the less ten sweeps converge. At two, a rod shoved at the
 robot's cruising speed takes several times as long to come within a centimetre
 of rest, and some end centimetres off where they started.
 """
@@ -71,12 +70,12 @@ ROD_STIFFEN = 3.0
 A trade between the pose the generator drew and a believable swing. A
 cantilever's sag under its own weight and its first frequency are tied by
 gravity alone -- the tip sags about 1.5 g / omega^2, whatever the mass and
-stiffness -- so a cane swinging at the ~0.8 Hz its cable material implies sags
-a quarter metre out of the drawn pose. At this factor a 1.4 m cane sags about
+stiffness -- so a rod swinging at the ~0.8 Hz its cable material implies sags
+a quarter metre out of the drawn pose. At this factor a 1.4 m rod sags about
 9 cm and swings at about 1.1 Hz.
 
 Not lower. At two, `VBDSolverCfg.iterations` (ten) sweeps no longer hold a
-chain that soft: a cane creeps for seconds after a push, and some come to rest
+chain that soft: a rod creeps for seconds after a push, and some come to rest
 centimetres from where they started.
 """
 
@@ -87,10 +86,10 @@ Not a preference. VBD solves a rod chain by Gauss-Seidel sweeps, one body at a
 time against its neighbours, and a joint far stiffer than a segment's inertia
 over one step (m / dt^2) is what those converge worst on. The cable material
 makes stretch and shear several hundred times that. The part a sweep leaves
-unconverged becomes velocity: at the authored values, a cane soft enough to
+unconverged becomes velocity: at the authored values, a rod soft enough to
 swing like one never comes to rest, damped or not. A hundredth brings them
-to a few times the inertia, which still holds a 1.4 m cane to under a
-millimetre of stretch. A thousandth is too soft the other way, and the canes
+to a few times the inertia, which still holds a 1.4 m rod to under a
+millimetre of stretch. A thousandth is too soft the other way, and the rods
 stop settling again.
 """
 
@@ -100,14 +99,14 @@ stiffness, in seconds.
 
 Newton builds every rod joint undamped -- the cable importer never passes
 `add_rod` a damping, and the curve material schema has no attribute to carry
-one -- so a cane rings around its rest pose instead of arriving at it. This
-much is a heavily damped swing, the way a leafy shoot moves in air: pushed
-aside and let go, a cane swings back past its rest pose once, by about a fifth
+one -- so a rod rings around its rest pose instead of arriving at it. This
+much is a heavily damped swing, the way a leafy stem moves in air: pushed
+aside and let go, a rod swings back past its rest pose once, by about a fifth
 of the push, and is within a centimetre of rest in one to three seconds.
 
 Bend and twist only. VBD adds damping to a slot's stiffness as `kd / dt` every
 sweep, so on stretch and shear it would make the slots that already converge
-worst stiffer still; damped there, canes pump themselves into a swing that
+worst stiffer still; damped there, rods pump themselves into a swing that
 never stops.
 """
 
@@ -125,13 +124,13 @@ A group is one signed integer per shape. A positive group meets itself and
 every negative one; a negative group meets everything but its own; zero meets
 nothing. That is the whole algebra, and it is enough: a plant's rods and its
 wood share a positive group, so a cut piece catches on its own plant's stub,
-canes and cordon, and segments of different plants never pair. The ground, the
-trellis and the robot's bodies are negative, so every rod meets them. The
-robot takes a group per body, which pairs its parts exactly as the default
-group did.
+its other rods and its wood, and segments of different plants never pair. The
+ground, the trellis and the robot's bodies are negative, so every rod meets
+them. The robot takes a group per body, which pairs its parts exactly as the
+default group did.
 
-Measured on the pruning demo's row, 953 segments over twelve vines with a
-trunk and two cordons each: 62,058 contact pairs against 19,364 with no rod
+Measured on a row of twelve plants, each a trunk and two arms of wood, with 953
+rod segments among them: 62,058 contact pairs against 19,364 with no rod
 meeting a rod, at the same step time. Every rod meeting every other would be
 454,000.
 """
@@ -139,9 +138,9 @@ meeting a rod, at the same step time. Every rod meeting every other would be
 SCENE_GROUP = -1
 """Collision group of the ground and of every static shape that is not a
 plant's wood: negative, so every rod and the robot meet it, at one pair per rod
-segment each. A post costs that much, a wire would too. The straddler demo's
-widest scene, 9,800 segments among some eighty posts, pays 900,000 pairs and
-8% of its step time for them."""
+segment each. A post costs that much, a wire would too. A large scene, 9,800
+rod segments among some eighty posts, pays 900,000 pairs and 8% of its step
+time for them."""
 
 
 _tuning: CallbackHandle | None = None
@@ -156,10 +155,10 @@ def tune_rods(
 ) -> CallbackHandle:
     """Retune every rod joint's stiffness and damping, and group what collides.
 
-    `plant` is the prim name every plant takes, its index appended -- `Vine`
-    for a vineyard, whose `PART` in `vine.rs` picks it. A rod's body label and
-    a wood collider's shape label both pass through the plant's prim, which is
-    what puts a plant's rods and its wood in one collision group.
+    `plant` is the prim name every plant takes, its index appended -- `Plant`
+    for `Plant_007`, the cfg's `PLANT`. A rod's body label and a wood
+    collider's shape label both pass through the plant's prim, which is what
+    puts a plant's rods and its wood in one collision group.
 
     `spawn.spawn_generated` calls this when it spawns rods under a solver that
     steps them, so a script calls it only to change the numbers: from inside the
@@ -307,7 +306,7 @@ def make_physics_cfg_newton(
                     destination="rods",
                     bodies=list(contact_bodies),
                     # Refresh the proxies' contacts every pass: a walking robot
-                    # moves a shoot's width within one step.
+                    # moves a rod's width within one step.
                     collide_interval=1,
                 )
             ],

@@ -1,8 +1,7 @@
 """Cutting a rod anywhere along it while the simulation runs.
 
-A flexible organ -- a vineyard's shoot -- is a rod: a chain of capsule bodies,
-one per segment, joined by rod joints (see `rods`). A cut at a joint is one
-switch -- turn the joint
+A flexible organ is a rod: a chain of capsule bodies, one per segment, joined
+by rod joints (see `rods`). A cut at a joint is one switch -- turn the joint
 off -- and everything past it falls away as a chain of its own. A cut anywhere
 else moves the joint to the cut first: the capsule the cut lands on is
 shortened to end there, the next one down the chain is stretched back to start
@@ -47,8 +46,8 @@ shortened to nothing has no mass left, and the solver divides by it.
 STEM = "Stem"
 """The prim each rod segment's tube is drawn as, below the segment's own.
 
-The generator picks it -- vinerylab's `STEM` in `shoot.rs` -- and `Shears`
-takes another name for a generator that drew its tubes differently."""
+The generator picks it, and `Shears` takes another name for a generator that
+drew its tubes differently."""
 
 
 class Shears:

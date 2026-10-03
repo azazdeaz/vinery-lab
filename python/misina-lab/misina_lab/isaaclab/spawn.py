@@ -76,7 +76,7 @@ class GeneratedSceneCfg(FileCfg):
 
     PARAMS: ClassVar[type] = MISSING  # type: ignore[assignment]
     """The generator's params aggregate, a pyclass of its extension module:
-    `vinerylab.VineyardParams`. A subclass sets it; `configclass` needs every
+    `boxlab.BoxesParams`. A subclass sets it; `configclass` needs every
     annotation to carry a value, so the base holds `MISSING`."""
 
     FRAGMENTS: ClassVar[tuple[str, ...]] = ()
@@ -84,9 +84,9 @@ class GeneratedSceneCfg(FileCfg):
     beside the fields themselves."""
 
     PLANT: ClassVar[str | None] = None
-    """Prim name of the plant a rod belongs to -- `Vine` in a vineyard -- for a
-    scene that can author one. Everything under one plant's prim collides as a
-    group and passes through every other plant; see `rods.tune_rods`."""
+    """Prim name of the plant a rod belongs to -- `Plant` for `Plant_007` --
+    for a scene that can author one. Everything under one plant's prim collides
+    as a group and passes through every other plant; see `rods.tune_rods`."""
 
     func: Callable | str = "misina_lab.isaaclab.spawn:spawn_generated"
     """Fully qualified rather than the `{DIR}` form: Isaac Lab resolves `{DIR}`
@@ -96,8 +96,8 @@ class GeneratedSceneCfg(FileCfg):
     cache_dir: str | None = None
     """Where generated scenes are cached. Defaults to ``$<PACKAGE>_CACHE_DIR``,
     else ``$XDG_CACHE_HOME/<package>/scenes``, else ``~/.cache/<package>/scenes``,
-    for the package `PARAMS` comes from -- `VINERYLAB_CACHE_DIR` and
-    ``~/.cache/vinerylab/scenes`` for a vineyard."""
+    for the package `PARAMS` comes from -- `BOXLAB_CACHE_DIR` and
+    ``~/.cache/boxlab/scenes`` for `boxlab`."""
 
     force_regenerate: bool = False
     """Regenerate even on a cache hit. For iterating on the generator itself."""
@@ -124,7 +124,7 @@ def spawn_generated(
     """Spawn a generated scene, generating it first if it isn't cached.
 
     Decorated with :func:`clone`, so a regex prim path such as
-    ``{ENV_REGEX_NS}/Vineyard`` spawns once and is copied to every matching
+    ``{ENV_REGEX_NS}/Boxes`` spawns once and is copied to every matching
     parent -- the generation cost is paid once regardless of ``num_envs``.
 
     The scene is checked against the physics backend in force. Where nothing
@@ -280,17 +280,17 @@ def _generator_id(core: ModuleType) -> str:
 
 
 def _core(cfg: GeneratedSceneCfg) -> ModuleType:
-    """The extension module `PARAMS` came from: `vinerylab._core` for a vineyard."""
+    """The extension module `PARAMS` came from: `boxlab._core` for `BoxesParams`."""
     return sys.modules[cfg.PARAMS.__module__]
 
 
 def _package(cfg: GeneratedSceneCfg) -> str:
-    """The generator's package, `vinerylab`: the one its extension module sits in."""
+    """The generator's package, `boxlab`: the one its extension module sits in."""
     return _core(cfg).__name__.rpartition(".")[0]
 
 
 def _stem(cfg: GeneratedSceneCfg) -> str:
-    """What a cached file is named after: `vineyard` for `VineyardParams`."""
+    """What a cached file is named after: `boxes` for `BoxesParams`."""
     return cfg.PARAMS.__name__.removesuffix("Params").lower()
 
 

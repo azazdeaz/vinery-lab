@@ -104,22 +104,22 @@ pub fn app<G: Generator>() -> App {
 
 /// How far from the camera shadows are still drawn, in meters. Past the engine
 /// default of 150, which the framing below overruns: the camera starts 114 m
-/// out and the far corner of an 80x50 m parcel is another 50 beyond that, so at
-/// the default the row furthest from the camera would sit unshadowed. The
-/// cascade splits are left alone — they stay fine-grained near the camera,
-/// which is what orbiting in to inspect a single vine wants.
+/// out and the far corner of an 80 by 50 m scene is another 50 beyond that,
+/// so at the default the row furthest from the camera would sit unshadowed.
+/// The cascade splits are left alone — they stay fine-grained near the
+/// camera, which is what orbiting in to inspect a single object wants.
 const SHADOW_DISTANCE: f32 = 200.0;
 
 fn setup(mut commands: Commands, mut mediums: ResMut<Assets<ScatteringMedium>>) {
     // A physically scattered sky, which is both the backdrop and — through
     // `AtmosphereEnvironmentMapLight` below — the scene's ambient light. It
     // places itself one earth radius under the origin on its own, so the
-    // parcel sits on the planet's surface with no transform to author.
+    // scene sits on the planet's surface with no transform to author.
     commands.spawn(Atmosphere::earth(
         mediums.add(ScatteringMedium::earth(256, 256)),
     ));
 
-    // Framed for a scene about 80 m across, vinerylab's default parcel.
+    // Framed for a scene about 80 by 50 m.
     // ponytail: one framing for every generator; a resource the generator
     // inserts once a second scene size exists.
     commands.spawn((

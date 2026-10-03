@@ -15,7 +15,7 @@
 //! a percent of the error and is rounded away however different it looks.
 //! k-center is density-blind: one config far from everything costs as much as a
 //! cluster of ten thousand. That is what keeps a handful of diseased leaves in
-//! a healthy vineyard — provided the [`Metric`] puts them far away, which is
+//! a healthy canopy — provided the [`Metric`] puts them far away, which is
 //! the metric's business and not this module's.
 //!
 //! k-center is NP-hard; Gonzalez's farthest-first traversal is a
@@ -117,7 +117,7 @@ where
 {
     let k = k.min(items.len());
     if k == 0 {
-        // A real state, not a caller error: a parcel can solve to no rows, and
+        // A real state, not a caller error: a layout can solve to no rows, and
         // a row can draw no plants.
         return Codebook {
             representatives: Vec::new(),

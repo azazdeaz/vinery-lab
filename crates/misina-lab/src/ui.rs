@@ -531,7 +531,7 @@ const QUIET: f32 = 0.15;
 
 /// The panel's copy of every element's params, waiting to be handed over.
 ///
-/// Rebuilding a layer costs tens of milliseconds at parcel scale, so a slider
+/// Rebuilding a layer costs tens of milliseconds at field scale, so a slider
 /// that wrote the live resources would spend a drag rebuilding the scene once
 /// per frame. Sliders write this instead and [`commit`] copies it across.
 ///

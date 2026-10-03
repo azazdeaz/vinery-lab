@@ -306,7 +306,7 @@ mod tests {
     }
 
     fn root(world: &mut World) -> Entity {
-        world.spawn((UsdRoot, Name::new("Vineyard"))).id()
+        world.spawn((UsdRoot, Name::new("Scene"))).id()
     }
 
     #[test]
@@ -315,7 +315,7 @@ mod tests {
         root(&mut world);
 
         let doc = scene_doc(&mut world).unwrap();
-        assert_eq!(doc.root.name, "Vineyard");
+        assert_eq!(doc.root.name, "Scene");
         assert_eq!(doc.root.type_name, "Xform");
         assert_eq!(doc.up_axis, "Z");
         assert!(
@@ -332,7 +332,7 @@ mod tests {
             .spawn((Name::new("Row_00"), UsdType("Scope"), ChildOf(root)))
             .id();
         world.spawn((
-            Name::new("Vine_000"),
+            Name::new("Plant_000"),
             Transform::from_xyz(1.0, 2.0, 3.0),
             ChildOf(row),
         ));
@@ -344,9 +344,9 @@ mod tests {
             ("Row_00", "Scope")
         );
 
-        let vine = &row.children[0];
-        assert_eq!(vine.name, "Vine_000");
-        assert_eq!(vine.xform.unwrap().translate, [1.0, 2.0, 3.0]);
+        let plant = &row.children[0];
+        assert_eq!(plant.name, "Plant_000");
+        assert_eq!(plant.xform.unwrap().translate, [1.0, 2.0, 3.0]);
     }
 
     /// A referencing prim is the geometry, so it is what carries
@@ -410,11 +410,11 @@ mod tests {
     fn a_referencing_prim_may_not_have_children() {
         let mut world = world();
         let root = root(&mut world);
-        let name = add_part(&mut world, "Shoot", 0);
-        let stem = world
-            .spawn((Name::new("Stem"), UsdReference(name), ChildOf(root)))
+        let name = add_part(&mut world, "Stem", 0);
+        let tube = world
+            .spawn((Name::new("Tube"), UsdReference(name), ChildOf(root)))
             .id();
-        world.spawn((Name::new("Leaf_00"), ChildOf(stem)));
+        world.spawn((Name::new("Leaf_00"), ChildOf(tube)));
 
         let err = scene_doc(&mut world).unwrap_err().to_string();
         assert!(err.contains("must be leaves"), "got: {err}");

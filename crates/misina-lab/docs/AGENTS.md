@@ -55,7 +55,8 @@ about 200 lines.
   broken by the first reader who thinks they know better.
 - Say what a measured number was measured on.
 - Name no generator. The framework's examples are its own, and the test
-  fails on a generator's name anywhere in this crate's Markdown.
+  fails on a generator's name or vocabulary anywhere in this crate or its
+  Python package.
 
 ## Links
 

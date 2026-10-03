@@ -107,10 +107,11 @@ pub fn nudged<P: Params>() -> P {
 /// One organ, read back off the scene graph.
 #[derive(Clone, Debug)]
 pub struct Organ<C> {
-    /// The prim name — `Vine_007`. Repeats across rows; use [`path`](Self::path)
-    /// when identity matters.
+    /// The prim name — `Plant_007`. Repeats across rows; use
+    /// [`path`](Self::path) when identity matters.
     pub name: String,
-    /// Slash-joined names from the scene root down, `Planting/Row_000/Vine_007`.
+    /// Slash-joined names from the scene root down,
+    /// `Planting/Row_000/Plant_007`.
     pub path: String,
     pub transform: Transform,
     pub config: C,
@@ -242,8 +243,8 @@ fn corner(mesh: &MeshData, index: i32) -> Vec3 {
 // ─── A generator to test the framework with ─────────────────────────
 
 /// The smallest generator that exercises every surface: two fragments, one
-/// element, a row of boxes. What this crate's own tests stand in for the
-/// vineyard with, and the shortest example of what a generator declares.
+/// element, a row of boxes. What this crate's own tests use in place of a real
+/// generator, and the shortest example of what a generator declares.
 #[cfg(test)]
 pub mod fixture {
     use bevy::prelude::*;

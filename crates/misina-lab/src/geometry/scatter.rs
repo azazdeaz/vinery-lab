@@ -1,10 +1,10 @@
 //! Points scattered over a [`Band`] of ground.
 //!
 //! One rule for everything placed *within* a zone rather than along a line:
-//! sward tiles down an alley, weed slots in the under-vine strip, blades
-//! inside a tile. A jittered grid rather than dart throwing — it is `O(n)`,
-//! never lands two points on one spot at a jitter under half a cell, and
-//! gives every point a stable slot to be named by.
+//! ground-cover tiles down an alley, weed slots in the strip under a row,
+//! blades inside a tile. A jittered grid rather than dart throwing — it is
+//! `O(n)`, never lands two points on one spot at a jitter under half a cell,
+//! and gives every point a stable slot to be named by.
 
 use bevy::math::Vec2;
 
@@ -13,9 +13,9 @@ use crate::rng::Rng;
 /// A strip of ground: a centerline in plan view and how far it reaches either
 /// side of it.
 ///
-/// A row's under-vine strip is one, the alley between two rows is one, and so
-/// is a tile of sward — anything placed *within* a zone rather than *along* a
-/// line takes its frame from here. See [`jittered_grid`].
+/// The strip under a row is one, the alley between two rows is one, and so
+/// is a tile of ground cover — anything placed *within* a zone rather than
+/// *along* a line takes its frame from here. See [`jittered_grid`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Band {
     pub start: Vec2,

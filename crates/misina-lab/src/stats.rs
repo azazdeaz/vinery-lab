@@ -189,7 +189,7 @@ fn footer() -> impl Scene {
             ),
             field(
                 "Tris",
-                "Triangles built, then triangles standing in the scene. The gap between them is the instancing — a detail slider moves the first, a parcel slider the second.",
+                "Triangles built, then triangles standing in the scene. The gap between them is the instancing — a detail slider moves the first, a count or layout slider the second.",
                 |stats| format!("{} / {}", short(stats.unique_triangles), short(stats.drawn_triangles)),
             ),
             field(
@@ -199,7 +199,7 @@ fn footer() -> impl Scene {
             ),
             field(
                 "Rods",
-                "Capsule bodies a solver builds from the flexible shoots — the one figure here that reaches the physics step. Zero unless stray shoots are bendable.",
+                "Capsule bodies a solver builds from the scene's flexible organs — the one figure here that reaches the physics step. Zero when nothing in the scene is flexible.",
                 |stats| short(stats.segments),
             ),
             // Holds the view controls at the far end, away from the figures.
