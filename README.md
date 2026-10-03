@@ -57,7 +57,7 @@ cargo run --release
 
 This should bring up the preview app to configure the vineyard
 
-https://github.com/user-attachments/assets/c00b227f-74c6-4446-bd41-2c487d7f5605
+https://github.com/user-attachments/assets/529d2e5b-2bfa-458f-81d0-02c65c27ba53
 
 
 
