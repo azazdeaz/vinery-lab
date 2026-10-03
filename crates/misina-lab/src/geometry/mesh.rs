@@ -176,7 +176,7 @@ pub fn box_mesh(size: f32) -> MeshData {
 ///
 /// Tapers linearly from `base` to `top`; pass the same radius twice for a
 /// plain cylinder. Straight and unjittered either way: the variety a
-/// vineyard's posts show is in how they were driven rather than in their
+/// row of posts shows is in how they were driven rather than in their
 /// shape, which is per placement and needs no geometry of its own. Anything
 /// that *bends* wants [`strand`](super::strand) instead — this is the cheap
 /// case, one ring at each end and no curve to fit.

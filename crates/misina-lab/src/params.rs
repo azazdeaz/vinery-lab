@@ -62,11 +62,11 @@ pub enum Widget {
 /// ```ignore
 /// misina_lab::generator! {
 ///     /// A plain snapshot of every element's params.
-///     pub struct VineyardParams as PyVineyardParams("VineyardParams") for crate::Vineyard {
+///     pub struct BoxesParams as PyBoxesParams("BoxesParams") for Boxes {
 ///         pub scene: SceneParams,
 ///         pub terrain: misina_lab::terrain::TerrainParams as core,
-///         #[reflect(@Label("Weeds"))]
-///         pub weed: weed::WeedParams,
+///         #[reflect(@Label("Box row"))]
+///         pub boxes: BoxParams,
 ///     }
 /// }
 /// ```

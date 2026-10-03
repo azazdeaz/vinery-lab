@@ -11,7 +11,7 @@
 //! actually rebuilt something:
 //!
 //! ```text
-//! VINERYLAB_PERF=1 cargo run
+//! BOXLAB_PERF=1 cargo run
 //! ```
 //!
 //! The per-layer breakdown is the generator's to place: it adds a

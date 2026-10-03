@@ -64,8 +64,10 @@ current.
 ## Rules that bite
 
 - **Nothing here is about one generator.** What only one kind of scene
-  has, a plant, a trellis, the prim names it uses, belongs in that
-  generator's crate.
+  has, its crop, its trellis, its prim names, belongs in that generator's
+  crate; the examples here are the row of boxes and a generic plant.
+  `tests/test_docs.py` fails on a generator's name or vocabulary anywhere in
+  this crate or its Python package.
 - **A change to the code is a change to the docs.** The change that renames
   a public item, or changes what one does, fixes the pages that name it; no
   test reads prose.

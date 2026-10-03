@@ -1,6 +1,6 @@
 [package]
 name = "misina-lab"
-description = "The framework under vinerylab: what a scene generator is built from."
+description = "What a procedural scene generator is built from."
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

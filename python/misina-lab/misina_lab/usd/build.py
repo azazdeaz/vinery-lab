@@ -166,8 +166,8 @@ FORMAT = 6
 
 PARTS = "parts"
 """Name of the mesh library, a child of the scene root. Referenced by every
-geometry prim. The root itself is named by the document: `/Vineyard` for a
-vineyard, and the stage's default prim."""
+geometry prim. The root itself is named by the document: `/Boxes` for the
+`Boxes` generator, and the stage's default prim."""
 
 GEOM = "Geom"
 """Name of the `Mesh` inside a part. See the module docstring for why a part
@@ -229,14 +229,14 @@ _BOLTED_POINTS = 2
 down. See `_cable_point_masses`."""
 
 CABLE_MATERIAL_ATTRS: dict[str, float] = {
-    # Young's modulus of a green cane, in Pa. The importer derives all four rod
+    # Young's modulus of green wood, in Pa. The importer derives all four rod
     # stiffnesses -- stretch, shear, bend, twist -- from this, Poisson's ratio
     # and the cross-section, so it is the one knob that says how stiff a
-    # flexible organ is. At a shoot's radius it leaves a cane that stands up
+    # flexible organ is. At a stem's radius it leaves a rod that stands up
     # under its own weight and folds out of a robot's way.
     "youngsModulus": 1.0e9,
     "poissonsRatio": 0.3,
-    # Fresh cane is mostly water.
+    # Green wood is mostly water.
     "density": 800.0,
 }
 """Cable material, in SI. Not on the scene document: these are tuning, and the
@@ -576,7 +576,7 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     the same way it keeps a collision capsule out of one. A ``BasisCurves``
     whose points move every frame renders with a visible glitch under Kit's RTX
     delegate, so a flexible organ is drawn by a mesh on each of the rod segments
-    the importer drives instead -- see vinerylab's `shoot.rs`.
+    the importer drives instead.
 
     ``widths`` and ``displayColor`` are authored anyway, so the curve reads as
     the organ it stands for when guides are turned on. Nothing in the import
@@ -614,8 +614,8 @@ def _author_cable(spec: Sdf.PrimSpec, cable: Mapping[str, Any]) -> None:
     taper.SetInfo("interpolation", UsdGeom.Tokens.vertex)
 
     # One colour for the whole curve, and one material, both carrying the
-    # surface of the mesh this curve stands in for -- a cane drawn beside a
-    # rigid shoot of the same kind must not shade differently from it.
+    # surface of the mesh this curve stands in for -- a rod drawn beside a
+    # rigid stem of the same kind must not shade differently from it.
     color = Sdf.AttributeSpec(spec, "primvars:displayColor", Sdf.ValueTypeNames.Color3fArray)
     color.default = Vt.Vec3fArray([tuple(cable["display_color"])])
     color.SetInfo("interpolation", UsdGeom.Tokens.constant)
@@ -663,7 +663,7 @@ def _cable_point_masses(
     rather than a body -- the importer lumps ``m[s] + m[s+1]/2`` onto the segment
     between two of them -- so zeroing the first two leaves the first segment
     massless, which Newton simulates as **static**: fixed in position *and* in
-    orientation, the way a shoot is held where it leaves the wood.
+    orientation, the way a stem is held where it leaves the wood.
 
     The schema's own anchor, a ``PhysicsAttachment``, is the worse tool here. It
     lowers only to *ball* joints, so one pins a position and leaves the curve

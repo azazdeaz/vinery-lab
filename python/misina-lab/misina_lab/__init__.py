@@ -1,6 +1,6 @@
 """What a generated scene's Python side is built from.
 
-A generator such as `vinerylab` compiles its Rust core into a `_core`
+A generator such as `boxlab` compiles its Rust core into a `_core`
 extension module whose params classes write a scene as a JSON document. This
 package is the half that turns the document into something a simulator loads:
 `misina_lab.usd` authors it as a USD stage, and `misina_lab.isaaclab` spawns

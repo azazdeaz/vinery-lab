@@ -7,10 +7,9 @@
 //! viewer and the export agree by construction.
 //!
 //! The named colours and responses — a leaf, a post, bark — are a generator's
-//! own; vinerylab keeps them in `elements/util/{color,material}.rs`. What is
-//! here is the machinery those constants go through: [`srgb`] into linear,
-//! [`mix`] between two, [`shade`] for the per-variation jitter that keeps a
-//! field of clones from reading as one, and [`Response::surface`].
+//! own. What is here is the machinery those constants go through: [`srgb`]
+//! into linear, [`mix`] between two, [`shade`] for the per-variation jitter
+//! that keeps a field of clones from reading as one, and [`Response::surface`].
 //!
 //! # Linear, not sRGB
 //!
@@ -149,9 +148,9 @@ const BLADE_THICKNESS: f32 = 0.000_3;
 mod tests {
     use super::*;
 
-    /// A deep, slightly blue-shifted green: vinerylab's leaf.
+    /// A deep, slightly blue-shifted green: a leaf.
     const LEAF: u32 = 0x3E6B2A;
-    /// A grey-brown: vinerylab's bark.
+    /// A grey-brown: bark.
     const WOOD: u32 = 0x5A4A38;
 
     /// The three points the sRGB transfer function is pinned at. Mid-grey is

@@ -47,7 +47,7 @@ pub struct SceneDoc {
     /// from a constant of its own.
     pub up_axis: String,
     pub meters_per_unit: f64,
-    /// The mesh library, sorted by name. Becomes `/Vineyard/parts`.
+    /// The mesh library, sorted by name. Becomes `/Scene/parts`.
     pub parts: Vec<PartEntry>,
     /// The scene root, which becomes the stage's default prim.
     pub root: Node,
@@ -58,7 +58,7 @@ pub struct SceneDoc {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PartEntry {
     /// Unique within the document, and the name a [`Node::reference`] uses.
-    /// By convention `<Layer>_<representative index>` — `Leaf_2`, `Vine_11`.
+    /// By convention `<Layer>_<representative index>` — `Leaf_2`, `Plant_11`.
     pub name: String,
     pub points: Vec<[f32; 3]>,
     /// Flat triangle list into `points`.
@@ -257,8 +257,8 @@ mod tests {
             height: 1.72,
         });
 
-        let mut cane = Node::group("Cable", "BasisCurves");
-        cane.cable = Some(Cable {
+        let mut rod = Node::group("Cable", "BasisCurves");
+        rod.cable = Some(Cable {
             points: vec![[0.0; 3], [0.0, 0.0, 0.1], [0.0, 0.0, 0.2]],
             widths: vec![0.011, 0.010, 0.009],
             thickness: 0.009,
@@ -267,10 +267,10 @@ mod tests {
             reflectance: 0.25,
         });
 
-        let mut root = Node::group("Vineyard", "Xform");
+        let mut root = Node::group("Scene", "Xform");
         root.children.push(leaf);
         root.children.push(collider);
-        root.children.push(cane);
+        root.children.push(rod);
 
         SceneDoc {
             format: FORMAT,

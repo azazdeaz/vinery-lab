@@ -2,9 +2,10 @@
 
 Every relative link resolves, down to the heading it names, and no link
 points at a line number: lines move with every edit and nothing notices.
-Each docs folder's pages are all listed in its index, and the framework's
-Markdown names no generator, since it leaves the repo with the crate. What
-a regex cannot read is prose, which `crates/misina-lab/docs/AGENTS.md` covers.
+Each docs folder's pages are all listed in its index, and nothing in the
+framework, docs or code, names a generator or speaks its vocabulary, since it
+leaves the repo with the crate. What a regex cannot read is prose, which
+`crates/misina-lab/docs/AGENTS.md` covers.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-FRAMEWORK = ROOT / "crates" / "misina-lab"
 
 FENCE = re.compile(r"^ *```.*?^ *```", re.DOTALL | re.MULTILINE)
 SPAN = re.compile(r"`[^`\n]*`")
@@ -27,29 +27,33 @@ HEADING = re.compile(r"^#{1,6} +(.+?) *$", re.MULTILINE)
 URL = re.compile(r"[a-z][a-z0-9+.-]*:")
 LINE = re.compile(r"#L\d+|:\d+$")
 """A line anchor, `#L42`, or a line suffix, `lib.rs:42`."""
-GENERATOR = re.compile(r"\b(vine|grape)", re.IGNORECASE)
-"""What the generators in this repo go by: the vineyard's words. A generator
-that joins the repo adds its own."""
+GENERATOR = re.compile(r"\b(vine\w*|grape\w*|canes?|cordons?|spurs?|swards?)\b", re.IGNORECASE)
+"""What the generators in this repo go by: the vineyard's names, and the parts
+of a vine it is built from. A generator that joins the repo adds its own."""
 INDEXES = {"docs": "AGENTS.md", "crates/misina-lab/docs": "crates/misina-lab/README.md"}
 """Each docs folder, and the file that lists every page in it."""
 GUIDES = {"AGENTS.md", "CLAUDE.md"}
 """What a docs folder holds for whoever edits it, rather than as a page."""
 
 
-def markdown() -> list[Path]:
-    """Every Markdown file git tracks or would track. What it ignores, the
-    build trees, the caches and `*.local.md` notes, is not checked."""
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
+def listed(*pathspecs: str) -> list[Path]:
+    """Every file git tracks or would track under `pathspecs`. What it
+    ignores, the build trees, the caches and `*.local.md` notes, is not
+    checked."""
+    paths = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", *pathspecs],
         cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.split("\0")
-    return sorted(page for page in map(ROOT.joinpath, filter(None, listed)) if page.exists())
+    return sorted(path for path in map(ROOT.joinpath, filter(None, paths)) if path.exists())
 
 
-MARKDOWN = markdown()
+MARKDOWN = listed("*.md")
+FRAMEWORK = listed("crates/misina-lab", "python/misina-lab")
+"""Everything that leaves the repo with the framework: its crate and its
+Python package."""
 
 
 def name(page: Path) -> str:
@@ -106,10 +110,9 @@ def test_every_page_is_indexed(folder: str, index: str) -> None:
     assert not missing, f"{index} does not link {missing}"
 
 
-@pytest.mark.parametrize(
-    "page", [page for page in MARKDOWN if page.is_relative_to(FRAMEWORK)], ids=name
-)
-def test_the_framework_names_no_generator(page: Path) -> None:
-    lines = page.read_text(encoding="utf-8").splitlines()
+@pytest.mark.parametrize("path", FRAMEWORK, ids=name)
+def test_the_framework_names_no_generator(path: Path) -> None:
+    """Its examples are the row of boxes and a generic plant."""
+    lines = path.read_text(encoding="utf-8").splitlines()
     hits = [f"{n}: {line.strip()}" for n, line in enumerate(lines, 1) if GENERATOR.search(line)]
-    assert not hits, f"{name(page)}: {hits}"
+    assert not hits, f"{name(path)}: {hits}"

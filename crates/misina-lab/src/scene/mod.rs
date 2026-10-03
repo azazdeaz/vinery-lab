@@ -17,11 +17,11 @@
 //! part, carry no children, and are instanceable:
 //!
 //! ```text
-//! /Vineyard/Planting/Row_00/Vine_047     Xform, unique
-//!   /Wood                                 -> parts/Vine_3, instanceable
+//! /Scene/Planting/Row_00/Plant_047        Xform, unique
+//!   /Wood                                 -> parts/Plant_3, instanceable
 //!   /Collision                            Capsule, the trunk's proxy
-//!   /Shoot_00_0                           Xform, unique
-//!     /Stem                               -> parts/Shoot_11, instanceable
+//!   /Stem_00                              Xform, unique
+//!     /Tube                               -> parts/Stem_1, instanceable
 //!     /Leaf_00                            -> parts/Leaf_2, instanceable
 //! ```
 //!
@@ -35,7 +35,7 @@
 //! collides as its own mesh ([`Library::collide`]) because the shape *is* the
 //! terrain; everything else gets a [`capsule`] proxy, which needs no cooking
 //! and is the only round shape PhysX has natively. None of it is a rigid body
-//! — a vineyard is scenery that stands still.
+//! — a generated scene is scenery that stands still.
 //!
 //! Except where it does not: a [`cable`] is a flexible organ, which a solver
 //! that understands one turns into bodies of its own. It replaces the mesh
@@ -123,7 +123,7 @@ pub struct UsdReference(pub String);
 /// Overrides the prim type, which is otherwise `Xform`.
 ///
 /// Only worth setting for `Scope`, on a prim that groups without placing —
-/// a row of vines carries no transform of its own, because its plants are each
+/// a row carries no transform of its own, because its plants are each
 /// draped onto terrain that one row transform could not follow.
 #[derive(Component, Clone, Copy, Debug)]
 pub struct UsdType(pub &'static str);
@@ -472,12 +472,12 @@ mod tests {
         for i in 0..4 {
             prototypes.insert("Leaf", i, part());
         }
-        prototypes.insert("Vine", 0, part());
+        prototypes.insert("Plant", 0, part());
 
         prototypes.clear_layer("Leaf");
 
         assert_eq!(prototypes.len(), 1);
-        assert!(prototypes.get("Vine_0").is_some());
+        assert!(prototypes.get("Plant_0").is_some());
     }
 
     /// `LeafBlade_0` is not a `Leaf` part, and clearing one layer must not
@@ -553,9 +553,9 @@ mod tests {
     fn the_library_iterates_in_name_order() {
         let mut prototypes = Prototypes::default();
         for i in [3, 0, 2, 1] {
-            prototypes.insert("Vine", i, part());
+            prototypes.insert("Plant", i, part());
         }
         let names: Vec<&str> = prototypes.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, ["Vine_0", "Vine_1", "Vine_2", "Vine_3"]);
+        assert_eq!(names, ["Plant_0", "Plant_1", "Plant_2", "Plant_3"]);
     }
 }

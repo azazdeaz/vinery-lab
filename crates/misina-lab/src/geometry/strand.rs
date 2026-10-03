@@ -1,10 +1,9 @@
 //! Strands — the woody members plants are built from.
 //!
 //! A *strand* is a polyline of control points, each carrying a radius, skinned
-//! into a closed tube. A trunk is a strand; so are a cordon, a spur, and — once
-//! they exist — a cane and a shoot. Callers place control points where the
-//! shape is and add more where the shape needs resolving; nothing here knows
-//! any botany.
+//! into a closed tube. A trunk is a strand; so are a branch and a twig.
+//! Callers place control points where the shape is and add more where the
+//! shape needs resolving; nothing here knows any botany.
 //!
 //! # Why the surface is hand-skinned
 //!
@@ -56,13 +55,13 @@ const MERGE_DISTANCE: f64 = 1e-6;
 
 /// A local swelling on a strand's radius.
 ///
-/// A graft union and a spur knuckle are the same shape at different scales, so
-/// they are the same type. `height` is a fraction of the strand's nominal
+/// A graft union and a branch knuckle are the same shape at different scales,
+/// so they are the same type. `height` is a fraction of the strand's nominal
 /// radius, added on top of whatever taper the caller is already applying.
 #[derive(Clone, Copy, Debug)]
 pub struct Bulge {
     /// Where the swelling sits, in whatever coordinate the caller is walking
-    /// (height up a trunk, distance out along a cordon).
+    /// (height up a trunk, distance out along a branch).
     pub at: f64,
     /// Standard deviation of the falloff, in the same coordinate.
     pub width: f64,
@@ -220,7 +219,7 @@ impl Strand {
     /// control polyline's length.
     ///
     /// Detail expressed per meter rather than per strand keeps a 1 m trunk and
-    /// a 5 cm spur equally smooth from one number, which is what lets an
+    /// a 5 cm twig equally smooth from one number, which is what lets an
     /// element expose a single detail slider.
     ///
     /// Measures the polyline rather than [`NurbsCurve::try_length`]: the fit is
@@ -376,7 +375,7 @@ fn radius_at(anchors: &[f64], radii: &[f64], t: f64) -> f64 {
 ///   2.5e-3, so the last one can stop just short of the domain end.
 ///
 /// The endpoints are therefore snapped. That is not cosmetic: a station short
-/// by even a little leaves a cordon's tip cap hanging in mid-air and a trunk's
+/// by even a little leaves a branch's tip cap hanging in mid-air and a trunk's
 /// bottom cap above the ground it was supposed to be buried in.
 fn stations(rail: &NurbsCurve3D<f64>, count: usize) -> (Vec<f64>, Vec<f64>) {
     let count = count.max(MIN_STATIONS);
@@ -860,7 +859,7 @@ mod tests {
             .stations
         };
         assert_eq!(at(1.0), 21);
-        assert!(at(0.05) == MIN_STATIONS, "a 5 cm spur bottoms out");
+        assert!(at(0.05) == MIN_STATIONS, "a 5 cm twig bottoms out");
         assert!(at(100.0) == MAX_STATIONS, "and a runaway one is capped");
     }
 }

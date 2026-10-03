@@ -8,10 +8,10 @@
 //! frame however long it took.
 //!
 //! ```text
-//! VINERYLAB_RECORD=demo.mp4 cargo run --release
+//! BOXLAB_RECORD=demo.mp4 cargo run --release
 //! ```
 //!
-//! The variable is `{PACKAGE}_RECORD`, so that is vinerylab's. It covers the
+//! The variable is `{PACKAGE}_RECORD`, so that is `boxlab`'s. It covers the
 //! whole run: recording starts with the app and the file is finished when the
 //! window closes. `{PACKAGE}_RECORD_FPS` sets the rate (default [`FPS`]);
 //! frames between two due ones are not captured, so everything but a stall
