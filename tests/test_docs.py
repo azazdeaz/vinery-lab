@@ -1,39 +1,115 @@
-"""Every relative link in the repo's Markdown resolves to a file that exists.
+"""The repo's Markdown, held to the rules a regex can check.
 
-The doc pages navigate by file link, and a link that rots does so silently
-on GitHub and in an editor alike. Only relative links are checked; a URL is
-someone else's to keep alive. `*.local.md` files are private notes and
-skipped.
+Every relative link resolves, down to the heading it names, and no link
+points at a line number: lines move with every edit and nothing notices.
+Each docs folder's pages are all listed in its index, and the framework's
+Markdown names no generator, since it leaves the repo with the crate. What
+a regex cannot read is prose, which `crates/misina-lab/docs/AGENTS.md` covers.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-LINK = re.compile(r"\]\(([^)\s#]+)(?:#[^)]*)?\)")
-"""The target of an inline link or image, without its anchor."""
-SKIPPED_DIRS = {".claude", ".git", ".venv", "node_modules", "site", "target"}
+FRAMEWORK = ROOT / "crates" / "misina-lab"
+
+FENCE = re.compile(r"^ *```.*?^ *```", re.DOTALL | re.MULTILINE)
+SPAN = re.compile(r"`[^`\n]*`")
+LINK = re.compile(r"\]\(([^)\s#]*)(#[^)\s]*)?\)")
+"""An inline link or image: its target, empty for one into its own page, and
+its anchor."""
+HEADING = re.compile(r"^#{1,6} +(.+?) *$", re.MULTILINE)
+URL = re.compile(r"[a-z][a-z0-9+.-]*:")
+LINE = re.compile(r"#L\d+|:\d+$")
+"""A line anchor, `#L42`, or a line suffix, `lib.rs:42`."""
+GENERATOR = re.compile(r"\b(vine|grape)", re.IGNORECASE)
+"""What the generators in this repo go by: the vineyard's words. A generator
+that joins the repo adds its own."""
+INDEXES = {"docs": "AGENTS.md", "crates/misina-lab/docs": "crates/misina-lab/README.md"}
+"""Each docs folder, and the file that lists every page in it."""
+GUIDES = {"AGENTS.md", "CLAUDE.md"}
+"""What a docs folder holds for whoever edits it, rather than as a page."""
 
 
-def pages() -> list[Path]:
-    return sorted(
-        page
-        for page in ROOT.rglob("*.md")
-        if not SKIPPED_DIRS & set(page.relative_to(ROOT).parts)
-        and not page.name.endswith(".local.md")
-    )
+def markdown() -> list[Path]:
+    """Every Markdown file git tracks or would track. What it ignores, the
+    build trees, the caches and `*.local.md` notes, is not checked."""
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "*.md"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split("\0")
+    return sorted(page for page in map(ROOT.joinpath, filter(None, listed)) if page.exists())
 
 
-@pytest.mark.parametrize("page", pages(), ids=lambda page: str(page.relative_to(ROOT)))
+MARKDOWN = markdown()
+
+
+def name(page: Path) -> str:
+    return str(page.relative_to(ROOT))
+
+
+def links(page: Path) -> list[tuple[str, str]]:
+    """Every link outside code, where a bracket is not Markdown."""
+    return LINK.findall(SPAN.sub("", FENCE.sub("", page.read_text(encoding="utf-8"))))
+
+
+def anchors(page: Path) -> set[str]:
+    """The anchors GitHub gives a page's headings: lowercased, punctuation
+    dropped, each space a hyphen."""
+    headings = HEADING.findall(FENCE.sub("", page.read_text(encoding="utf-8")))
+    return {re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-") for heading in headings}
+
+
+@pytest.mark.parametrize("page", MARKDOWN, ids=name)
 def test_relative_links_resolve(page: Path) -> None:
-    targets = LINK.findall(page.read_text(encoding="utf-8"))
-    broken = [
-        target
-        for target in targets
-        if not re.match(r"[a-z][a-z0-9+.-]*:", target) and not (page.parent / target).exists()
+    broken = []
+    for target, anchor in links(page):
+        if URL.match(target):
+            continue
+        path = page.parent / target if target else page
+        if not path.exists() or (
+            anchor and path.suffix == ".md" and anchor[1:] not in anchors(path)
+        ):
+            broken.append(target + anchor)
+    assert not broken, f"{name(page)}: {broken}"
+
+
+@pytest.mark.parametrize("page", MARKDOWN, ids=name)
+def test_no_link_points_at_a_line(page: Path) -> None:
+    """A line number moves with every edit above it; link the file and name
+    the symbol instead."""
+    lines = [
+        target + anchor
+        for target, anchor in links(page)
+        if LINE.search(anchor) or (not URL.match(target) and LINE.search(target))
     ]
-    assert not broken, f"{page.relative_to(ROOT)}: {broken}"
+    assert not lines, f"{name(page)}: {lines}"
+
+
+@pytest.mark.parametrize(("folder", "index"), INDEXES.items())
+def test_every_page_is_indexed(folder: str, index: str) -> None:
+    home = (ROOT / index).parent
+    linked = {(home / target).resolve() for target, _ in links(ROOT / index)}
+    missing = [
+        name(page)
+        for page in MARKDOWN
+        if page.parent == ROOT / folder and page.name not in GUIDES and page.resolve() not in linked
+    ]
+    assert not missing, f"{index} does not link {missing}"
+
+
+@pytest.mark.parametrize(
+    "page", [page for page in MARKDOWN if page.is_relative_to(FRAMEWORK)], ids=name
+)
+def test_the_framework_names_no_generator(page: Path) -> None:
+    lines = page.read_text(encoding="utf-8").splitlines()
+    hits = [f"{n}: {line.strip()}" for n, line in enumerate(lines, 1) if GENERATOR.search(line)]
+    assert not hits, f"{name(page)}: {hits}"

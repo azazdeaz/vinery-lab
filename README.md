@@ -104,7 +104,7 @@ uv run main.py
  - The generator is built on [misina-lab](crates/misina-lab/README.md), the framework
  under it, which holds everything that is not about vines.
  - The vineyard can be composed with a [`VineyardCfg`](crates/vinerylab/python/vinerylab/isaaclab/vineyard_cfg.py) object,
- which is a standard Isaac Lab `FileCfg` config class. See the [example](examples/isaaclab_demo/main.py#L43).
+ which is a standard Isaac Lab `FileCfg` config class. See `VINEYARD_CFG` in the [quadruped demo](examples/isaaclab_demo/main.py).
  - Every parameter, with its default and range, is listed in [docs/parameters.md](docs/parameters.md).
  - The options are many, so prefer to use the parameter editor GUI and copy the configuration snippet to your script.
  - When the simulation starts, the meshes and layouts are generated a USD file and cached for the next run.
