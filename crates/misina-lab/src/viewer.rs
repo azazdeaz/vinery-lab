@@ -92,6 +92,13 @@ pub fn app<G: Generator>() -> App {
         app.add_plugins(crate::record::plugin::<G>);
     }
 
+    // Off by default: plays the storyboard it names, for a demo video. See
+    // [`crate::tour`].
+    #[cfg(not(target_arch = "wasm32"))]
+    if G::env("TOUR").is_some() {
+        app.add_plugins(crate::tour::plugin::<G>);
+    }
+
     app
 }
 

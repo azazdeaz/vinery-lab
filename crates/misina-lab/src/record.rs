@@ -47,15 +47,24 @@ pub fn plugin<G: Generator>(app: &mut App) {
     let Some(path) = G::env("RECORD") else {
         return;
     };
-    let fps = G::env("RECORD_FPS")
+    app.insert_resource(Recorder::new(path, fps::<G>()))
+        .add_systems(Update, capture.run_if(not(resource_exists::<Hold>)))
+        .add_observer(encode);
+}
+
+/// The rate `{PACKAGE}_RECORD_FPS` asks for, or [`FPS`].
+pub fn fps<G: Generator>() -> f64 {
+    G::env("RECORD_FPS")
         .and_then(|fps| fps.into_string().ok())
         .and_then(|fps| fps.parse::<f64>().ok())
         .filter(|fps| *fps > 0.0)
-        .unwrap_or(FPS);
-    app.insert_resource(Recorder::new(path, fps))
-        .add_systems(Update, capture)
-        .add_observer(encode);
+        .unwrap_or(FPS)
 }
+
+/// Nothing is captured while this resource exists. A [`tour`](crate::tour)
+/// holds the recording until its opening shot has settled.
+#[derive(Resource)]
+pub struct Hold;
 
 /// The frame's place in the video, kept on the screenshot entity so the
 /// capture can be put back in order when it lands.

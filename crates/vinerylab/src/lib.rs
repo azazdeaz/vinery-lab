@@ -68,6 +68,14 @@ mod tests {
         );
     }
 
+    /// The README video's storyboard names only parameters there are, which
+    /// a rename would otherwise leave to the next recording to find.
+    #[test]
+    fn the_readme_tour_is_valid() {
+        let tour = root().join("../../docs/video/tour.json");
+        misina_lab::tour::load::<elements::VineyardParams>(&tour).unwrap();
+    }
+
     /// Rewrites the generated files from the structs.
     ///
     /// A dev tool rather than a test, and `#[ignore]`d for the same reason

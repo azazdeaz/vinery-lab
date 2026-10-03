@@ -18,6 +18,9 @@ pub mod snippet;
 pub mod stats;
 pub mod terrain;
 pub mod testing;
+// Reads its storyboard from a file, and drives `record`.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tour;
 pub mod ui;
 pub mod viewer;
 

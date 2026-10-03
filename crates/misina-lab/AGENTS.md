@@ -31,7 +31,7 @@ package, is in the root `AGENTS.md`.
 | [src/codegen.rs](src/codegen.rs) | generates the Python stub, the Isaac Lab cfg classes and the parameters page |
 | [src/snippet.rs](src/snippet.rs) | the viewer's **Copy Isaac Lab cfg** output |
 | [src/python.rs](src/python.rs) | the PyO3 glue under the macro, behind the `python` feature |
-| [src/stats.rs](src/stats.rs), [src/perf.rs](src/perf.rs), [src/record.rs](src/record.rs) | scene footer, rebuild timing, window capture |
+| [src/stats.rs](src/stats.rs), [src/perf.rs](src/perf.rs), [src/record.rs](src/record.rs), [src/tour.rs](src/tour.rs) | scene footer, rebuild timing, window capture, and the storyboard player a demo video is recorded with |
 | [src/terrain.rs](src/terrain.rs) | the ground: `TerrainParams`, the `Ground` height field, and the one build system every generator stages first |
 | [src/palette.rs](src/palette.rs) | linear colour, the per-mesh jitter, and `Response`, how a surface answers light |
 | [src/geometry/](src/geometry/) | the geometry kernels: `mesh`, `strand`, `outline`, `shapes`, `scatter`, and `par_map` |
