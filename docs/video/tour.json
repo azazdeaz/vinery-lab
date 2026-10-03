@@ -7,7 +7,7 @@
   },
   "steps": [
     {"note": "A slow orbit under the terrain and layout edits.",
-     "camera": {"yaw": 35, "radius": 62}, "secs": 8, "wait": 1},
+     "camera": {"yaw": 40, "radius": 62}, "secs": 11, "wait": 1},
 
     {"show": "terrain.max_inclination", "secs": 0.8, "wait": 1},
     {"set": {"terrain.max_inclination": 32}, "secs": 1.2, "wait": 2.3},
@@ -15,12 +15,24 @@
     {"show": "parcel.orientation", "secs": 0.8, "wait": 1},
     {"set": {"parcel.orientation": 25}, "secs": 1.2, "wait": 2.5},
 
+    {"show": "parcel.row_spacing", "secs": 0.8, "wait": 1},
+    {"set": {"parcel.row_spacing": 1.8}, "secs": 1.2, "wait": 2.5},
+
     {"note": "Over an alley: half a row spacing off the rows at 25 degrees, looking down it from above the canopy.",
-     "camera": {"focus": [-0.5, 1.1, 1.0], "yaw": 115, "pitch": 24, "radius": 9}, "secs": 4, "wait": 4.2},
+     "camera": {"focus": [-0.38, 0.82, 1.0], "yaw": 115, "pitch": 24, "radius": 9}, "secs": 4, "wait": 4.2},
     {"note": "Down into it, staying in the alley's vertical plane: a yaw change here would swing the camera through a row.",
      "camera": {"pitch": 9, "radius": 4.5}, "secs": 3, "wait": 3.2},
-    {"note": "A slow drift under the canopy edits. The camera stays above the cover on the hills.",
-     "camera": {"yaw": 109, "radius": 4}, "secs": 10, "wait": 0},
+    {"note": "A slow push in. Only the radius changes, so the camera stays on the alley's centreline.",
+     "camera": {"radius": 4}, "secs": 5, "wait": 0},
+
+    {"show": "vine.trunk_height", "secs": 0.8, "wait": 1},
+    {"note": "Trained low, as in a cool climate: the posts come down with the heads.",
+     "set": {"vine.trunk_height": 0.5, "parcel.trellis_height": 1.3}, "secs": 1.5, "wait": 2.5},
+
+    {"note": "Up over the lowered canopy before the stray shoots grow out into the alley and past the top wire.",
+     "camera": {"pitch": 20, "radius": 6}, "secs": 6, "wait": 0},
+    {"toggle": {"Wireframe": true}, "wait": 1.8},
+    {"toggle": {"Wireframe": false}, "wait": 1},
 
     {"show": "shoot.stray", "secs": 0.8, "wait": 1},
     {"set": {"shoot.stray": 0.15}, "secs": 1.2, "wait": 2.2},

@@ -5,11 +5,11 @@ description: Re-records the README's demo video of the viewer with docs/video/re
 
 # README video
 
-The README's **Parameter editor app** section shows a half-minute video of the
+The README's **Parameter editor app** section shows a 40-second video of the
 viewer: the parcel from above while the terrain and the row layout are edited,
-a descent into an alley, stray shoots, a cover crop drying to straw, the vines
-going dormant, and a pull back over the winter vineyard. It is one command
-away:
+a descent into an alley, the vines trained lower, a glimpse of the wireframe,
+stray shoots, a cover crop drying to straw, the vines going dormant, and a
+pull back over the winter vineyard. It is one command away:
 
 ```bash
 docs/video/record.sh
@@ -49,9 +49,9 @@ A video is right when:
 - the panel shows each control, tooltip up, before it moves, and the scene has
   visibly answered an edit before the next one starts
 - the panel's text is legible at the README's width, about 830 px
-- the file is under 10 MB, the most GitHub takes on a free plan. Nothing
-  enforces it: the script prints the size, and the `-crf` on its first
-  `ffmpeg` line trades size against quality.
+- the file is under 10 MB, the most GitHub takes on a free plan. The script
+  spends 9 MB whatever the length, so a longer video gets fewer bits a
+  second: if the foliage turns to mush, cut shots rather than raise it.
 
 ## Change what it shows
 
@@ -77,6 +77,8 @@ last step's `wait` is the closing hold: the video ends when it runs out.
   over `secs` the way a drag would, and the scene answers 150 ms after it
   stops, as it does to a person; a flag or a name switches at once. Edits
   persist: every later shot sees them.
+- **View options** outside the params, such as the footer's Wireframe, are
+  `toggle`d by their caption.
 - **The camera** orbits a focus. `focus` is x and y in meters on the parcel,
   which is centred on 0, then a height above the ground there — read when the
   step starts, so a camera step that starts before a terrain edit has settled
@@ -85,17 +87,20 @@ last step's `wait` is the closing hold: the video ends when it runs out.
   are.
 - **Alleys.** With the rows at orientation θ and spacing s, a row runs through
   the origin and the others are s apart, so the alley next to it is centred on
-  (−sin θ, cos θ) · s/2 — `[-0.5, 1.1]` for the 25° and 2.4 m the storyboard
+  (−sin θ, cos θ) · s/2 — `[-0.38, 0.82]` for the 25° and 1.8 m the storyboard
   sets. The camera looks down it from yaw θ + 90 or θ − 90.
 - **Keep the camera out of the plants.** Beside a row it has to be above the
   canopy, about 2 m. To get down into an alley, line up over it first, then
   change only `pitch` and `radius`, which keeps the camera in the alley's
   vertical plane. Once down, a `yaw` change moves the camera sideways by about
-  `radius × sin(Δyaw)`, which has to stay inside half the alley, 1.2 m: the
-  storyboard's 6° drift at 4 m moves it 0.4 m. On steep hills the ground
-  behind a low camera can rise above it.
+  `radius × sin(Δyaw)`, which has to stay well inside half the alley, 0.9 m
+  in the storyboard. Stray shoots and dormant canes grow out into the alley
+  and past the top wire: be up over the canopy before they appear. On steep
+  hills the ground behind a low camera can rise above it.
 - **Finding a shot**: write a scratch storyboard of cuts — steps with
-  `"secs": 0` and `"wait": 2`, so the sheet shows one cut per frame — and run
+  `"secs": 0` and `"wait": 2` after a first step of `"wait": 1`, so each of
+  the sheet's frames falls a second into a cut, after its edits have built —
+  and run
   `docs/video/record.sh scratch.json /tmp/scratch.mp4`.
 
 `VINERYLAB_TOUR=docs/video/tour.json cargo run --release` plays the storyboard
