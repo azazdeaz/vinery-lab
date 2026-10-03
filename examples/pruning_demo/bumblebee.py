@@ -12,11 +12,11 @@ poses is the arm the simulation steps.
 
 The shear touches what it prunes. Its head and both blades collide with the
 canes, so a cane the shear comes in on is pushed aside or funnelled into the
-mouth, and the cut is where the moving blade reaches it: while the shear
-closes, `Bumblebee.blade` at the blade's angle is what `main.py` hands
-`Shears.cut_through`, tick by tick. Only each blade's last `Shear.bite` before
-its edge collides with nothing -- that is the part of a blade that is in the
-wood -- so a cane between the closed blades is cut, not crushed.
+mouth, and the moving blade carries it across the mouth onto the fixed one.
+Held there, it is cut where the moving blade's edge reaches its axis: tick by
+tick while the shear closes, `pruner.Stroke` hands `Bumblebee.blade` at the
+blade's angle to `Shears.cut_through`, and keeps the moving blade's collider
+standing at the cane while the blade itself closes on through it.
 
 The robot drives with the row on its left: the rail is on the +Y edge of the
 deck, and the arm reaches out that way.
@@ -56,6 +56,9 @@ fixed joint between them."""
 
 HAND = "wrist_3_link"
 """The body the shear is fixed to, and whose pose says where the mouth is."""
+
+BLADE = "blade_link"
+"""The body the moving blade is, swinging on `SHEAR_JOINT`."""
 
 # -- The UR5, as its URDF places each joint in the frame of the link before
 # it. Zero everywhere is the arm lying out along +X.
@@ -144,14 +147,11 @@ class Shear:
     thickness: float = 0.004
     """Plate thickness, along the pivot."""
 
-    opening: float = 0.6
-    """How far the moving blade swings open, in radians."""
-
-    bite: float = 0.01
-    """How much of each plate, from its cutting edge back, is in the wood
-    rather than against it: that much of a plate collides with nothing, and
-    the moving blade cuts a cane whose axis comes that close to its edge. A
-    cane of up to this radius sits between the closed blades unsqueezed."""
+    opening: float = 0.9
+    """How far the moving blade swings open, in radians: about fifty
+    degrees, an electric pruner's. The mouth is then wide enough that a cane
+    a couple of centimetres off the planned point still lies between the
+    blades."""
 
     head: float = 0.05
     """The body the blades are set in: a cube of this edge, holding the drive
@@ -166,11 +166,26 @@ class Shear:
     @property
     def mouth(self) -> tuple[float, float]:
         """Where a cane is brought to, as (y, z) in the shear's own frame:
-        halfway across the wedge, three quarters of the way out along the
-        blades -- four centimetres of mouth at the default size, with a
-        quarter of the blades still beyond the cane."""
-        z = 0.75 * self.blade
-        return -z * math.tan(self.opening) / 2, z
+        the point of the open mouth furthest from both edges and from the
+        blades' tips, the centre of the widest circle the mouth holds, so a
+        cane that far off the planned point in any direction still lies
+        between the blades -- 2.4 cm at the default size."""
+        half = self.opening / 2
+        d = self.blade / (1 + math.sin(half))
+        return -d * math.sin(half), d * math.cos(half)
+
+    @property
+    def reach(self) -> float:
+        """How far across, in -Y, the mouth opens: where the moving edge's
+        plane is at full opening, a blade's length out from the pivot."""
+        return self.blade * math.tan(self.opening)
+
+    def pinch(self, y: float, z: float, radius: float) -> float:
+        """The blade angle at which the moving edge's plane is `radius` from
+        the point (y, z) of the shear's frame, on the mouth's side of it:
+        where the moving blade touches a cane of that radius lying across
+        the mouth there, and shutting further would push it."""
+        return math.asin(min(1.0, radius / math.hypot(y, z))) - math.atan2(y, z)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -267,14 +282,25 @@ class Bumblebee:
     def blade(self, angle: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """The moving blade's plate with the shear at `angle`, in the `HAND`
         frame, as the rectangle `Shears.cut_through` takes: a corner and its
-        two edges, across the plate and along it. It reaches `Shear.bite`
-        past the cutting edge, and a cane whose axis crosses it is cut where
-        it does."""
+        two edges, across the plate to its cutting edge and along it. A cane
+        whose axis crosses it is cut where it does."""
         s = self.shear
         plate = TOOL @ transform(rpy=(angle, 0.0, 0.0))
         corner = plate @ np.array([s.bypass, -s.width, 0.0, 1.0])
-        across = plate[:3, :3] @ np.array([0.0, s.width + s.bite, 0.0])
+        across = plate[:3, :3] @ np.array([0.0, s.width, 0.0])
         up = plate[:3, :3] @ np.array([0.0, 0.0, s.blade])
+        return corner[:3], across, up
+
+    def wedge(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """The mouth at full opening, in the `HAND` frame, as the rectangle
+        `Shears.crossing` takes: in the moving plate's plane, `Shear.reach`
+        across to the fixed edge and the blades' length out. A cane crossing
+        it at (a, b) lies at y = reach (a - 1), z = blade b of the shear's
+        frame."""
+        s = self.shear
+        corner = TOOL @ np.array([s.bypass, -s.reach, 0.0, 1.0])
+        across = TOOL[:3, :3] @ np.array([0.0, s.reach, 0.0])
+        up = TOOL[:3, :3] @ np.array([0.0, 0.0, s.blade])
         return corner[:3], across, up
 
     @property
@@ -509,11 +535,11 @@ def _shear(m: Bumblebee) -> str:
   </link>
   <joint name="{SHEAR_JOINT}" type="revolute">
     <parent link="shear_link"/>
-    <child link="blade_link"/>
+    <child link="{BLADE}"/>
     <axis xyz="1 0 0"/>
     <limit lower="0" upper="{s.opening}" effort="10" velocity="6"/>
   </joint>
-  <link name="blade_link">
+  <link name="{BLADE}">
 {_plate(s, s.bypass, -1)}
     <inertial>
       <origin xyz="0 0 {s.blade / 2}"/>
@@ -526,24 +552,8 @@ def _shear(m: Bumblebee) -> str:
 
 def _plate(s: Shear, x: float, side: int) -> str:
     """One blade: a plate `x` along the pivot with its cutting edge on the
-    link's XZ plane, lying back from it towards `side` (+1 or -1) in Y. Drawn
-    whole; colliding only past its `bite`."""
-    return "\n".join(
-        [
-            _box(
-                (x, side * s.width / 2, s.blade / 2),
-                (s.thickness, s.width, s.blade),
-                "steel",
-                tags=("visual",),
-            ),
-            _box(
-                (x, side * (s.width + s.bite) / 2, s.blade / 2),
-                (s.thickness, s.width - s.bite, s.blade),
-                "steel",
-                tags=("collision",),
-            ),
-        ]
-    )
+    link's XZ plane, lying back from it towards `side` (+1 or -1) in Y."""
+    return _box((x, side * s.width / 2, s.blade / 2), (s.thickness, s.width, s.blade), "steel")
 
 
 def _joint(joint: Joint, parent: str, child: str) -> str:
@@ -571,12 +581,12 @@ def _link_shape(
     return _cylinder(centre, rpy_of(axis), max(base, radius), length, material)
 
 
-def _box(xyz, size, material: str, tags: tuple[str, ...] = ("visual", "collision")) -> str:
+def _box(xyz, size, material: str) -> str:
     shape = (
         f'      <origin xyz="{xyz[0]} {xyz[1]} {xyz[2]}"/>\n'
         f'      <geometry><box size="{size[0]} {size[1]} {size[2]}"/></geometry>'
     )
-    return _shaped(shape, tags, material)
+    return _shaped(shape, ("visual", "collision"), material)
 
 
 def _cylinder(xyz, rpy, radius: float, length: float, material: str) -> str:

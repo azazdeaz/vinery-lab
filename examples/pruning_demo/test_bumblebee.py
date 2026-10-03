@@ -88,30 +88,39 @@ def test_the_mouth_is_what_the_closing_blade_sweeps():
     assert abs(normal @ MACHINE.tool[:3, 0]) == pytest.approx(np.linalg.norm(normal))
 
 
-def test_the_blades_collide_but_for_their_edges(built):
-    """Each plate is drawn whole, with its edge on the link's XZ plane, and
-    collides only from a bite back of it: the closing blades push a cane
-    about, and never squeeze one between them."""
+def test_the_blades_collide_whole(built):
+    """Each plate is one box, drawn and colliding alike, with its cutting
+    edge on the link's XZ plane: what pushes a cane about is the plate the
+    stroke stands at the cane."""
     shear = MACHINE.shear
     assert any(
         width == pytest.approx(shear.head)
         for _, width in _boxes(built.find("./link[@name='shear_link']"), "collision")
     ), "the head collides"
-    for name, side in (("shear_link", 1), ("blade_link", -1)):
+    for name, side in (("shear_link", 1), (bumblebee.BLADE, -1)):
         link = built.find(f"./link[@name='{name}']")
-        plates = [box for box in _boxes(link, "visual") if box[1] == pytest.approx(shear.width)]
-        colliders = [
-            box
-            for box in _boxes(link, "collision")
-            if box[1] == pytest.approx(shear.width - shear.bite)
-        ]
-        assert len(plates) == 1 and len(colliders) == 1, name
-        (y, width), (cy, cwidth) = plates[0], colliders[0]
-        assert side * y - width / 2 == pytest.approx(0.0), "the edge is on the XZ plane"
-        assert side * cy - cwidth / 2 == pytest.approx(shear.bite), (
-            "the collider starts a bite back"
-        )
-        assert side * cy + cwidth / 2 == pytest.approx(shear.width), "and reaches the plate's back"
+        for tag in ("visual", "collision"):
+            [(y, width)] = [
+                box for box in _boxes(link, tag) if box[1] == pytest.approx(shear.width)
+            ]
+            assert side * y - width / 2 == pytest.approx(0.0), f"{name} {tag}: edge on the XZ plane"
+
+
+def test_a_cane_in_the_mouth_is_pinched_where_the_edges_are_a_cane_apart():
+    """`pinch` is the angle at which the moving edge's plane is a radius
+    from the cane's axis, and `wedge` maps a crossing back to where in the
+    shear's frame the cane is."""
+    shear = MACHINE.shear
+    y, z, radius = -0.005, 0.06, 0.005
+    angle = shear.pinch(y, z, radius)
+    assert 0 < angle < shear.opening
+    assert y * math.cos(angle) + z * math.sin(angle) == pytest.approx(radius)
+    assert shear.pinch(y, z, 0.0) == pytest.approx(math.atan(-y / z)), "no radius: the axis itself"
+    corner, across, up = MACHINE.wedge()
+    point = (bumblebee.TOOL @ [shear.bypass, *shear.mouth, 1.0])[:3]
+    a, b = (point - corner) @ across / (across @ across), (point - corner) @ up / (up @ up)
+    assert np.cross(across, up) @ (point - corner) == pytest.approx(0.0), "in the plate's plane"
+    assert (shear.reach * (a - 1), shear.blade * b) == pytest.approx(shear.mouth)
 
 
 def _boxes(link: ElementTree.Element, tag: str) -> list[tuple[float, float]]:

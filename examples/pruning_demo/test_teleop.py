@@ -11,6 +11,7 @@ bumblebee = pytest.importorskip("bumblebee", reason="Isaac Lab is not installed"
 import kinematics  # noqa: E402
 import teleop  # noqa: E402
 from driver import CRUISE_SPEED, MAX_YAW_RATE  # noqa: E402
+from pruner import BLADE_STEP  # noqa: E402
 
 MACHINE = bumblebee.Bumblebee()
 
@@ -24,7 +25,9 @@ class FakeDriver:
 
 
 class FakeShears:
-    """Every sweep of the blade cuts one cane."""
+    """Every sweep of the blade cuts one cane; none is ever held."""
+
+    labels = ["/robot/blade_link"]
 
     def __init__(self):
         self.sweeps = 0
@@ -32,6 +35,15 @@ class FakeShears:
     def cut_through(self, corner, u, v) -> int:
         self.sweeps += 1
         return 1
+
+    def crossing(self, corner, u, v):
+        return np.zeros(0, dtype=int), np.zeros(0), np.zeros((0, 2))
+
+    def collider(self, body: int):
+        return 0, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
+
+    def place(self, shape: int, pose: np.ndarray) -> None:
+        pass
 
 
 def mouth(q: np.ndarray) -> np.ndarray:
@@ -81,7 +93,12 @@ def test_the_keys_drive_the_base_jog_the_mouth_and_work_the_shear():
     hold("W", "D")
     assert driver.driven[-1] == (CRUISE_SPEED, -MAX_YAW_RATE)
 
-    hold("ENTER", ticks=21)
-    assert shears.sweeps == 20 and tele.stroke.jaw < MACHINE.shear.opening, "shut, and opening"
-    hold(ticks=30)
-    assert tele.stroke.jaw == MACHINE.shear.opening and shears.sweeps == 20
+    shut = round(MACHINE.shear.opening / BLADE_STEP)
+    hold("ENTER")
+    mouth_at_cut = tele.mouth
+    hold("ENTER", "W", "UP", ticks=4)
+    assert driver.driven[-1] == (0.0, 0.0) and tele.mouth is mouth_at_cut, "still while it shuts"
+    hold("ENTER", ticks=shut - 4)
+    assert shears.sweeps == shut and tele.stroke.jaw < MACHINE.shear.opening, "shut, and opening"
+    hold(ticks=shut + 10)
+    assert tele.stroke.jaw == MACHINE.shear.opening and shears.sweeps == shut

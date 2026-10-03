@@ -4,7 +4,7 @@ The left hand has the machine and the right hand the shear: `W`/`S` drive
 the base forward and back and `A`/`D` turn it; the arrows jog the shear's
 mouth along the robot and across it, `Page Up`/`Page Down` up and down, and
 `Enter` closes the shear on whatever is in the mouth, cutting what the blade
-sweeps through, then opens it again.
+sweeps through, then opens it again; the robot holds still while it shuts.
 
 The mouth is a gantry head, not a wrist: it stays squared up to the row --
 blades pointing out over the rail, pivot upright, so an upright cane lies
@@ -46,6 +46,16 @@ the blades along `OUT`, which is toward the row."""
 
 CUT = "ENTER"
 """The key that closes the shear."""
+
+KEYS = (
+    ("W / S", "drive forward / back"),
+    ("A / D", "turn left / right"),
+    ("Up / Down", "jog the mouth forward / back"),
+    ("Left / Right", "jog it toward the row / away"),
+    ("Page Up / Down", "jog it up / down"),
+    ("Enter", "cut"),
+)
+"""The keys and what they do, as the viewport lists them."""
 
 
 class Teleop:
@@ -95,7 +105,9 @@ class Teleop:
         `hand` is the pose of the body the shear is on in world coordinates
         and `shear` the blade's angle. Returns the slide and arm positions to
         hold and the blade angle to hold."""
-        held = self.held
+        # The stroke is made with the hand still: while the blade shuts, the
+        # base and the mouth hold and the keys wait.
+        held = set() if self.closing else self.held
         self.driver.drive(
             CRUISE_SPEED * (("W" in held) - ("S" in held)),
             MAX_YAW_RATE * (("A" in held) - ("D" in held)),
@@ -122,3 +134,20 @@ class Teleop:
             # Shut, it opens; open, it shuts again while the key is down.
             self.closing = not self.closing and CUT in held
         return self.target, self.stroke.jaw
+
+
+def show_keys() -> None:
+    """List `KEYS` in the bottom right corner of Kit's viewport, clear of the
+    world axes Kit draws in the left one."""
+    import omni.ui as ui
+    from omni.kit.viewport.utility import get_active_viewport_window
+
+    with get_active_viewport_window().get_frame("teleop_keys"), ui.VStack():
+        ui.Spacer()
+        with ui.HStack(height=0):
+            ui.Spacer()
+            with ui.ZStack(width=0, height=0):
+                ui.Rectangle(style={"background_color": 0x99000000, "border_radius": 4})
+                with ui.HStack(width=0, height=0, spacing=16, style={"margin": 6}):
+                    for column in zip(*KEYS, strict=True):
+                        ui.Label("\n".join(column))
