@@ -111,6 +111,12 @@ smooth however long the rebuilds take; `docs/video/record.sh` records the
 README video that way. See `crates/misina-lab/src/tour.rs`, and
 [the skill](../.claude/skills/readme-video/SKILL.md) for changing the video.
 
+The pruning demo's video is filmed in Isaac Sim instead, headless:
+`examples/pruning_demo/record.sh` runs the demo's `video.py`, which samples
+an RTX camera on the simulation's clock. Both scripts encode what they record
+with `docs/video/encode.sh`. See
+[its skill](../.claude/skills/pruning-video/SKILL.md) for changing it.
+
 ### Web build
 
 The same viewer, compiled to wasm and published by the manually triggered

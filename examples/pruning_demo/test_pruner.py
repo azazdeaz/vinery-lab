@@ -229,10 +229,20 @@ def test_the_collider_stands_at_a_held_cane_while_the_blade_closes_through_it(z)
     ), "swung about the pivot"
 
 
-def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch):
+@pytest.mark.parametrize(
+    ("push", "gone"),
+    [
+        ((0.0, 0.0, 0.0), False),
+        ((0.0, -0.01, 0.0), False),
+        ((0.0, 0.0, 0.01), False),
+        ((0.0, 0.0, 0.0), True),
+    ],
+)
+def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch, push, gone):
     """With an arm that goes where it is told and a blade that turns as told,
-    every reachable cane is cut at its planned point, and the tally says
-    so."""
+    every reachable cane is cut at its planned point, the shear closing with
+    the mouth moved on from it by the cut's push, and the tally says so -- but
+    a cane whose bud to take is `gone` before its turn is left alone."""
     bumblebee = pytest.importorskip("bumblebee", reason="Isaac Lab is not installed")
     machine = bumblebee.Bumblebee()
     # Two canes standing beside the robot, out over its rail side.
@@ -248,16 +258,26 @@ def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch):
         pruner, "attached", lambda bud, shears, stage: bud.prim not in shears.removed
     )
     cuts = pruner.plan(Vine("/vine", np.zeros(3), canes), shears, np.array([0.0, 1.0, 0.0]))
+    for cut in cuts:
+        cut.push = np.array(push)
+    if gone:
+        shears.removed.add(cuts[1].removed.prim)
     tally = Tally()
     q = np.array([0.0, *bumblebee.ARM_HOME])
     pruning = pruner.Pruning(machine, cuts, np.eye(4), q, shears, None, tally)
     assert tally.reachable == 2, "both are within reach"
 
-    angle, ticks = machine.shear.opening, 0
+    angle, ticks, stage, closed = machine.shear.opening, 0, None, 0
     while not pruning.done and ticks < 3000:
         hand = kinematics.frames(machine.chain, q)[-1]
         q, angle = pruning.control(q, hand, angle)
+        if pruning.stage_name == "close" and stage != "close":
+            mouth = kinematics.frames(machine.chain, q)[-1] @ machine.tool
+            assert mouth[:3, 3] == pytest.approx(pruning.cut.pushed[:3, 3], abs=0.002)
+            closed += 1
+        stage = pruning.stage_name
         ticks += 1
 
-    assert pruning.done and ticks < 3000
-    assert (tally.planned, tally.reachable, tally.made, tally.correct) == (2, 2, 2, 2)
+    made = 1 if gone else 2
+    assert pruning.done and ticks < 3000 and closed == made
+    assert (tally.planned, tally.reachable, tally.made, tally.correct) == (2, 2, made, made)

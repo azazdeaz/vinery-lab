@@ -192,12 +192,26 @@ class Cut:
     """The last bud to keep, below the cut."""
     removed: Bud
     """The first bud to take, above it."""
+    push: np.ndarray = dataclasses.field(default_factory=lambda: np.zeros(3))
+    """How far the mouth moves on from the cut before the shear closes, in
+    the cut's own frame: x along the pivot, y across the mouth -- the fixed
+    blade on its +y side, the moving one opening to -y -- and z along the
+    blades. The edge the mouth moves into the cane pushes it: +z drives it
+    into the crotch, -y against the fixed blade, +y against the moving one.
+    Zero for a planned cut."""
 
     @property
     def standoff(self) -> np.ndarray:
         """The same frame `STANDOFF` back along the blades."""
         pose = self.pose.copy()
         pose[:3, 3] -= STANDOFF * pose[:3, 2]
+        return pose
+
+    @property
+    def pushed(self) -> np.ndarray:
+        """The same frame moved by `push`."""
+        pose = self.pose.copy()
+        pose[:3, 3] += pose[:3, :3] @ self.push
         return pose
 
 
@@ -391,10 +405,11 @@ class Pruning:
 
     `control` returns the slide and arm positions to hold and the blade angle
     to hold, and moves the sequence on as each stage's target is reached: a
-    planned move out to the stand-off, a straight line in, the shear closing
-    once the arm has settled -- the blade cutting what it sweeps through --
-    and opening, and the straight line back out. Poses are solved in the
-    robot's own frame, so the caller hands in where the robot is.
+    planned move out to the stand-off, a straight line in -- and on by the
+    cut's `push`, if it has one -- the shear closing once the arm has settled,
+    the blade cutting what it sweeps through, and opening, and the straight
+    line back out. Poses are solved in the robot's own frame, so the caller
+    hands in where the robot is.
     """
 
     def __init__(
@@ -441,6 +456,11 @@ class Pruning:
 
     def _next(self) -> None:
         """Start on the next cut, or finish."""
+        # A cut whose bud to take is gone already -- taken by another cut's
+        # blade, or by a piece falling across it -- is left alone: aimed at
+        # where that bud is now, it would chase the piece to the ground.
+        while self.cuts and not attached(self.cuts[0].removed, self.shears, self.stage):
+            self.cuts.pop(0)
         self.cut = self.cuts.pop(0) if self.cuts else None
         self.ticks = 0
         if self.cut is None:
@@ -486,18 +506,19 @@ class Pruning:
                     self.goal - self.target, -JOINT_STEP, JOINT_STEP
                 )
                 return self.target, self.stroke.jaw
-        if self.stage_name in ("approach", "retract"):
+        if self.stage_name in ("approach", "push", "retract"):
             # The straight line, a step of the mouth at a time, solved from
             # where the arm is so each step starts from the last -- and the
             # end of it held until the arm has caught up.
-            end = cut.pose[:3, 3] if self.stage_name == "approach" else cut.standoff[:3, 3]
-            gap = end - self.line
+            end = {"approach": cut.pose, "push": cut.pushed, "retract": cut.standoff}
+            gap = end[self.stage_name][:3, 3] - self.line
             distance = np.linalg.norm(gap)
             arrived = distance < 1e-6 and np.abs(self.target - self.q).max() < ARRIVED
-            # Closing waits for the arm to settle as well: a blade shut while
-            # the mouth is still moving in sweeps past the cane.
+            # Pushing and closing wait for the arm to settle as well: a blade
+            # shut while the mouth is still moving in sweeps past the cane.
             if arrived and (self.stage_name == "retract" or self.moved < STILL):
-                self.stage_name = "close" if self.stage_name == "approach" else "next"
+                after = {"approach": "push" if cut.push.any() else "close", "push": "close"}
+                self.stage_name = after.get(self.stage_name, "next")
                 self.ticks = 0
             else:
                 self.line = self.line + gap * min(CLOSE_IN / max(distance, 1e-9), 1.0)

@@ -4,7 +4,8 @@ A Bumblebee-like robot pruning a row of a generated winter vineyard: a
 skid-steer UGV drives the alley, stops at each vine, and an arm on a linear
 slide cuts every cane back to two buds with a bypass shear. The cuts are
 planned from the scene's own ground truth -- which cane, where each bud is --
-rather than from a sensor.
+rather than from a sensor. The trellis wires are hidden: they have no
+collider yet, so the canes and the shear would pass through them.
 
 ## Requirements
  - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed
@@ -50,6 +51,19 @@ it -- and its position is held in the robot's own frame, so it rides along
 when the base drives. It starts out over the rail at spur height, a stand-off
 short of the row, and a jog the arm cannot reach is refused.
 
+## Recording the video
+
+```bash
+./record.sh
+```
+
+films a vine of the default scene pruned, in Isaac Sim's RTX renderer and
+headless, and writes `target/video/pruning.mp4` at the repo root, captioned
+and small enough to upload, and a contact sheet beside it. Its storyboard --
+the cases filmed, one per cane, the camera, the pacing -- is the top of
+`video.py`; [the skill](../../.claude/skills/pruning-video/SKILL.md) covers
+re-recording it and changing what it shows.
+
 ## What it shows
 
 The layout is [Bumblebee's](https://arxiv.org/abs/2112.00291) (Silwal et al.,
@@ -66,7 +80,9 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
    then closes in on a straight line and settles there. The shear's head and
    blades collide with the canes, so a cane the mouth comes in on is
    funnelled between the edges or pushed aside, bending as it goes.
-3. **The order.** The cuts on a vine are taken nearest neighbour first.
+3. **The order.** The cuts on a vine are taken nearest neighbour first. A
+   cut whose bud to take is gone by its turn -- caught by the blade on a
+   neighbouring cane, or by a falling piece -- is left out.
 4. **The cut.** Once the arm has settled, the shear closes, and the moving
    blade carries the cane across the mouth onto the fixed one. Held there, the
    blade's collider stands still while the blade itself closes on through:
@@ -85,7 +101,7 @@ cuts reachable, cuts made, cuts made at the right place -- the kept bud still
 on the vine and the next one gone -- and seconds per vine. Bumblebee reports
 87% of cuts made at the right place, 213 s per vine and 68% of canes reachable
 from one side. On the default scene the demo reaches all 72 cuts of its row
-and makes every one at the right place, at 15 s of simulated time per vine.
+and makes every one at the right place, at 16 s of simulated time per vine.
 Because the simulation knows the true plant, the score keeps "chose the right
 cut" apart from "made the cut", which a field trial cannot.
 
@@ -114,6 +130,7 @@ shorter road.
 | `pruner.py` | the ground truth off the stage, the rule, the cut sequence, the score |
 | `driver.py` | driving the skid steer from stop to stop |
 | `teleop.py` | the keyboard driving the base, jogging the mouth and working the shear |
+| `video.py`, `record.sh` | the video: a vine pruned case by case, filmed headless, and its encoding |
 
 `DEVELOPMENT.md` in `../isaaclab_demo` covers the pinned Isaac Lab revision,
 which this example shares.

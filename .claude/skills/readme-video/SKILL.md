@@ -49,7 +49,8 @@ A video is right when:
 - the panel shows each control, tooltip up, before it moves, and the scene has
   visibly answered an edit before the next one starts
 - the panel's text is legible at the README's width, about 830 px
-- the file is under 10 MB, the most GitHub takes on a free plan. The script
+- the file is under 10 MB, the most GitHub takes on a free plan.
+  `docs/video/encode.sh`, which the pruning demo's video goes through too,
   spends 9 MB whatever the length, so a longer video gets fewer bits a
   second: if the foliage turns to mush, cut shots rather than raise it.
 
