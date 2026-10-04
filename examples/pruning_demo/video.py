@@ -39,13 +39,28 @@ FPS = 25
 """Frames a second of video: a frame is 8 physics steps of simulated time,
 at the simulation's own speed."""
 
-PACE = {"move": 3.0, "approach": 2.0, "push": 2.0, "close": 3.0, "open": 2.0, "retract": 2.0}
+PACE = {
+    "move": 3.0,
+    "approach": 2.0,
+    "push": 2.0,
+    "close": 3.0,
+    "open": 2.0,
+    "retract": 2.0,
+    "tip": 3.0,
+    "home": 3.0,
+}
 """How many times slower than the simulation the video plays each stage of
 a take's cut, by `Pruning.stage_name`: the arm swinging out to the cane,
-closing in and pushing it, the blade closing, and the blade opening again as
-the piece falls. A cut no take has is filmed wide, and only its swing out --
-brushing through the canes -- is slowed; that and the drive between vines
-play at the simulation's own speed."""
+closing in and pushing it, the blade closing, the blade opening again as the
+piece falls, and the arm backing out and tipping out a piece that fell into
+the mouth. A cut no take has is filmed wide, and only its swings -- out
+through the canes, and tipping -- are slowed, as is the arm folding home;
+the rest of those and the drive between vines play at the simulation's own
+speed."""
+
+SETTLE = 1.0
+"""Seconds of simulated time not filmed at the start, while the robot drops
+onto its wheels and the arm settles on its drives."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -147,8 +162,9 @@ CUT = 1.0
 before it cuts to the next rather than easing there: a longer move would
 pass through the arm or the row."""
 
-ENDING = 4.0
-"""Seconds of video after the vine is pruned."""
+ENDING = 6.0
+"""Seconds of video after the vine's last cut: the arm folding home and the
+robot driving on."""
 
 CAMERA = "/World/VideoCamera"
 
@@ -342,7 +358,9 @@ def main():
         due, cut, done, entering = 0.0, None, None, False
         made: collections.Counter[Take | None] = collections.Counter()
         try:
-            for pruning in run:
+            for step, pruning in enumerate(run):
+                if step * SIM_DT < SETTLE:
+                    continue
                 working = pruning.cut if isinstance(pruning, Pruning) else None
                 if working is not cut:
                     # A cut is over once the next one starts: checked then, as
@@ -359,8 +377,9 @@ def main():
                     entering = takes.get(id(working)) is not takes.get(id(cut))
                     cut = working
                 take = takes.get(id(cut))
-                doing = pruning.stage_name if cut else None
-                due += (PACE.get(doing, 1.0) if take or doing == "move" else 1.0) / 8
+                doing = pruning.stage_name if isinstance(pruning, Pruning) else None
+                swinging = doing in ("move", "tip", "home")
+                due += (PACE.get(doing, 1.0) if take or swinging else 1.0) / 8
                 if due < 1:
                     continue
                 due -= 1

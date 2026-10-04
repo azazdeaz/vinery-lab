@@ -160,7 +160,7 @@ class Shears:
         crosses, and its (a, b) on the rectangle -- shapes (N,), (N,) and
         (N, 2), in body order."""
         origin, u, v = (np.asarray(each, dtype=float) for each in (origin, u, v))
-        start, end = self._capsules()
+        start, end = self.capsules()
         normal = np.cross(u, v)
         before, after = (start - origin) @ normal, (end - origin) @ normal
         crossing = (before * after < 0) & ~self.loose
@@ -212,9 +212,10 @@ class Shears:
         follows it: its world placement is this pose applied to its own."""
         return self._manager._state_0.body_q.numpy()[body]
 
-    def _capsules(self) -> tuple[np.ndarray, np.ndarray]:
+    def capsules(self) -> tuple[np.ndarray, np.ndarray]:
         """Each rod body's capsule axis in world coordinates, as its end nearer
-        the wood and its far end. Shape is (N, 3) each."""
+        the wood and its far end -- shapes (N, 3) and (N, 3), in `bodies`
+        order. With `loose`, where the pieces cut free lie."""
         pose = self._manager._state_0.body_q.numpy()[self.bodies]
         axis = _rotate_z(pose[:, 3:])
         return (

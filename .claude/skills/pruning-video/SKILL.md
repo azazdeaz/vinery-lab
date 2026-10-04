@@ -10,8 +10,8 @@ Isaac Sim: down the alley as it drives up, a first cane cut in a wider shot
 as the arm swings out through the canes, then each case of the shear meeting
 a cane, captioned — a planned cut, one cane cut three times, the cane pushed
 back into the crotch of the blades, pushed aside by the fixed blade, pushed
-aside by the moving blade — and the robot driving on. It is one command
-away:
+aside by the moving blade — and the arm folding home as the robot drives
+on. It is one command away:
 
 ```bash
 examples/pruning_demo/record.sh
@@ -101,8 +101,10 @@ first.
   the robot or the row. Each swing out to a take's cane is filmed from
   `REST`, as the arm can cross where a close-up's camera stands.
 - **`PACE`** slows down the stages of a take's cut by `Pruning.stage_name`,
-  and the swing out of every cut; the frame rate stays `FPS`. `ENDING` is
-  how long the video runs on after the vine is pruned.
+  and the arm's swings in every cut — out to the cane, tipping out a piece
+  that fell into the mouth — and folding home; the frame rate stays `FPS`.
+  `SETTLE` is the start left out, while the robot drops onto its wheels.
+  `ENDING` is how long the video runs on after the vine's last cut.
 - **`ROW`, `VINE`** pick the vine: away from the headland, so there is
   vineyard behind every shot.
 

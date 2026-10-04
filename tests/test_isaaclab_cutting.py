@@ -79,7 +79,7 @@ class Rig:
 
     def spans(self) -> np.ndarray:
         """Each capsule's axis along x, as (start, end) per body."""
-        return np.stack(self.shears._capsules(), axis=1)[:, :, 0]
+        return np.stack(self.shears.capsules(), axis=1)[:, :, 0]
 
 
 @pytest.fixture
@@ -162,7 +162,7 @@ def test_a_cut_piece_lands_on_the_ground_and_lies_there(monkeypatch):
     rig.shears.cut(rig.bodies[1], 0.5)
     rig.step(1.0)
 
-    start, end = rig.shears._capsules()
+    start, end = rig.shears.capsules()
     assert np.concatenate([start[2:, 2], end[2:, 2]]) == pytest.approx(0.8 + 0.01, abs=2e-3)
     assert np.abs(rig.state.body_qd.numpy()[rig.bodies[2:]]).max() < 0.01
 
@@ -176,5 +176,5 @@ def test_a_cut_piece_catches_on_the_rod_it_was_cut_from(monkeypatch):
     rig.shears.cut(rig.bodies[2], 0.5)
     rig.step(1.0)
 
-    start, end = rig.shears._capsules()
+    start, end = rig.shears.capsules()
     assert start[3, 2] == pytest.approx(end[1, 2] + 2 * 0.01, abs=3e-3)
