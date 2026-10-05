@@ -14,7 +14,11 @@ with VBD, the one that bends and cuts a cane -- see `vinerylab.isaaclab
 .physics`. Under any other the canes spawn static and nothing can be cut.
 """
 
+from __future__ import annotations
+
 import argparse
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -46,16 +50,21 @@ from bumblebee import (
     bumblebee_cfg,
 )
 from driver import DECIMATION, SIM_DT, Driver
-from pruner import Pruning, Tally, Vine, nearest_first, plan, read_vines
+from pruner import Cut, Pruning, Tally, Vine, nearest_first, plan, read_vines
 from teleop import Teleop, show_keys
+
+if TYPE_CHECKING:
+    from vinerylab.isaaclab import Shears
 
 # The scene is generated on first use and cached on these parameters, so a
 # second run of this script spawns it without re-running the generator.
 VINEYARD_CFG = VineyardCfg(
-    # A small, nearly flat plot: two rows are all the robot works, and every
-    # cane on them is a rod, which is what the size is paying for.
-    terrain=TerrainCfg(length=18.0, width=6.0, max_inclination=3.0, feature_size=14.0),
-    parcel=ParcelCfg(row_spacing=2.4, trellis_height=1.5, headland=2.0, min_row_length=4.0),
+    # A small, nearly flat plot of three rows: the robot works the middle one.
+    # Every cane on all three is a rod, which is what the size is paying for;
+    # the wide headland around them costs nothing, and keeps the edge of the
+    # ground out of the camera's way.
+    terrain=TerrainCfg(length=30.0, width=22.0, max_inclination=3.0, feature_size=14.0),
+    parcel=ParcelCfg(row_spacing=2.4, trellis_height=1.5, headland=8.0, min_row_length=4.0),
     # One cane per spur, so pruning to two buds leaves a two-bud spur.
     vine=VineCfg(shoots_per_spur=1.0),
     # Winter: bare lignified canes with buds a dormant internode apart.
@@ -85,8 +94,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--row",
         type=int,
-        default=0,
-        help="The row to prune, numbered as the scene names them -- Row_000 first.",
+        default=1,
+        help=(
+            "The row to prune, numbered as the scene names them -- Row_000 first. "
+            "The middle one of the three by default."
+        ),
     )
     parser.add_argument(
         "--teleop",
@@ -117,13 +129,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def design_scene(machine: Bumblebee) -> Articulation:
-    """The vineyard, a sky, and the robot."""
+    """The vineyard without its wires, a sky, and the robot."""
     cfg = sim_utils.DomeLightCfg(
         intensity=750.0,
         texture_file=f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr",
     )
     cfg.func("/World/Light", cfg)
     VINEYARD_CFG.func(VINEYARD_PATH, VINEYARD_CFG)
+    # The trellis wires are hidden: they have no collider, so the canes and
+    # the shear would pass straight through them.
+    from pxr import UsdGeom
+
+    stage = sim_utils.get_current_stage()
+    for row in stage.GetPrimAtPath(f"{VINEYARD_PATH}/Planting").GetChildren():
+        for prim in row.GetChildren():
+            if prim.GetName().startswith("Wire_"):
+                UsdGeom.Imageable(prim).MakeInvisible()
     return Articulation(bumblebee_cfg(machine, ROBOT_PATH))
 
 
@@ -202,14 +223,25 @@ def run_simulator(
     to_row: np.ndarray,
     shears,
     teleop: Teleop | None = None,
-):
+    planner: Callable[[Vine, np.ndarray], list[Cut]] | None = None,
+    render: bool = True,
+) -> Iterator[Pruning | Teleop | None]:
     """Drive from vine to vine, pruning each, then stand at the end -- or,
-    with a `teleop`, do as the keyboard says for as long as the run lasts."""
+    with a `teleop`, do as the keyboard says -- for as long as the run lasts,
+    yielding what has the arm after every physics step: a vine's `Pruning`,
+    the keyboard, or nothing between vines.
+
+    `planner` takes a vine and where the mouth is, and returns the cuts to
+    make on it in order; by default the rule's, nearest neighbour first.
+    Without `render` no step renders, and what does is up to the caller."""
     stage = sim_utils.get_current_stage()
     arm, _ = robot.find_joints([SLIDE_JOINT, *ARM_JOINTS], preserve_order=True)
     shear, _ = robot.find_joints([SHEAR_JOINT])
     hand, _ = robot.find_bodies([HAND])
-    root_shift = np.array([*(-to_row * VINEYARD_CFG.parcel.row_spacing / 2), 0.0])
+    side = np.array([*to_row, 0.0])
+    if planner is None:
+        planner = lambda vine, mouth: nearest_first(plan(vine, shears, side), mouth)  # noqa: E731
+    root_shift = -side * VINEYARD_CFG.parcel.row_spacing / 2
     stops = [vine.position[:2] + root_shift[:2] for vine in vines]
 
     driver.place(stops[0] - 1.5 * driver.forward)
@@ -230,7 +262,7 @@ def run_simulator(
                     vine = vines[len(vines) - len(stops)]
                     base = base_pose(robot)
                     mouth = hand_pose(robot, hand[0])[:3, 3]
-                    cuts = nearest_first(plan(vine, shears, np.array([*to_row, 0.0])), mouth)
+                    cuts = planner(vine, mouth)
                     reachable = tally.reachable
                     pruning = Pruning(machine, cuts, base, q, shears, stage, tally)
                     started = step * SIM_DT
@@ -262,18 +294,58 @@ def run_simulator(
                     if not stops:
                         print(f"[INFO]: done. {tally.summary()}\n[INFO]: {PAPER}")
         robot.write_data_to_sim()
-        sim.step()
+        sim.step(render=render)
         robot.update(SIM_DT)
         step += 1
+        yield pruning
+
+
+def simulation_cfg(device: str) -> sim_utils.SimulationCfg:
+    """The simulation on `device`: Newton coupled with VBD, the robot's arm
+    and shear among what a cane collides with."""
+    return sim_utils.SimulationCfg(
+        dt=SIM_DT,
+        device=device,
+        physics=make_physics_cfg_newton(VINEYARD_CFG, ROBOT_PATH, ROBOT_CONTACT),
+    )
+
+
+def start(
+    sim: sim_utils.SimulationContext, robot: Articulation, machine: Bumblebee, row: int
+) -> tuple[Driver, list[Vine], np.ndarray, Shears | None]:
+    """Reset the simulation of the scene `design_scene` laid out, and read off
+    it what the robot works: the driver for the alley beside `row`, the row's
+    vines in driving order, the direction from the alley to the row, and the
+    shears that cut its canes -- None under a backend that bends no cane."""
+    # Imported here: `vinerylab.usd` pulls in `pxr`, and Kit's own copy
+    # only wins the import if nothing loaded the pip one first.
+    from vinerylab.usd import Ground
+
+    stage = sim_utils.get_current_stage()
+    heading, to_row = row_geometry(stage, row)
+    sim.reset()
+    fix_heightfield_offsets()
+    # The robot's joints exist once the simulation has been reset.
+    driver = Driver(robot, machine, heading, Ground(stage))
+
+    shears = None
+    if steps_rods(sim.cfg.physics):
+        from vinerylab.isaaclab import Shears
+
+        shears = Shears()
+    else:
+        print("[WARN]: the backend bends no cane, so nothing can be cut")
+    vines = read_vines(stage, VINEYARD_PATH, row, shears) if shears else []
+    # In driving order down the alley.
+    vines.sort(key=lambda vine: vine.position[:2] @ driver.forward)
+    if not vines:
+        raise RuntimeError(f"row {row} has no cane to prune")
+    return driver, vines, to_row, shears
 
 
 def main():
     args_cli = parse_args()
-    sim_cfg = sim_utils.SimulationCfg(
-        dt=SIM_DT,
-        device=args_cli.device,
-        physics=make_physics_cfg_newton(VINEYARD_CFG, ROBOT_PATH, ROBOT_CONTACT),
-    )
+    sim_cfg = simulation_cfg(args_cli.device)
     # Starts Isaac Sim when the chosen backend or viewer needs it, and closes it
     # on exit. An explicit --physics replaces the config built above.
     with launch_simulation(sim_cfg, args_cli):
@@ -284,29 +356,7 @@ def main():
         sim = sim_utils.SimulationContext(sim_cfg)
         machine = Bumblebee()
         robot = design_scene(machine)
-        # Imported here: `vinerylab.usd` pulls in `pxr`, and Kit's own copy
-        # only wins the import if nothing loaded the pip one first.
-        from vinerylab.usd import Ground
-
-        stage = sim_utils.get_current_stage()
-        heading, to_row = row_geometry(stage, args_cli.row)
-        sim.reset()
-        fix_heightfield_offsets()
-        # The robot's joints exist once the simulation has been reset.
-        driver = Driver(robot, machine, heading, Ground(stage))
-
-        shears = None
-        if steps_rods(sim.cfg.physics):
-            from vinerylab.isaaclab import Shears
-
-            shears = Shears()
-        else:
-            print("[WARN]: the backend bends no cane, so nothing can be cut")
-        vines = read_vines(stage, VINEYARD_PATH, args_cli.row, shears) if shears else []
-        # In driving order down the alley.
-        vines.sort(key=lambda vine: vine.position[:2] @ driver.forward)
-        if not vines:
-            raise RuntimeError(f"row {args_cli.row} has no cane to prune")
+        driver, vines, to_row, shears = start(sim, robot, machine, args_cli.row)
         first = vines[0].position
         sim.set_camera_view(
             eye=(first + [*(-4.0 * driver.forward - 2.5 * to_row), 2.5]).tolist(),
@@ -318,7 +368,8 @@ def main():
             teleop.listen()
             show_keys()
         print(f"[INFO]: Setup complete, {len(vines)} vines to prune...")
-        run_simulator(sim, robot, machine, driver, vines, to_row, shears, teleop)
+        for _ in run_simulator(sim, robot, machine, driver, vines, to_row, shears, teleop):
+            pass
 
 
 if __name__ == "__main__":

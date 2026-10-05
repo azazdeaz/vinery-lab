@@ -52,7 +52,19 @@ meters: half a metre a second, at the controller's rate."""
 
 JOINT_STEP = 0.05
 """How far a joint moves per control tick on a planned move, in radians or
-meters: a move takes as many ticks as its longest joint swing needs."""
+meters: a move takes as many ticks as its longest joint swing needs. It is
+the arm's top speed, 2.5 rad/s at the controller's rate, under a UR5's
+3.1."""
+
+TIP = 1.2
+"""How far the blades are turned down, in radians, to tip out a piece cut
+free that lies in the mouth."""
+
+FOUL = 0.02
+"""How far off the blades' plane a point of a piece cut free may lie and
+still be in the mouth, in meters: past the axis of a piece lying on a plate,
+and past half the spacing of the points `Stroke.fouled` takes along a
+capsule, so one crossing the plane has a point this close."""
 
 ARRIVED = 0.08
 """How close every joint has to be to its target, in radians or meters, for
@@ -192,12 +204,35 @@ class Cut:
     """The last bud to keep, below the cut."""
     removed: Bud
     """The first bud to take, above it."""
+    push: np.ndarray = dataclasses.field(default_factory=lambda: np.zeros(3))
+    """How far the mouth moves on from the cut before the shear closes, in
+    the cut's own frame: x along the pivot, y across the mouth -- the fixed
+    blade on its +y side, the moving one opening to -y -- and z along the
+    blades. The edge the mouth moves into the cane pushes it: +z drives it
+    into the crotch, -y against the fixed blade, +y against the moving one.
+    Zero for a planned cut."""
 
     @property
     def standoff(self) -> np.ndarray:
         """The same frame `STANDOFF` back along the blades."""
         pose = self.pose.copy()
         pose[:3, 3] -= STANDOFF * pose[:3, 2]
+        return pose
+
+    @property
+    def pushed(self) -> np.ndarray:
+        """The same frame moved by `push`."""
+        pose = self.pose.copy()
+        pose[:3, 3] += pose[:3, :3] @ self.push
+        return pose
+
+    @property
+    def tipped(self) -> np.ndarray:
+        """The stand-off frame with the blades turned `TIP` down the cane,
+        about the line across the mouth."""
+        pose = self.standoff
+        c, s = math.cos(TIP), math.sin(TIP)
+        pose[:3, :3] = pose[:3, :3] @ np.array([[c, 0.0, -s], [0.0, 1.0, 0.0], [s, 0.0, c]])
         return pose
 
 
@@ -363,6 +398,26 @@ class Stroke:
         # at it would squeeze the first; two in one mouth is rare.
         return max(held, default=None)
 
+    def fouled(self, hand: np.ndarray) -> bool:
+        """Whether a piece cut free lies in the mouth, `hand` being the pose
+        of the body the shear is on: one that fell across it or onto the
+        blades, which the blade does not cut and the arm would carry on to
+        the next cut."""
+        s = self.machine.shear
+        corner, u, v = _placed(hand, *self.machine.wedge())
+        start, end = self.shears.capsules()
+        loose = self.shears.loose
+        # Points along every loose capsule, from the wedge's corner: a piece
+        # lying flat on a plate crosses no plane of the mouth's.
+        along = np.linspace(0.0, 1.0, 5)[:, None]
+        points = start[loose, None] + along * (end - start)[loose, None] - corner
+        normal = np.cross(u, v)
+        a, b = points @ u / (u @ u), points @ v / (v @ v)
+        off = np.abs(points @ normal) / np.linalg.norm(normal)
+        # Out to the back of either plate, across the mouth.
+        w = s.width / s.reach
+        return bool(((-w <= a) & (a <= 1 + w) & (0 <= b) & (b <= 1) & (off <= FOUL)).any())
+
 
 @dataclasses.dataclass
 class Tally:
@@ -391,10 +446,13 @@ class Pruning:
 
     `control` returns the slide and arm positions to hold and the blade angle
     to hold, and moves the sequence on as each stage's target is reached: a
-    planned move out to the stand-off, a straight line in, the shear closing
-    once the arm has settled -- the blade cutting what it sweeps through --
-    and opening, and the straight line back out. Poses are solved in the
-    robot's own frame, so the caller hands in where the robot is.
+    planned move out to the stand-off, a straight line in -- and on by the
+    cut's `push`, if it has one -- the shear closing once the arm has settled,
+    the blade cutting what it sweeps through, and opening, and the straight
+    line back out -- then the blades tipped down while a piece cut free lies
+    in the mouth. Once the last cut is made the arm folds home, and the
+    vine is done. Poses are solved in the robot's own frame, so the caller
+    hands in where the robot is.
     """
 
     def __init__(
@@ -407,6 +465,12 @@ class Pruning:
         stage: Usd.Stage,
         tally: Tally,
     ):
+        # Imported here, as in `Stroke`.
+        from bumblebee import ARM_HOME
+
+        self.home = np.array([0.0, *ARM_HOME])
+        """The slide and arm positions the arm folds back to once the vine is
+        pruned, to ride to the next."""
         self.chain, self.tool = machine.chain, machine.tool
         self.shears, self.stage, self.tally = shears, stage, tally
         self.base = base
@@ -441,10 +505,15 @@ class Pruning:
 
     def _next(self) -> None:
         """Start on the next cut, or finish."""
+        # A cut whose bud to take is gone already -- taken by another cut's
+        # blade, or by a piece falling across it -- is left alone: aimed at
+        # where that bud is now, it would chase the piece to the ground.
+        while self.cuts and not attached(self.cuts[0].removed, self.shears, self.stage):
+            self.cuts.pop(0)
         self.cut = self.cuts.pop(0) if self.cuts else None
         self.ticks = 0
         if self.cut is None:
-            self.stage_name = "done"
+            self.stage_name, self.goal = "home", self.home
             return
         self.stage_name = "move"
         # Aimed afresh at where the buds are now: a cane may have been pushed
@@ -470,35 +539,44 @@ class Pruning:
         # wheels while the arm works, and a pose solved against where it
         # stood when the vine was reached would be off by that much.
         self.base = hand @ np.linalg.inv(frames(self.chain, self.q)[-1])
-        if self.cut is None:
+        if self.done:
             return self.target, self.stroke.jaw
-        cut = self.cut
         self.ticks += 1
         if self.ticks > PATIENCE:
-            self.stage_name = "next"
-        if self.stage_name == "move":
+            self.stage_name = "next" if self.cut else "done"
+        if self.stage_name in ("move", "tip", "home"):
             # A planned move: the target walks to the goal a step at a time,
-            # and the stage ends once the arm has arrived on it.
-            if np.abs(self.goal - self.q).max() < ARRIVED:
-                self.stage_name, self.ticks = "approach", 0
-            else:
+            # and the stage ends once the arm has arrived on it -- tipped, once
+            # the piece has slid out as well.
+            if np.abs(self.goal - self.q).max() >= ARRIVED:
                 self.target = self.target + np.clip(
                     self.goal - self.target, -JOINT_STEP, JOINT_STEP
                 )
                 return self.target, self.stroke.jaw
-        if self.stage_name in ("approach", "retract"):
+            if self.stage_name == "tip" and self.stroke.fouled(hand):
+                return self.target, self.stroke.jaw
+            after = {"move": "approach", "tip": "next", "home": "done"}
+            self.stage_name, self.ticks = after[self.stage_name], 0
+        cut = self.cut
+        if cut is None:
+            return self.target, self.stroke.jaw
+        if self.stage_name in ("approach", "push", "retract"):
             # The straight line, a step of the mouth at a time, solved from
             # where the arm is so each step starts from the last -- and the
             # end of it held until the arm has caught up.
-            end = cut.pose[:3, 3] if self.stage_name == "approach" else cut.standoff[:3, 3]
-            gap = end - self.line
+            end = {"approach": cut.pose, "push": cut.pushed, "retract": cut.standoff}
+            gap = end[self.stage_name][:3, 3] - self.line
             distance = np.linalg.norm(gap)
             arrived = distance < 1e-6 and np.abs(self.target - self.q).max() < ARRIVED
-            # Closing waits for the arm to settle as well: a blade shut while
-            # the mouth is still moving in sweeps past the cane.
+            # Pushing and closing wait for the arm to settle as well: a blade
+            # shut while the mouth is still moving in sweeps past the cane.
             if arrived and (self.stage_name == "retract" or self.moved < STILL):
-                self.stage_name = "close" if self.stage_name == "approach" else "next"
+                after = {"approach": "push" if cut.push.any() else "close", "push": "close"}
+                self.stage_name = after.get(self.stage_name, "next")
                 self.ticks = 0
+                if self.stage_name == "next" and self.stroke.fouled(hand):
+                    self.goal, tips = self._solve(cut.tipped)
+                    self.stage_name = "tip" if tips else "next"
             else:
                 self.line = self.line + gap * min(CLOSE_IN / max(distance, 1e-9), 1.0)
                 pose = cut.pose.copy()

@@ -72,10 +72,10 @@ and `import misina_lab` work without it.
 | [tests/](tests/) | Python tests: the params, the USD build, the Isaac Lab cfg and physics |
 | [examples/isaaclab_demo/](examples/isaaclab_demo/) | a quadruped walking the alleys; its own uv project |
 | [examples/straddler_demo/](examples/straddler_demo/) | a straddling robot driving every row, `--trim` to hedge it; its own uv project |
-| [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs; its own uv project |
+| [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs, and `record.sh`, which films it; its own uv project |
 | [assets/leaves/](crates/vinerylab/assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
-| [docs/video/](docs/video/) | the README video: `record.sh` and the storyboard it plays |
+| [docs/video/](docs/video/) | the README video: `record.sh` and the storyboard it plays, and `encode.sh`, which both videos are encoded with |
 
 ## Docs
 
@@ -83,6 +83,7 @@ and `import misina_lab` work without it.
 - [docs/parameters.md](docs/parameters.md) — every parameter, with its default and range (generated)
 - [docs/pruning-research.md](docs/pruning-research.md) — prior art for cutting shoots: pruning robots, hedgers, how simulators model a cut
 - [.claude/skills/readme-video/SKILL.md](.claude/skills/readme-video/SKILL.md) — re-recording the README video and changing what it shows; plain Markdown, for any agent
+- [.claude/skills/pruning-video/SKILL.md](.claude/skills/pruning-video/SKILL.md) — the same for the pruning demo's video, filmed in Isaac Sim
 - [examples/isaaclab_demo/DEVELOPMENT.md](examples/isaaclab_demo/DEVELOPMENT.md) — the pinned Isaac Lab revision and how to bump it
 - [crates/misina-lab/docs/](crates/misina-lab/docs/) — the framework's: how a scene is built and exported, quantization, randomness, Isaac Lab, and how to add or change a parameter
 - [crates/misina-lab/docs/AGENTS.md](crates/misina-lab/docs/AGENTS.md) — how a page is written and kept current
