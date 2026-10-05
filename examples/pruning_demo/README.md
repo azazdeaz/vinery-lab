@@ -26,6 +26,12 @@ Only the default backend, Newton coupled with VBD, bends a cane and so can cut
 one. Under any other the canes spawn static and the robot drives the row with
 nothing to do.
 
+
+
+https://github.com/user-attachments/assets/56860fb4-5722-44cd-bbd3-adbfb399779b
+
+
+
 ## Teleoperation
 
 ```bash
