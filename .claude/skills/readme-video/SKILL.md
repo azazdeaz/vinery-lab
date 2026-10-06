@@ -1,6 +1,6 @@
 ---
 name: readme-video
-description: Re-records the README's demo video of the viewer with docs/video/record.sh, and changes what it shows — the camera moves, the panel edits, their timing — by editing the storyboard docs/video/tour.json. Use after a change to how the viewer, the panel or the scene looks, or when asked to update, re-record or re-cut the README video. Not for still screenshots.
+description: Re-records the README's demo video of the viewer with docs/video/record.sh, publishes it with docs/video/publish.sh, and changes what it shows — the camera moves, the panel edits, their timing — by editing the storyboard docs/video/tour.json. Use after a change to how the viewer, the panel or the scene looks, or when asked to update, re-record or re-cut the README video. Not for still screenshots.
 ---
 
 # README video
@@ -32,11 +32,13 @@ itself when the video is done.
    `ffmpeg -ss T -i target/video/vinerylab.mp4 -frames:v 1 -update 1 frame.png`
    takes the frame at `T`. A video that fails one is not done: change the
    storyboard, never the video.
-3. Hand the mp4 to a person to upload. GitHub plays only video it hosts, and
-   only a signed-in browser can put it there, by dragging the file into an
-   issue comment or the README's editor on github.com. The URL that gives
-   replaces the `https://github.com/user-attachments/assets/…` line under
-   **Parameter editor app** in README.md.
+3. Run `docs/video/publish.sh` on the branch whose pull request changes the
+   video, and commit README.md with the change. GitHub plays only video it
+   hosts, so the script uploads the mp4 in a comment on that pull request,
+   where reviewers see it too, and puts the URL GitHub gave it on the
+   README's video line: the one `https://github.com/user-attachments/assets/…`
+   line alone, under **Parameter editor app**. It needs gh 2.102 or later and
+   push access, and it posts, so run it once the video is right.
 
 A video is right when:
 

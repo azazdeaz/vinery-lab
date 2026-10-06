@@ -75,7 +75,7 @@ and `import misina_lab` work without it.
 | [examples/pruning_demo/](examples/pruning_demo/) | a Bumblebee-like arm pruning a dormant row to two-bud spurs, and `record.sh`, which films it; its own uv project |
 | [assets/leaves/](crates/vinerylab/assets/leaves/) | traced leaf outlines, compiled in with `include_str!` |
 | [web/index.html](web/index.html) | host page for the wasm playground |
-| [docs/video/](docs/video/) | the README video: `record.sh` and the storyboard it plays, and `encode.sh`, which both videos are encoded with |
+| [docs/video/](docs/video/) | the README video: `record.sh` and the storyboard it plays, `encode.sh`, which both videos are encoded with, and `publish.sh`, which uploads either and points its README at it |
 
 ## Docs
 

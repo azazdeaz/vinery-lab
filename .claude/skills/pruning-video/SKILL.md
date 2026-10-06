@@ -39,11 +39,13 @@ hides the trellis wires, which have no collider yet.
    `ffmpeg -ss T -i target/video/pruning.mp4 -frames:v 1 -update 1 frame.png`
    takes the frame at `T`. A video that fails one is not done: change the
    storyboard, never the video.
-3. Hand the mp4 to a person to upload. GitHub plays only video it hosts, and
-   only a signed-in browser can put it there, by dragging the file into an
-   issue comment or the README's editor on github.com. The URL that gives
-   goes on its own line under the title of `examples/pruning_demo/README.md`,
-   in place of the old one if there is one.
+3. Run
+   `docs/video/publish.sh target/video/pruning.mp4 examples/pruning_demo/README.md`
+   on the branch whose pull request changes the video, and commit the README
+   with the change. It uploads the mp4 in a comment on that pull request and
+   puts the URL GitHub gave it on the README's video line, the one
+   `https://github.com/user-attachments/assets/…` line alone. Its header says
+   what it needs; it posts, so run it once the video is right.
 
 `video.py` fails the run when a take's cut was not made, and `record.sh`
 records again, five times at most. The canes bend chaotically, and the GPU
