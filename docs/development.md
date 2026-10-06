@@ -116,6 +116,8 @@ The pruning demo's video is filmed in Isaac Sim instead, headless:
 an RTX camera on the simulation's clock. Both scripts encode what they record
 with `docs/video/encode.sh`. See
 [its skill](../.claude/skills/pruning-video/SKILL.md) for changing it.
+`docs/video/publish.sh` uploads either video to the branch's pull request
+and puts the link GitHub gives it in its README.
 
 ### Web build
 
