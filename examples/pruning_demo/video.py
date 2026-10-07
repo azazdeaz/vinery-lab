@@ -113,8 +113,8 @@ ACROSS = Shot(eye=(-0.7, 1.4, 0.6))
 cane at, which run down it against the robot's chassis."""
 
 TAKES = (
-    Take("A planned cut: the cane lies in the middle of the mouth", CLOSE),
     Take("One cane, cut three times from the top down", ACROSS, kept=(6, 4, 2)),
+    Take("A planned cut: the cane lies in the middle of the mouth", CLOSE),
     Take("Pushed back into the crotch of the blades", BEHIND, push=(0.0, 0.0, 0.035)),
     Take("Pushed aside by the fixed blade before the cut", CLOSE, push=(0.0, -0.035, 0.0)),
     Take(
@@ -127,12 +127,13 @@ TAKES = (
 those that push come after those that do not. A push carries the open blades
 further than a planned cut does, through a neighbouring cane still standing,
 and that cane's own take would find it cut already -- so the takes that push
-go on every second cane along the cordon, after the canes between are cut.
-A take of several cuts and no push goes on the cane between nearest the
-robot, which the arm reaches past no other: a cane it brushes on the way can
-be carried into the mouth beside the one cut. The vine's canes no take has are cut first,
-filmed `REST` -- but for one left over among those every second, which comes
-last."""
+go on every second cane along the cordon, after the takes on the canes
+between. Those go on the canes between nearest the robot, the first take on
+the nearest, which the arm reaches past no other: the take of several cuts
+is first. The vine's canes no take has, a cane between leaning away from the
+robot among them, are cut last, filmed `REST`: the arm reaches such a cane
+between the two either side of it, and can drape one over itself to ride
+into the mouths that follow."""
 
 ROW, VINE = 1, 4
 """The row pruned, and which of its vines in driving order: away from the
@@ -178,11 +179,10 @@ def schedule(row: list[Cut], mouth: np.ndarray, side: np.ndarray) -> list[tuple[
     cordon, `mouth` where the shear starts out from, and `side` the
     horizontal direction from the robot to the row.
 
-    The takes that push go on every second cane, after the canes between are
-    cut, and one of several cuts and no push on the cane between nearest the
-    robot: see `TAKES`. The other canes between are cut nearest neighbour first,
-    those no take has first of all; then the takes that push, nearest
-    neighbour first again, and any cane left over.
+    The takes that do not push go on the canes between nearest the robot, in
+    their order, the first on the nearest of all; then the takes that push on
+    every second cane, nearest neighbour first; then, nearest neighbour first
+    again, every cane no take has. See `TAKES`.
     """
     still = [take for take in TAKES if not any(take.push)]
     pushing = [take for take in TAKES if any(take.push)]
@@ -192,16 +192,14 @@ def schedule(row: list[Cut], mouth: np.ndarray, side: np.ndarray) -> list[tuple[
             f"{len(row)} canes are too few for {len(still)} takes"
             f" and {len(pushing)} more that push on every second cane"
         )
-    several = [take for take in still if len(take.kept) > 1]
-    nearest = sorted(between, key=lambda cut: cut.pose[:3, 3] @ side)[: len(several)]
-    between = nearest_first([cut for cut in between if all(cut is not n for n in nearest)], mouth)
-    rest = len(between) - len(still) + len(several)
-    singles, nearest = iter(between[rest:]), iter(nearest)
-    order = [(cut, None) for cut in between[:rest]]
-    order += [(next(nearest if take in several else singles), take) for take in still]
+    toward = sorted(between, key=lambda cut: cut.pose[:3, 3] @ side)
+    order: list[tuple[Cut, Take | None]] = list(zip(toward, still))
     spaced = nearest_first(spaced, order[-1][0].pose[:3, 3] if order else mouth)
-    leftover = [(cut, None) for cut in spaced[len(pushing) :]]
-    return order + list(zip(spaced, pushing, strict=False)) + leftover
+    order += zip(spaced, pushing)
+    rest = nearest_first(
+        toward[len(still) :] + spaced[len(pushing) :], order[-1][0].pose[:3, 3] if order else mouth
+    )
+    return order + [(cut, None) for cut in rest]
 
 
 class Rig:

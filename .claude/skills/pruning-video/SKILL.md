@@ -6,12 +6,12 @@ description: Re-records the pruning demo's video in Isaac Sim with examples/prun
 # Pruning video
 
 The pruning demo's video is about a minute of the robot pruning one vine in
-Isaac Sim: down the alley as it drives up, a first cane cut in a wider shot
-as the arm swings out through the canes, then each case of the shear meeting
-a cane, captioned — a planned cut, one cane cut three times, the cane pushed
-back into the crotch of the blades, pushed aside by the fixed blade, pushed
-aside by the moving blade — and the arm folding home as the robot drives
-on. It is one command away:
+Isaac Sim: down the alley as it drives up, then each case of the shear
+meeting a cane, captioned — one cane cut three times, a planned cut, the cane
+pushed back into the crotch of the blades, pushed aside by the fixed blade,
+pushed aside by the moving blade — then the vine's last cane cut in a wider
+shot, and the arm folding home as the robot drives on. It is one command
+away:
 
 ```bash
 examples/pruning_demo/record.sh
@@ -76,13 +76,15 @@ first.
 
 - **`TAKES`** are the cases, each on its own cane, filmed in their order but
   that the takes with a `push` come last. They go on every second cane along
-  the cordon, after the canes between are cut: a push carries the open blades
-  through a neighbouring cane still standing. A take of several cuts and no
-  push goes on the cane between nearest the robot, so the arm brushes no
-  other into its mouth. `schedule` assigns the canes, and `test_video.py`
-  checks it. The vine's canes no take has are cut first, filmed from `REST`
-  — but for one left over among those every second, which comes last. A
-  take has a caption, a `Shot`, a `push` and `kept`.
+  the cordon, after the takes on the canes between: a push carries the open
+  blades through a neighbouring cane still standing. The takes without one go
+  on the canes between nearest the robot, the first on the nearest, which
+  the arm reaches past no other — so the take of several cuts is first. The
+  vine's canes no take has are cut last, filmed from `REST`: among them the
+  cane between that leans away from the robot, which the arm reaches between
+  the canes either side of it, draping one over itself to ride into the
+  mouths that follow. `schedule` assigns the canes, and `test_video.py`
+  checks it. A take has a caption, a `Shot`, a `push` and `kept`.
 - **`push`** is `Cut.push`: how far the mouth moves on from the cut point
   before the shear closes, in the cut's own frame — x along the pivot, y
   across the mouth, z along the blades. +z drives the cane into the crotch,
