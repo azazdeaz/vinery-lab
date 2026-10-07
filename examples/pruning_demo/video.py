@@ -128,8 +128,11 @@ those that push come after those that do not. A push carries the open blades
 further than a planned cut does, through a neighbouring cane still standing,
 and that cane's own take would find it cut already -- so the takes that push
 go on every second cane along the cordon, after the canes between are cut.
-The vine's canes no take has are cut first, filmed `REST` -- but for one
-left over among those every second, which comes last."""
+A take of several cuts and no push goes on the cane between nearest the
+robot, which the arm reaches past no other: a cane it brushes on the way can
+be carried into the mouth beside the one cut. The vine's canes no take has are cut first,
+filmed `REST` -- but for one left over among those every second, which comes
+last."""
 
 ROW, VINE = 1, 4
 """The row pruned, and which of its vines in driving order: away from the
@@ -169,15 +172,17 @@ robot driving on."""
 CAMERA = "/World/VideoCamera"
 
 
-def schedule(row: list[Cut], mouth: np.ndarray) -> list[tuple[Cut, Take | None]]:
+def schedule(row: list[Cut], mouth: np.ndarray, side: np.ndarray) -> list[tuple[Cut, Take | None]]:
     """Which take each of a vine's canes is filmed for, if any, in the order
     to cut them. `row` is a planned cut on each cane, in order along the
-    cordon, and `mouth` where the shear starts out from.
+    cordon, `mouth` where the shear starts out from, and `side` the
+    horizontal direction from the robot to the row.
 
     The takes that push go on every second cane, after the canes between are
-    cut: see `TAKES`. Those between are cut nearest neighbour first, those no
-    take has first of all; then the takes that push, nearest neighbour first
-    again, and any cane left over.
+    cut, and one of several cuts and no push on the cane between nearest the
+    robot: see `TAKES`. The other canes between are cut nearest neighbour first,
+    those no take has first of all; then the takes that push, nearest
+    neighbour first again, and any cane left over.
     """
     still = [take for take in TAKES if not any(take.push)]
     pushing = [take for take in TAKES if any(take.push)]
@@ -187,9 +192,13 @@ def schedule(row: list[Cut], mouth: np.ndarray) -> list[tuple[Cut, Take | None]]
             f"{len(row)} canes are too few for {len(still)} takes"
             f" and {len(pushing)} more that push on every second cane"
         )
-    between = nearest_first(between, mouth)
-    rest = len(between) - len(still)
-    order = [(cut, None) for cut in between[:rest]] + list(zip(between[rest:], still, strict=True))
+    several = [take for take in still if len(take.kept) > 1]
+    nearest = sorted(between, key=lambda cut: cut.pose[:3, 3] @ side)[: len(several)]
+    between = nearest_first([cut for cut in between if all(cut is not n for n in nearest)], mouth)
+    rest = len(between) - len(still) + len(several)
+    singles, nearest = iter(between[rest:]), iter(nearest)
+    order = [(cut, None) for cut in between[:rest]]
+    order += [(next(nearest if take in several else singles), take) for take in still]
     spaced = nearest_first(spaced, order[-1][0].pose[:3, 3] if order else mouth)
     leftover = [(cut, None) for cut in spaced[len(pushing) :]]
     return order + list(zip(spaced, pushing, strict=False)) + leftover
@@ -339,7 +348,7 @@ def main():
                 return []
             row = sorted(plan(vine, shears, side), key=lambda cut: cut.pose[:3, 3] @ axes[:, 0])
             cuts = []
-            for planned, take in schedule(row, mouth):
+            for planned, take in schedule(row, mouth, side):
                 cuts += filmed(take, planned.cane) if take else [planned]
             return cuts
 

@@ -77,10 +77,12 @@ first.
 - **`TAKES`** are the cases, each on its own cane, filmed in their order but
   that the takes with a `push` come last. They go on every second cane along
   the cordon, after the canes between are cut: a push carries the open blades
-  through a neighbouring cane still standing. `schedule` assigns the canes,
-  and `test_video.py` checks it. The vine's canes no take has are cut first,
-  filmed from `REST` — but for one left over among those every second, which
-  comes last. A take has a caption, a `Shot`, a `push` and `kept`.
+  through a neighbouring cane still standing. A take of several cuts and no
+  push goes on the cane between nearest the robot, so the arm brushes no
+  other into its mouth. `schedule` assigns the canes, and `test_video.py`
+  checks it. The vine's canes no take has are cut first, filmed from `REST`
+  — but for one left over among those every second, which comes last. A
+  take has a caption, a `Shot`, a `push` and `kept`.
 - **`push`** is `Cut.push`: how far the mouth moves on from the cut point
   before the shear closes, in the cut's own frame — x along the pivot, y
   across the mouth, z along the blades. +z drives the cane into the crotch,
