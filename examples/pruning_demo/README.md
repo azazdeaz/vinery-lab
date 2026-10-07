@@ -28,7 +28,7 @@ nothing to do.
 
 
 
-https://github.com/user-attachments/assets/56860fb4-5722-44cd-bbd3-adbfb399779b
+https://github.com/user-attachments/assets/5831edf6-d97a-4f67-a7ce-a16cb0be8053
 
 
 
@@ -49,7 +49,7 @@ in its bottom right corner.
 | `↑` / `↓` | jog the mouth forward / back along the robot |
 | `←` / `→` | jog it toward the row / away from it |
 | `Page Up` / `Page Down` | jog it up / down |
-| `Enter` | close the shear, cutting what the blade sweeps through, and open it again; the robot holds still while it shuts |
+| `Enter` | close the shear, cutting the first cane the blade closes on, and open it again; the robot holds still while it shuts |
 
 The mouth is a gantry head rather than a wrist: it stays squared up to the
 row -- blades out over the rail, pivot upright, so an upright cane lies across
@@ -83,9 +83,11 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
 2. **The approach.** Each cut is a pose for the shear's mouth, squared up to
    the cane: the pivot along it, the blades along the approach, aimed afresh
    at the buds when the cut's turn comes. The arm plans to a point 15 cm out,
-   then closes in on a straight line and settles there. The shear's head and
-   blades collide with the canes, so a cane the mouth comes in on is
-   funnelled between the edges or pushed aside, bending as it goes.
+   where the cut is aimed once more -- the swing out brushes through the
+   canes, the one to cut among them -- then closes in on a straight line to
+   it and settles there. The shear's head and blades collide with the canes,
+   so a cane the mouth comes in on is funnelled between the edges or pushed
+   aside, bending as it goes.
 3. **The order.** The cuts on a vine are taken nearest neighbour first. A
    cut whose bud to take is gone by its turn -- caught by the blade on a
    neighbouring cane, or by a falling piece -- is left out. Once the last
@@ -94,12 +96,18 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
 4. **The cut.** Once the arm has settled, the shear closes, and the moving
    blade carries the cane across the mouth onto the fixed one. Held there, the
    blade's collider stands still while the blade itself closes on through:
-   every control tick its plate, at the angle the blade has reached, goes to
-   `Shears.cut_through`, and the cane is cut where the edge reaches its axis.
-   Nothing is crushed between the blades, nothing the cane leans on is pulled
-   from under it, and the collider rides the blade again once it has opened
-   back past where it stood. A cane the blade never reaches, pushed out of
-   the mouth on the way in or never in it, is a miss.
+   every control tick its plate, at the angle the blade has reached, is
+   checked against the canes with `Shears.crossing`, and the first cane
+   against the fixed blade whose axis it reaches is cut there, with
+   `Shears.cut`. A cane the moving blade is still carrying across is not cut,
+   even where it has sunk into the blade past its axis. Nothing is crushed
+   between the blades, nothing the cane leans on is pulled from under it, and
+   the collider rides the blade again once it has opened back past where it
+   stood. A stroke makes that one cut, and a second cane in the mouth is left
+   standing. A cane the open blade was in already, gone into rather than
+   closed on, is cut only if the blade closes on no other. A cane the blade
+   never reaches, pushed out of the mouth on the way in or never in it, is a
+   miss.
 5. **The fall.** The piece meets its own vine -- the stub, the other canes,
    the cordon -- the ground and the robot, and passes through every other
    vine: it catches on the stub for a moment, tips, and slides down beside

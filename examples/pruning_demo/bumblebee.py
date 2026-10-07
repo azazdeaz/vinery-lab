@@ -14,9 +14,10 @@ The shear touches what it prunes. Its head and both blades collide with the
 canes, so a cane the shear comes in on is pushed aside or funnelled into the
 mouth, and the moving blade carries it across the mouth onto the fixed one.
 Held there, it is cut where the moving blade's edge reaches its axis: tick by
-tick while the shear closes, `pruner.Stroke` hands `Bumblebee.blade` at the
-blade's angle to `Shears.cut_through`, and keeps the moving blade's collider
-standing at the cane while the blade itself closes on through it.
+tick while the shear closes, `pruner.Stroke` looks along `Bumblebee.blade` at
+the blade's angle with `Shears.crossing` and cuts the first cane it closes on,
+and keeps the moving blade's collider standing at the cane while the blade
+itself closes on through it.
 
 The robot drives with the row on its left: the rail is on the +Y edge of the
 deck, and the arm reaches out that way.
@@ -281,9 +282,9 @@ class Bumblebee:
 
     def blade(self, angle: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """The moving blade's plate with the shear at `angle`, in the `HAND`
-        frame, as the rectangle `Shears.cut_through` takes: a corner and its
-        two edges, across the plate to its cutting edge and along it. A cane
-        whose axis crosses it is cut where it does."""
+        frame, as the rectangle `Shears.crossing` takes: a corner and its two
+        edges, across the plate to its cutting edge and along it. The first
+        cane whose axis crosses it in a stroke is cut where it does."""
         s = self.shear
         plate = TOOL @ transform(rpy=(angle, 0.0, 0.0))
         corner = plate @ np.array([s.bypass, -s.width, 0.0, 1.0])

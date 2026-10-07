@@ -25,19 +25,22 @@ class FakeDriver:
 
 
 class FakeShears:
-    """Every sweep of the blade cuts one cane; none is ever held."""
+    """A cane across every rectangle the blade looks along: one the open blade
+    is in already and never holds, which the blades meeting cut."""
 
     labels = ["/robot/blade_link"]
+    bodies = np.array([0])
+    radius = np.array([0.005])
 
     def __init__(self):
-        self.sweeps = 0
-
-    def cut_through(self, corner, u, v) -> int:
-        self.sweeps += 1
-        return 1
+        self.cuts = 0
 
     def crossing(self, corner, u, v):
-        return np.zeros(0, dtype=int), np.zeros(0), np.zeros((0, 2))
+        return np.array([0]), np.array([0.5]), np.array([[0.5, 0.5]])
+
+    def cut(self, body: int, at: float) -> bool:
+        self.cuts += 1
+        return True
 
     def collider(self, body: int):
         return 0, np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0])
@@ -99,6 +102,6 @@ def test_the_keys_drive_the_base_jog_the_mouth_and_work_the_shear():
     hold("ENTER", "W", "UP", ticks=4)
     assert driver.driven[-1] == (0.0, 0.0) and tele.mouth is mouth_at_cut, "still while it shuts"
     hold("ENTER", ticks=shut - 4)
-    assert shears.sweeps == shut and tele.stroke.jaw < MACHINE.shear.opening, "shut, and opening"
+    assert shears.cuts == 1 and not tele.closing, "shut, with one cut"
     hold(ticks=shut + 10)
-    assert tele.stroke.jaw == MACHINE.shear.opening and shears.sweeps == shut
+    assert tele.stroke.jaw == MACHINE.shear.opening and shears.cuts == 1
