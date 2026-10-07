@@ -9,15 +9,16 @@ running simulation is the segment's pose applied to the bud's own.
 The rule is the paper's: keep `KEEP_BUDS` on every cane and cut midway
 between the last kept bud and the next. Each cut is a pose for the shear's
 mouth -- the blades along the approach, the pivot along the cane -- aimed
-afresh when its turn comes and reached in two stages, a planned move to
-`STANDOFF` out and a straight line in, and the cuts on a vine are taken
-nearest neighbour first. Once the arm has settled the shear closes, and the
-moving blade cuts the first cane it closes on: the cut is where the blade's
-edge reaches that cane's axis once it lies against the fixed blade, made by
-`Shears` at that point, and a cane the blade never reaches -- pushed out of
-the mouth on the way in, or never in it -- is a miss. `Stroke` is that closing and opening, a tick at a
-time, the moving blade's collider stood at the cane once the blades hold it
-so the blade closes through the cane rather than crushing it; `Pruning` runs
+afresh when its turn comes and again at the stand-off, and reached in two
+stages, a planned move to `STANDOFF` out and a straight line in, and the
+cuts on a vine are taken nearest neighbour first. Once the arm has settled
+the shear closes, and the moving blade cuts the first cane it closes on:
+the cut is where the blade's edge reaches that cane's axis once it lies
+against the fixed blade, made by `Shears` at that point, and a cane the
+blade never reaches -- pushed out of the mouth on the way in, or never in
+it -- is a miss. `Stroke` is that closing and opening, a tick at a time,
+the moving blade's collider stood at the cane once the blades hold it so
+the blade closes through the cane rather than crushing it; `Pruning` runs
 the whole sequence one vine at a time, and `Tally` keeps the paper's own
 score: cuts made, cuts made at the right place, and how long a vine took.
 """
@@ -552,13 +553,18 @@ class Pruning:
             self.stage_name, self.goal = "home", self.home
             return
         self.stage_name = "move"
-        # Aimed afresh at where the buds are now: a cane may have been pushed
-        # since the vine was planned, by the arm passing or a piece falling.
+        self._aim()
+        self.goal, _ = self._solve(self.cut.standoff)
+        self.line = self.cut.standoff[:3, 3].copy()
+
+    def _aim(self) -> None:
+        """Aim the cut afresh at where its buds are now: a cane may have been
+        pushed since the vine was planned, by a piece falling or by the arm
+        passing -- the swing out to it among them, so it is aimed again once
+        the arm stands off, and the line in bends to where the cane is."""
         pose = aimed(self.cut.kept, self.cut.removed, self.shears, self.cut.pose[:3, 2])
         if pose is not None:
             self.cut.pose = pose
-        self.goal, _ = self._solve(self.cut.standoff)
-        self.line = self.cut.standoff[:3, 3].copy()
 
     @property
     def done(self) -> bool:
@@ -593,6 +599,8 @@ class Pruning:
                 return self.target, self.stroke.jaw
             after = {"move": "approach", "tip": "next", "home": "done"}
             self.stage_name, self.ticks = after[self.stage_name], 0
+            if self.stage_name == "approach":
+                self._aim()
         cut = self.cut
         if cut is None:
             return self.target, self.stroke.jaw

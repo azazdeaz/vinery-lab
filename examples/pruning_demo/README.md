@@ -83,9 +83,11 @@ deck, and a bypass shear in its hand. So is the pipeline, minus the cameras:
 2. **The approach.** Each cut is a pose for the shear's mouth, squared up to
    the cane: the pivot along it, the blades along the approach, aimed afresh
    at the buds when the cut's turn comes. The arm plans to a point 15 cm out,
-   then closes in on a straight line and settles there. The shear's head and
-   blades collide with the canes, so a cane the mouth comes in on is
-   funnelled between the edges or pushed aside, bending as it goes.
+   where the cut is aimed once more -- the swing out brushes through the
+   canes, the one to cut among them -- then closes in on a straight line to
+   it and settles there. The shear's head and blades collide with the canes,
+   so a cane the mouth comes in on is funnelled between the edges or pushed
+   aside, bending as it goes.
 3. **The order.** The cuts on a vine are taken nearest neighbour first. A
    cut whose bud to take is gone by its turn -- caught by the blade on a
    neighbouring cane, or by a falling piece -- is left out. Once the last

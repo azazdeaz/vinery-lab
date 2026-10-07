@@ -275,9 +275,10 @@ def test_the_collider_stands_at_a_held_cane_while_the_blade_closes_through_it(z,
 )
 def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch, push, gone, fouled):
     """With an arm that goes where it is told and a blade that turns as told,
-    every reachable cane is cut at its planned point, the shear closing with
-    the mouth moved on from it by the cut's push, and the tally says so -- but
-    a cane whose bud to take is `gone` before its turn is left alone. A piece
+    every reachable cane is cut at its planned point -- where it is once the
+    swing out to it has swept it aside -- the shear closing with the mouth
+    moved on from it by the cut's push, and the tally says so; but a cane
+    whose bud to take is `gone` before its turn is left alone. A piece
     cut free that lies across the mouth for the first `fouled` looks is
     tipped out, the blades turned down until it is gone; and once the vine is
     pruned the arm folds home."""
@@ -312,8 +313,16 @@ def test_the_sequence_stands_off_closes_in_and_cuts_every_cane(monkeypatch, push
         hand = kinematics.frames(machine.chain, q)[-1]
         q, angle = pruning.control(q, hand, angle)
         mouth = kinematics.frames(machine.chain, q)[-1] @ machine.tool
+        cut = pruning.cut
+        if pruning.stage_name == "move" and stage != "move" and cut:
+            # The swing out sweeps the cane 3 cm along the row, after the
+            # cut was aimed at it.
+            shears.poses[cut.kept.body] = shears.poses[cut.kept.body] + [0.03, *[0.0] * 6]
         if pruning.stage_name == "close" and stage != "close":
-            assert mouth[:3, 3] == pytest.approx(pruning.cut.pushed[:3, 3], abs=0.002)
+            point = (
+                pruner.bud_position(cut.kept, shears) + pruner.bud_position(cut.removed, shears)
+            ) / 2
+            assert mouth[:3, 3] == pytest.approx(point + cut.pose[:3, :3] @ cut.push, abs=0.002)
             closed += 1
         if pruning.stage_name == "tip":
             down.append(-mouth[2, 2])
