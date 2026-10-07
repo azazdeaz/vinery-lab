@@ -3,8 +3,9 @@
 The left hand has the machine and the right hand the shear: `W`/`S` drive
 the base forward and back and `A`/`D` turn it; the arrows jog the shear's
 mouth along the robot and across it, `Page Up`/`Page Down` up and down, and
-`Enter` closes the shear on whatever is in the mouth, cutting what the blade
-sweeps through, then opens it again; the robot holds still while it shuts.
+`Enter` closes the shear on whatever is in the mouth, cutting the first cane
+the blade closes on, then opens it again; the robot holds still while it
+shuts.
 
 The mouth is a gantry head, not a wrist: it stays squared up to the row --
 blades pointing out over the rail, pivot upright, so an upright cane lies
@@ -130,7 +131,7 @@ class Teleop:
         self.target = self.target + np.clip(self.goal - self.target, -JOINT_STEP, JOINT_STEP)
         if self.stroke.tick(hand, shear, self.closing):
             if self.closing:
-                print(f"[INFO]: shear closed, {self.stroke.swept} cut")
+                print(f"[INFO]: shear closed, {'a cane' if self.stroke.cut else 'nothing'} cut")
             # Shut, it opens; open, it shuts again while the key is down.
             self.closing = not self.closing and CUT in held
         return self.target, self.stroke.jaw
