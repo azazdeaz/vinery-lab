@@ -152,12 +152,12 @@ pub fn plugin(app: &mut App) {
 /// Local `+X` runs along the row and `+Y` across it, so a pair straddles the
 /// post rather than standing one behind the other. Heights are measured from
 /// **the ground the post stands on** rather than from the post's own base —
-/// see [`row_wires`] for the sink that distinction pays for.
+/// see [`staple`] for the sink that distinction pays for.
 ///
 /// Bottom-up: index `k` here is the `k` in the `Wire_<panel>_<k>` prim name,
 /// so `0` is the fruiting wire.
 ///
-/// [`row_wires`]: super::util::planting
+/// [`staple`]: super::util::planting
 pub fn anchors(params: &WireParams, pole_radius: f32, fruiting: f32, trellis: f32) -> Vec<Vec3> {
     let top = (trellis - TOP_CLEARANCE).max(MIN_TOP);
     // Python can ask for a head above the post tops. The levels collapse onto

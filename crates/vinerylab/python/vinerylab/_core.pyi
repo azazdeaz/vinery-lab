@@ -257,8 +257,10 @@ class VineParams:
     """
 
     trunk_height: float
-    """Ground to head, in meters: the height of the fruiting wire. Not the trellis
-    height, which is where the tops of the posts are.
+    """Height of the fruiting wire above the ground at the posts, in meters, held at the
+    top wire on posts too short for it. Each vine's trunk reaches the wire over it,
+    so on uneven ground the trunks differ about this. Not the trellis height, which
+    is where the tops of the posts are.
     """
     trunk_radius: float
     """Trunk radius at the base, in meters."""
@@ -311,7 +313,7 @@ class VineParams:
         roughness: float = 0.14,
         sides: int = 8,
         detail: int = 20,
-        variations: int = 4,
+        variations: int = 32,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

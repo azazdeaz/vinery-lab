@@ -115,7 +115,7 @@ Shape only: where vines stand, and which ones are missing or young, is the plant
 
 | Parameter | Type | Default | Slider range | Description |
 |---|---|---|---|---|
-| `trunk_height` | float | `0.9` | 0.3 to 1.6 | Ground to head, in meters: the height of the fruiting wire. Not the trellis height, which is where the tops of the posts are. |
+| `trunk_height` | float | `0.9` | 0.3 to 1.6 | Height of the fruiting wire above the ground at the posts, in meters, held at the top wire on posts too short for it. Each vine's trunk reaches the wire over it, so on uneven ground the trunks differ about this. Not the trellis height, which is where the tops of the posts are. |
 | `trunk_radius` | float | `0.035` | 0.01 to 0.08 | Trunk radius at the base, in meters. |
 | `trunk_wobble` | float | `0.02` | 0 to 0.08 | How far the trunk's axis wanders off vertical, in meters. |
 | `arms` | int | `2` | 1 to 2 | Cordons per vine: 1 for a unilateral vine, 2 for a bilateral one. |
@@ -127,7 +127,7 @@ Shape only: where vines stand, and which ones are missing or young, is the plant
 | `roughness` | float | `0.14` | 0 to 0.4 | Depth of the bark ridges, as a fraction of the local radius. |
 | `sides` | int | `8` | 3 to 16 | Vertices around each tube. The silhouette, visible on every instance. |
 | `detail` | int | `20` | 4 to 60 | Rings per meter along each tube. Barely visible at row distance, so this is the cheaper of the two detail knobs to turn down. |
-| `variations` | int | `4` | 1 to 8 | How many distinct vine meshes the scene may hold. A budget, not a count: the plants are clustered and this is how many representatives the clustering may keep. Lower it to trade variety for memory, raise it to spend memory on variety. |
+| `variations` | int | `32` | 1 to 64 | How many distinct vine meshes the scene may hold. A budget, not a count: the plants are clustered and this is how many representatives the clustering may keep. Lower it to trade variety for memory, raise it to spend memory on variety. |
 
 ## Shoot
 

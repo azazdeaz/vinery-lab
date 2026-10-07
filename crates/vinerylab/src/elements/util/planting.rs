@@ -17,7 +17,9 @@
 //! rows, terrain or age. So anything that depends on *where* a plant stands has
 //! to be decided in this module and written into its config — a plant whose
 //! shape depended on context the builder cannot see would silently diverge from
-//! the mesh it shares.
+//! the mesh it shares. The fruiting wire over a vine is the plainest case: its
+//! trunk is trained up to the wire's height there and its cordons run at the
+//! wire's slope.
 //!
 //! # Nothing is planted exactly where it was solved
 //!
@@ -207,17 +209,27 @@ pub fn plant(
             ))
             .id();
 
-        for (name, transform, established, vigour) in row_vines(row, &ground, &params, &mut rng) {
+        let posts = row_poles(row, &ground, &mut pole_rng);
+        // The fruiting wire over each panel, end to end.
+        let fruiting: Vec<(Vec3, Vec3)> = posts
+            .windows(2)
+            .map(|pair| (staple(&pair[0], anchors[0]), staple(&pair[1], anchors[0])))
+            .collect();
+        for (name, transform, established, vigour, panel) in
+            row_vines(row, &ground, &params, &mut rng)
+        {
+            let (from, to) = fruiting[panel];
+            let (height, slope) = wire_over(from, to, transform.translation);
             commands.spawn((
                 Name::new(name),
                 transform,
                 Visibility::default(),
-                vine::VineConfig::new(&vine_params, &parcel, established, vigour),
+                vine::VineConfig::new(&vine_params, &parcel, established, vigour)
+                    .on_wire(height, slope),
                 next(),
                 ChildOf(group),
             ));
         }
-        let posts = row_poles(row, &ground, &mut pole_rng);
         for (name, transform, _) in &posts {
             commands.spawn((
                 Name::new(name.clone()),
@@ -241,7 +253,8 @@ pub fn plant(
     }
 }
 
-/// The plants of one row, named by planting slot.
+/// The plants of one row, named by planting slot, each with the panel it
+/// stands in.
 ///
 /// The *draw order* of `rng` is part of this module's output: all three draws
 /// happen before the miss test, so the stream stays aligned no matter which
@@ -252,8 +265,9 @@ fn row_vines(
     ground: &Ground,
     params: &PlantingParams,
     rng: &mut Rng,
-) -> Vec<(String, Transform, f32, f32)> {
+) -> Vec<(String, Transform, f32, f32, usize)> {
     let yaw = row.direction().to_angle();
+    let per_panel = row.vines_per_panel.max(1) as usize;
     let mut plants = Vec::new();
     for (slot, position) in row.vine_positions(ground).enumerate() {
         let (miss, age, vigour) = (
@@ -271,6 +285,7 @@ fn row_vines(
             placed(position, yaw, Vec2::ZERO, 1.0),
             young_scale(params, age).unwrap_or(1.0) as f32,
             vigour as f32,
+            slot / per_panel,
         ));
     }
     plants
@@ -331,23 +346,15 @@ fn row_poles(row: &Row, ground: &Ground, rng: &mut Rng) -> Vec<(String, Transfor
 /// anchor on the next post, so the trellis follows the ground piecewise the
 /// way the posts do. Placed *on* the anchor it leaves, running up +Z to the one
 /// it reaches — the frame [`wire`] builds its geometry in.
-///
-/// A post's own sink is added back before the anchor is transformed by its
-/// frame: [`wire::anchors`] are heights above the ground, and a post driven
-/// deeper carries its staples up with it. Without that the fruiting wire would
-/// miss the cordons, which are planted on a ground that does not sink.
 fn row_wires(
     posts: &[(String, Transform, f32)],
     anchors: &[Vec3],
 ) -> Vec<(String, Transform, f32)> {
     let mut spans = Vec::new();
     for (panel, pair) in posts.windows(2).enumerate() {
-        let [(_, from, from_sink), (_, to, to_sink)] = pair else {
-            continue;
-        };
         for (k, anchor) in anchors.iter().enumerate() {
-            let start = from.transform_point(*anchor + Vec3::Z * *from_sink);
-            let run = to.transform_point(*anchor + Vec3::Z * *to_sink) - start;
+            let start = staple(&pair[0], *anchor);
+            let run = staple(&pair[1], *anchor) - start;
             let length = run.length();
             // Two posts on one spot leave nothing to string between them, and
             // no direction to string it along.
@@ -366,6 +373,31 @@ fn row_wires(
         }
     }
     spans
+}
+
+/// Where a post carries `anchor`, in scene space.
+///
+/// The post's own sink is added back before the anchor is transformed by its
+/// frame: [`wire::anchors`] are heights above the ground, and a post driven
+/// deeper carries its staples up with it. Without that the trellis would sag
+/// with every post driven deep.
+fn staple((_, frame, sink): &(String, Transform, f32), anchor: Vec3) -> Vec3 {
+    frame.transform_point(anchor + Vec3::Z * *sink)
+}
+
+/// How high above `foot` a wire strung from `from` to `to` passes, and how much
+/// it rises per meter along its run — what a vine planted at `foot` has its
+/// trunk trained up to and its cordons tied along.
+fn wire_over(from: Vec3, to: Vec3, foot: Vec3) -> (f32, f32) {
+    let plan = (to - from).truncate();
+    let run = plan.length();
+    // Two posts on one spot leave no direction to climb along.
+    if run < 1e-6 {
+        return (from.z - foot.z, 0.0);
+    }
+    let slope = (to.z - from.z) / run;
+    let along = (foot - from).truncate().dot(plan) / run;
+    (from.z + slope * along - foot.z, slope)
 }
 
 /// How established a plant whose age draw came out at `age` is, or `None` if it
@@ -534,6 +566,49 @@ mod tests {
                 "and stands upright, not leaning"
             );
         }
+    }
+
+    /// A vine is fitted to the fruiting wire over it: its head at the wire's
+    /// height and its cordons at the wire's slope. Checked against the spans
+    /// as authored, so a panel or anchor mixed up between the two is caught.
+    #[test]
+    fn every_vine_is_fitted_to_the_fruiting_wire_over_it() {
+        let mut app = scene(no_misses());
+        let spans: Vec<Organ<wire::WireConfig>> = organs(app.world_mut());
+        let mut steepest = 0.0f32;
+        for vine in vines(&mut app).iter().filter(|v| v.config.is_mature()) {
+            let (row, _) = vine.path.rsplit_once('/').unwrap();
+            let foot = vine.position();
+            // The fruiting span `Wire_<panel>_0` whose run passes the foot.
+            let (wire, run) = spans
+                .iter()
+                .filter(|s| s.path.starts_with(&format!("{row}/")) && s.name.ends_with("_0"))
+                .find_map(|s| {
+                    let run = s.transform.rotation * Vec3::Z * s.config.length;
+                    let plan = run.truncate();
+                    let t = (foot - s.position()).truncate().dot(plan) / plan.length_squared();
+                    (0.0..=1.0)
+                        .contains(&t)
+                        .then(|| (s.position() + run * t, run))
+                })
+                .unwrap_or_else(|| panic!("`{}` stands under a fruiting wire", vine.path));
+            let slope = run.z / run.truncate().length();
+
+            assert!(
+                (foot.z + vine.config.trunk_height - wire.z).abs() < 1e-4,
+                "`{}` heads {} m off its wire",
+                vine.path,
+                foot.z + vine.config.trunk_height - wire.z
+            );
+            assert!(
+                (vine.config.cordon_slope - slope).abs() < 1e-4,
+                "`{}` climbs {} where its wire climbs {slope}",
+                vine.path,
+                vine.config.cordon_slope
+            );
+            steepest = steepest.max(slope.abs());
+        }
+        assert!(steepest > 0.05, "the fixture strung no sloping wire");
     }
 
     /// A replant is its own plant — a shoot out of bare ground — so the age

@@ -207,8 +207,10 @@ class VineCfg:
     """
 
     trunk_height: float = 0.9
-    """Ground to head, in meters: the height of the fruiting wire. Not the trellis
-    height, which is where the tops of the posts are.
+    """Height of the fruiting wire above the ground at the posts, in meters, held at the
+    top wire on posts too short for it. Each vine's trunk reaches the wire over it,
+    so on uneven ground the trunks differ about this. Not the trellis height, which
+    is where the tops of the posts are.
     """
     trunk_radius: float = 0.035
     """Trunk radius at the base, in meters."""
@@ -240,7 +242,7 @@ class VineCfg:
     """Rings per meter along each tube. Barely visible at row distance, so this is the
     cheaper of the two detail knobs to turn down.
     """
-    variations: int = 4
+    variations: int = 32
     """How many distinct vine meshes the scene may hold. A budget, not a count: the
     plants are clustered and this is how many representatives the clustering may
     keep. Lower it to trade variety for memory, raise it to spend memory on variety.
