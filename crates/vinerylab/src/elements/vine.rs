@@ -29,7 +29,8 @@
 //! A vine is built with the **origin at the trunk base, on the ground**: +Z up,
 //! **+X along the row** so cordons run along ±X, +Y across it. Planting
 //! therefore only ever needs a yaw about Z, and never has to know which way a
-//! strand was built.
+//! strand was built. A slope along the row is the config's: the cordons climb
+//! at [`VineConfig::cordon_slope`] while the trunk stays plumb.
 //!
 //! # The layer
 //!
@@ -208,11 +209,10 @@ const REPLANT_APART: f32 = 10.0;
 /// A vine thickens with age and vigour while its head stays where the wire is,
 /// so this reaches the radii and the spurs and leaves `trunk_height` alone.
 ///
-/// It is also the axis the mesh budget gets spent covering. Without it every
-/// mature plant in a parcel would be the same config and the whole vineyard
-/// would share one mesh, however high `variations` was set — under the old
-/// model the variety came from authoring N differently-seeded prototypes, and
-/// under this one it has to be a real difference between the plants.
+/// It is also an axis the mesh budget gets spent covering. On flat ground,
+/// where every plant meets the same level wire, it is the only one: without it
+/// every mature plant in a parcel would be the same config and the whole
+/// vineyard would share one mesh, however high `variations` was set.
 pub const VINE_VIGOUR: f64 = 0.25;
 
 /// Shortest cordon we will build. Load-bearing rather than cosmetic: a
@@ -249,6 +249,7 @@ pub struct VineConfig {
     /// The two are different *shapes* rather than different sizes, which is why
     /// [`VineMetric`] steps here rather than reading it as a continuum.
     pub established: f32,
+    /// Ground to head, in meters: up to the fruiting wire over this plant.
     pub trunk_height: f32,
     pub trunk_radius: f32,
     pub trunk_wobble: f32,
@@ -256,6 +257,11 @@ pub struct VineConfig {
     /// How far a cordon reaches from the trunk, solved from the row's vine
     /// spacing so neighbouring plants meet without overlapping.
     pub cordon_reach: f32,
+    /// How far the fruiting wire rises per meter along +X over the panel this
+    /// plant stands in. The cordons are tied along it, so they climb with it.
+    /// A unilateral cordon long enough to pass the next post keeps this slope
+    /// beyond it, where the wire turns.
+    pub cordon_slope: f32,
     pub cordon_radius: f32,
     pub spur_spacing: f32,
     pub spur_length: f32,
@@ -269,6 +275,9 @@ impl VineConfig {
     /// The plant these params call for, at this stage of establishment and
     /// this `vigour` — a multiplier about `1.0`, drawn per plant. See
     /// [`VINE_VIGOUR`].
+    ///
+    /// Fitted to a level wire at the nominal `trunk_height`; [`Self::on_wire`]
+    /// fits it to the one actually over it.
     pub fn new(params: &VineParams, parcel: &ParcelParams, established: f32, vigour: f32) -> Self {
         Self {
             established: established.clamp(0.0, 1.0),
@@ -277,6 +286,7 @@ impl VineConfig {
             trunk_wobble: params.trunk_wobble.max(0.0),
             arms: params.arms.clamp(1, 2),
             cordon_reach: cordon_reach(parcel.vine_spacing, params.cordon_gap, params.arms),
+            cordon_slope: 0.0,
             cordon_radius: (params.cordon_radius * vigour).max(0.001),
             spur_spacing: params.spur_spacing.max(MIN_SPUR_SPACING),
             spur_length: (params.spur_length * vigour).max(0.0),
@@ -286,6 +296,17 @@ impl VineConfig {
             roughness: params.roughness.max(0.0),
             sides: params.sides.max(3),
             detail: params.detail.max(1),
+        }
+    }
+
+    /// This plant trained to a fruiting wire `height` above its foot and
+    /// rising `slope` per meter along +X: its trunk reaches the wire and its
+    /// cordons run along it.
+    pub fn on_wire(self, height: f32, slope: f32) -> Self {
+        Self {
+            trunk_height: height.max(MIN_TRUNK_HEIGHT),
+            cordon_slope: slope,
+            ..self
         }
     }
 
@@ -317,6 +338,8 @@ impl Metric<VineConfig> for VineMetric {
             (a.trunk_wobble - b.trunk_wobble) * 4.0,
             (a.arms as f32 - b.arms as f32) * 2.0,
             a.cordon_reach - b.cordon_reach,
+            // As far as the borrowed slope lifts a cordon's tip off its wire.
+            (a.cordon_slope - b.cordon_slope) * a.cordon_reach.max(b.cordon_reach),
             (a.cordon_radius - b.cordon_radius) * 4.0,
             a.spur_spacing - b.spur_spacing,
             a.spur_length - b.spur_length,
@@ -349,8 +372,10 @@ impl Metric<VineConfig> for VineMetric {
     pyo3::pyclass(get_all, set_all, skip_from_py_object)
 )]
 pub struct VineParams {
-    /// Ground to head, in meters: the height of the fruiting wire. Not the
-    /// trellis height, which is where the tops of the posts are.
+    /// Height of the fruiting wire above the ground at the posts, in meters,
+    /// held at the top wire on posts too short for it. Each vine's trunk
+    /// reaches the wire over it, so on uneven ground the trunks differ about
+    /// this. Not the trellis height, which is where the tops of the posts are.
     #[reflect(@Slider { min: 0.3, max: 1.6, step: 0.05 })]
     pub trunk_height: f32,
     /// Trunk radius at the base, in meters.
@@ -398,7 +423,12 @@ pub struct VineParams {
     /// count: the plants are clustered and this is how many representatives
     /// the clustering may keep. Lower it to trade variety for memory, raise it
     /// to spend memory on variety.
-    #[reflect(@Slider { min: 1.0, max: 8.0, step: 1.0 })]
+    ///
+    /// Each vine is fitted to the height and slope of the wire over it, and a
+    /// vine that draws a mesh fitted to another wire holds its cordons off its
+    /// own by the difference. On uneven ground this is the knob that keeps
+    /// them on it.
+    #[reflect(@Slider { min: 1.0, max: 64.0, step: 1.0 })]
     pub variations: u32,
 }
 
@@ -417,7 +447,7 @@ impl Default for VineParams {
             roughness: 0.14,
             sides: 8,
             detail: 20,
-            variations: 4,
+            variations: 32,
         }
     }
 }
@@ -630,6 +660,8 @@ fn trunk_strand(config: &VineConfig, rng: &mut Rng) -> Strand {
 fn cordon_shape(config: &VineConfig, sign: f64, rng: &mut Rng) -> (Vec<Strand>, Vec<Spur>) {
     let head_z = config.trunk_height as f64;
     let reach = config.cordon_reach as f64;
+    // How far the wire climbs per meter out from the head along this arm.
+    let climb = sign * config.cordon_slope as f64;
     let phase = rng.unit() * TAU;
     let sway = config.trunk_wobble as f64 * 0.5;
     let spurs = spur_positions(reach, config.spur_spacing as f64);
@@ -642,7 +674,7 @@ fn cordon_shape(config: &VineConfig, sign: f64, rng: &mut Rng) -> (Vec<Strand>, 
         Point3::new(
             sign * x,
             sway * (TAU * 0.8 * x / reach + phase).sin(),
-            head_z - HEAD_DROP - CORDON_DROOP * g,
+            head_z - HEAD_DROP - CORDON_DROOP * g + climb * x,
         )
     };
     let radius = |x: f64| {
@@ -658,7 +690,11 @@ fn cordon_shape(config: &VineConfig, sign: f64, rng: &mut Rng) -> (Vec<Strand>, 
     let mut points = vec![
         Point3::new(0.0, 0.0, head_z - CORDON_EMBED),
         Point3::new(0.0, 0.0, head_z - CORDON_EMBED * 0.25),
-        Point3::new(sign * HEAD_RUN * 0.45, 0.0, head_z),
+        Point3::new(
+            sign * HEAD_RUN * 0.45,
+            0.0,
+            head_z + climb * HEAD_RUN * 0.45,
+        ),
         centerline(HEAD_RUN),
     ];
     let mut radii = vec![radius(0.0), radius(0.0), radius(0.0), radius(HEAD_RUN)];
@@ -905,7 +941,8 @@ fn cordon_collider(config: &VineConfig, sign: f64) -> Option<impl Bundle + Copy>
             Vec3::new(
                 sign as f32 * config.cordon_reach,
                 0.0,
-                head - (HEAD_DROP + CORDON_DROOP) as f32,
+                head - (HEAD_DROP + CORDON_DROOP) as f32
+                    + sign as f32 * config.cordon_reach * config.cordon_slope,
             ),
         )
     })
@@ -1135,6 +1172,34 @@ mod tests {
         assert!(trunk_radius_at(&c, GRAFT_HEIGHT) > trunk_radius_at(&c, 0.05));
     }
 
+    /// A cordon is tied along its wire, so on a sloping one it climbs with it,
+    /// and the spurs the shoots hang off ride it up. The trunk under the head
+    /// stays plumb.
+    #[test]
+    fn a_cordon_climbs_with_its_wire() {
+        let slope = 0.2f32;
+        let level = vine_shape(&config(), 1);
+        let sloped = vine_shape(&config().on_wire(config().trunk_height, slope), 1);
+
+        assert_eq!(level.strands[0].points, sloped.strands[0].points);
+        assert!(!level.spurs.is_empty(), "the default vine has spurs");
+        // The first arm's cordon, head bend and all, then the spurs of both.
+        let cordon = level.strands[1]
+            .points
+            .iter()
+            .zip(&sloped.strands[1].points);
+        let spurs = level.spurs.iter().zip(&sloped.spurs);
+        let spurs = spurs.map(|(flat, climbed)| (&flat.base, &climbed.base));
+        for (flat, climbed) in cordon.chain(spurs) {
+            let rise = climbed - flat;
+            assert!(
+                rise.xy().norm() < 1e-9 && (rise.z - slope as f64 * flat.x).abs() < 1e-9,
+                "a point {} m out moved {rise:?}, not up the wire",
+                flat.x
+            );
+        }
+    }
+
     #[test]
     fn spurs_are_spaced_along_the_cordon() {
         let reach = cordon_reach(1.2, 0.15, 2) as f64;
@@ -1201,8 +1266,8 @@ mod tests {
     /// viewer's sliders can't reach. Nothing may come back degenerate.
     #[test]
     fn a_vine_asked_for_at_the_stops_still_builds() {
-        for edit in [
-            |p: &mut VineParams| {
+        for config in [
+            config_with(|p| {
                 *p = VineParams {
                     variations: 0,
                     trunk_height: 0.0,
@@ -1218,15 +1283,16 @@ mod tests {
                     sides: 0,
                     detail: 0,
                 }
-            },
-            |p: &mut VineParams| {
+            }),
+            config_with(|p| {
                 p.trunk_height = 12.0;
                 p.shoots_per_spur = 9.0;
                 p.sides = 64;
                 p.detail = 200;
-            },
+            }),
+            // A wire at the ground, and steeper than any trellis is strung.
+            config().on_wire(0.0, 3.0),
         ] {
-            let config = config_with(edit);
             let built = build_vine(&config, 3).expect("builds at the stops");
             let mesh = built.wood.expect("a mature vine has wood");
             let points = mesh
@@ -1443,6 +1509,7 @@ mod tests {
             config(),
             config_with(|p| p.arms = 1),
             config_with(|p| p.cordon_gap = 0.5),
+            config().on_wire(0.8, 0.2),
         ] {
             for arm in 0..config.arms {
                 let sign = arm_sign(arm);
@@ -1458,11 +1525,20 @@ mod tests {
                     head.distance(Vec3::new(0.0, 0.0, config.trunk_height)) < 1e-5,
                     "{config:?} arm {arm} starts off the head: {head}"
                 );
+                // Where the cordon's own centerline ends: the wood's furthest
+                // control point out along this arm.
+                let end = vine_shape(&config, 1)
+                    .strands
+                    .iter()
+                    .flat_map(|s| s.points.iter())
+                    .max_by(|a, b| (sign * a.x).total_cmp(&(sign * b.x)))
+                    .copied()
+                    .unwrap();
                 assert!(
                     (tip.x - sign as f32 * config.cordon_reach).abs() < 1e-5
                         && tip.y.abs() < 1e-5
-                        && tip.z < config.trunk_height,
-                    "{config:?} arm {arm} ends off the tip: {tip}"
+                        && (tip.z - end.z as f32).abs() < 1e-5,
+                    "{config:?} arm {arm} ends off the tip {end}: {tip}"
                 );
                 assert_eq!(shape.radius, config.cordon_radius);
             }
@@ -1534,6 +1610,7 @@ mod tests {
             established: 0.6,
             ..mature
         };
+        let sloped = mature.on_wire(mature.trunk_height, 0.2);
 
         // One replant among forty mature vines, and it still earns a mesh —
         // k-center minimizes the worst distance, not the average, so a rare
@@ -1541,9 +1618,10 @@ mod tests {
         let mut population = vec![mature; 40];
         population.push(replant);
         population.extend([stunted; 4]);
+        population.extend([sloped; 4]);
 
-        let book = farthest_first(&population, 3, 0.0, &VineMetric);
-        assert_eq!(book.len(), 3);
+        let book = farthest_first(&population, 4, 0.0, &VineMetric);
+        assert_eq!(book.len(), 4);
         assert_eq!(
             book.assignment[0], book.assignment[39],
             "the mature ones share"
@@ -1555,6 +1633,10 @@ mod tests {
         assert_ne!(
             book.assignment[0], book.assignment[41],
             "nor the stunted ones"
+        );
+        assert_ne!(
+            book.assignment[0], book.assignment[45],
+            "nor the ones on a sloping wire"
         );
 
         // And a budget of one is honoured, however varied the population.
